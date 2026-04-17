@@ -1,4 +1,4 @@
-// ERP Marginalità v3.3 - Design T.Luxy Premium
+// ERP Marginalità v3.4 - Italist + Filtro Custom + Century Gothic
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'autore-luxit.myshopify.com';
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
@@ -23,16 +23,17 @@ async function getShopifyAccessToken() {
 }
 
 const MARKETPLACE_CONFIGS = {
-  'SECRET_SALES': { nome: 'Secret Sales', sconto_percentuale: 0, fee_principale: 20, fee_secondaria: 0, fee_fissa_trasporto: 2, fee_fissa_packaging: 2 },
-  'FASHION_TAMERS': { nome: 'Fashion Tamers', sconto_percentuale: 0, fee_principale: 32, fee_secondaria: 2, fee_fissa_trasporto: 15, fee_fissa_packaging: 6 },
-  'INTRA_MIRROR': { nome: 'Intra Mirror', sconto_percentuale: 15, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3 },
-  'BALARDI': { nome: 'Balardi', sconto_percentuale: 35, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3 },
-  'THE_BRADERY': { nome: 'The Bradery', sconto_percentuale: 5, fee_principale: 17, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 2 },
-  'BOUTIQUE_MALL': { nome: 'Boutique Mall', sconto_percentuale: 33.3, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 10, fee_fissa_packaging: 2 },
-  'ARCHIVIST': { nome: 'Archivist', sconto_percentuale: 0, fee_principale: 22, fee_secondaria: 0, fee_fissa_trasporto: 10, fee_fissa_packaging: 2 },
-  'MIINTO': { nome: 'Miinto', sconto_percentuale: 0, fee_principale: 17.75, fee_secondaria: 2.25, fee_fissa_trasporto: 12, fee_fissa_packaging: 1.5 },
-  'WINKELSTRAAT': { nome: 'Winkelstraat', sconto_percentuale: 0, fee_principale: 17, fee_secondaria: 0, fee_accessoria: 9, fee_fissa_trasporto: 15, fee_fissa_packaging: 0 },
-  'TLUXY_SITE': { nome: 'T. Luxy (proprio)', sconto_percentuale: 10, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1 }
+  'SECRET_SALES': { nome: 'Secret Sales', sconto_percentuale: 0, fee_principale: 20, fee_secondaria: 0, fee_fissa_trasporto: 2, fee_fissa_packaging: 2, pagamento: 'Variabile' },
+  'FASHION_TAMERS': { nome: 'Fashion Tamers', sconto_percentuale: 0, fee_principale: 32, fee_secondaria: 2, fee_fissa_trasporto: 15, fee_fissa_packaging: 6, pagamento: 'Variabile' },
+  'INTRA_MIRROR': { nome: 'Intra Mirror', sconto_percentuale: 15, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Variabile' },
+  'BALARDI': { nome: 'Balardi', sconto_percentuale: 35, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Variabile' },
+  'THE_BRADERY': { nome: 'The Bradery', sconto_percentuale: 5, fee_principale: 17, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 2, pagamento: 'Variabile' },
+  'BOUTIQUE_MALL': { nome: 'Boutique Mall', sconto_percentuale: 33.3, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 10, fee_fissa_packaging: 2, pagamento: 'Variabile' },
+  'ARCHIVIST': { nome: 'Archivist', sconto_percentuale: 0, fee_principale: 22, fee_secondaria: 0, fee_fissa_trasporto: 10, fee_fissa_packaging: 2, pagamento: 'Variabile' },
+  'MIINTO': { nome: 'Miinto', sconto_percentuale: 0, fee_principale: 17.75, fee_secondaria: 2.25, fee_fissa_trasporto: 12, fee_fissa_packaging: 1.5, pagamento: 'Variabile' },
+  'WINKELSTRAAT': { nome: 'Winkelstraat', sconto_percentuale: 0, fee_principale: 17, fee_secondaria: 0, fee_accessoria: 9, fee_fissa_trasporto: 15, fee_fissa_packaging: 0, pagamento: 'Variabile' },
+  'ITALIST': { nome: 'Italist', sconto_percentuale: 0, fee_principale: 20, fee_secondaria: 25.5, fee_fissa_trasporto: 0, fee_fissa_packaging: 4, pagamento: 'Mensile (~30gg)' },
+  'TLUXY_SITE': { nome: 'T. Luxy (proprio)', sconto_percentuale: 10, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1, pagamento: 'Immediato' }
 };
 
 const SOURCE_NAME_MAP = {
@@ -44,7 +45,8 @@ const SOURCE_NAME_MAP = {
   'balardi': 'BALARDI',
   'the-bradery': 'THE_BRADERY', 'thebradery': 'THE_BRADERY', 'bradery': 'THE_BRADERY',
   'boutique-mall': 'BOUTIQUE_MALL', 'boutiquemall': 'BOUTIQUE_MALL',
-  'archivist': 'ARCHIVIST', 'winkelstraat': 'WINKELSTRAAT'
+  'archivist': 'ARCHIVIST', 'winkelstraat': 'WINKELSTRAAT',
+  'italist': 'ITALIST', 'italist-app': 'ITALIST'
 };
 
 function riconosciMarketplace(ordine) {
@@ -75,20 +77,30 @@ function calcolaMarginalita(prezzo_lordo, total_tax, costo_merce, spedizione, mp
   return { prezzo_lordo_iva_inclusa: prezzo_lordo, iva_scorporata: total_tax, prezzo_netto_iva, prezzo_netto_marketplace, fees_shopify, fees_marketplace, costo_merce, spedizione, costi_totali, margine_netto, margine_percentuale: parseFloat(margine_percentuale.toFixed(2)) };
 }
 
-async function getShopifyOrders(periodo = 'today') {
+async function getShopifyOrders(periodo = 'today', dateFromCustom = null, dateToCustom = null) {
   const token = await getShopifyAccessToken();
-  let dateFrom = new Date();
-  switch(periodo) {
-    case 'today': dateFrom.setHours(0, 0, 0, 0); break;
-    case 'yesterday': dateFrom.setDate(dateFrom.getDate() - 1); dateFrom.setHours(0, 0, 0, 0); break;
-    case 'week': dateFrom.setDate(dateFrom.getDate() - 7); break;
-    case 'month': dateFrom.setDate(dateFrom.getDate() - 30); break;
-    case 'quarter': dateFrom.setDate(dateFrom.getDate() - 90); break;
+  let dateFrom, dateTo;
+  
+  if (dateFromCustom && dateToCustom) {
+    dateFrom = new Date(dateFromCustom);
+    dateFrom.setHours(0, 0, 0, 0);
+    dateTo = new Date(dateToCustom);
+    dateTo.setHours(23, 59, 59, 999);
+  } else {
+    dateFrom = new Date();
+    dateTo = new Date();
+    switch(periodo) {
+      case 'today': dateFrom.setHours(0, 0, 0, 0); break;
+      case 'yesterday': dateFrom.setDate(dateFrom.getDate() - 1); dateFrom.setHours(0, 0, 0, 0); dateTo.setDate(dateTo.getDate() - 1); dateTo.setHours(23, 59, 59, 999); break;
+      case 'week': dateFrom.setDate(dateFrom.getDate() - 7); break;
+      case 'month': dateFrom.setDate(dateFrom.getDate() - 30); break;
+      case 'quarter': dateFrom.setDate(dateFrom.getDate() - 90); break;
+      case 'year': dateFrom.setDate(dateFrom.getDate() - 365); break;
+    }
   }
-  const response = await fetch(
-    `https://${SHOPIFY_STORE}/admin/api/2024-01/orders.json?status=any&created_at_min=${dateFrom.toISOString()}&limit=250`,
-    { headers: { 'X-Shopify-Access-Token': token } }
-  );
+  
+  const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/orders.json?status=any&created_at_min=${dateFrom.toISOString()}&created_at_max=${dateTo.toISOString()}&limit=250`;
+  const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json();
   return data.orders || [];
@@ -147,9 +159,6 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>T. Luxy ERP — Dashboard Marginalità</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
 <style>
   :root {
     --green-primary: #008060;
@@ -175,15 +184,17 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     --radius-sm: 8px;
     --radius-md: 12px;
     --radius-lg: 20px;
+    --font-main: 'Century Gothic', 'CenturyGothic', 'AppleGothic', Futura, 'Trebuchet MS', sans-serif;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { 
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+    font-family: var(--font-main);
     background: var(--beige);
     min-height: 100vh; 
     color: var(--black);
     -webkit-font-smoothing: antialiased;
     line-height: 1.5;
+    letter-spacing: 0.01em;
   }
   .container { max-width: 1440px; margin: 0 auto; padding: 24px; }
 
@@ -201,35 +212,39 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     gap: 20px;
     border: 1px solid var(--gray-100);
   }
-  .header-left { display: flex; align-items: center; gap: 24px; }
+  .header-left { display: flex; align-items: center; gap: 28px; }
   .logo {
-    font-family: 'Playfair Display', serif;
-    font-weight: 900;
-    font-size: 2.4rem;
+    font-family: var(--font-main);
+    font-weight: 700;
+    font-size: 2.6rem;
     color: var(--black);
-    letter-spacing: -0.02em;
+    letter-spacing: 0.02em;
     line-height: 1;
+    text-transform: uppercase;
   }
-  .logo .dot { color: var(--gold); margin: 0 4px; }
-  .header-divider { width: 1px; height: 48px; background: var(--gray-200); }
+  .logo .dot { color: var(--gold); }
+  .header-divider { width: 1px; height: 52px; background: var(--gray-200); }
   .header-info h1 { 
-    font-size: 1.1rem; 
-    font-weight: 600; 
+    font-size: 1.05rem; 
+    font-weight: 700; 
     color: var(--gray-900); 
-    margin-bottom: 2px;
-    letter-spacing: -0.01em;
+    margin-bottom: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
-  .header-info p { font-size: 0.85rem; color: var(--gray-500); }
+  .header-info p { font-size: 0.8rem; color: var(--gray-500); letter-spacing: 0.03em; }
   .header-right { display: flex; align-items: center; gap: 16px; }
   .status-pill {
     display: inline-flex; align-items: center; gap: 8px;
-    padding: 8px 14px;
+    padding: 8px 16px;
     background: var(--green-light);
     color: var(--green-dark);
     border-radius: 50px;
-    font-size: 0.8rem;
-    font-weight: 600;
+    font-size: 0.75rem;
+    font-weight: 700;
     border: 1px solid rgba(0,128,96,0.15);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
   }
   .status-dot {
     width: 7px; height: 7px;
@@ -248,12 +263,13 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     border: none; background: transparent; 
     border-radius: var(--radius-md); 
     cursor: pointer; 
-    font-family: inherit;
-    font-weight: 600; 
-    font-size: 0.9rem; 
+    font-family: var(--font-main);
+    font-weight: 700; 
+    font-size: 0.82rem; 
     color: var(--gray-700);
     transition: all 0.25s ease;
-    letter-spacing: -0.01em;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
   .tab:hover { background: var(--gray-100); color: var(--black); }
   .tab.active { background: var(--black); color: var(--white); }
@@ -272,22 +288,23 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   }
   .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; flex-wrap: wrap; gap: 16px; }
   .section-title { 
-    font-family: 'Playfair Display', serif;
-    font-size: 1.75rem; 
+    font-family: var(--font-main);
+    font-size: 1.6rem; 
     font-weight: 700; 
     color: var(--black); 
-    letter-spacing: -0.02em;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
   }
-  .section-subtitle { font-size: 0.9rem; color: var(--gray-500); margin-top: 4px; }
+  .section-subtitle { font-size: 0.85rem; color: var(--gray-500); margin-top: 6px; letter-spacing: 0.02em; }
 
-  /* INFO BOX */
+  /* INFO BOXES */
   .info-box { 
     background: var(--green-light); 
     border-left: 3px solid var(--green-primary); 
     padding: 14px 20px; 
     border-radius: var(--radius-sm); 
     margin-bottom: 24px; 
-    font-size: 0.88rem; 
+    font-size: 0.85rem; 
     color: var(--green-dark);
   }
   .warn-box { 
@@ -296,18 +313,24 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     padding: 14px 20px; 
     border-radius: var(--radius-sm); 
     margin-bottom: 24px; 
-    font-size: 0.88rem; 
+    font-size: 0.85rem; 
     color: #6B5320;
   }
 
   /* PERIOD SELECTOR */
-  .period-selector { 
-    display: flex; gap: 8px; margin-bottom: 28px; 
+  .filter-bar { 
+    display: flex; 
+    align-items: center; 
+    gap: 16px; 
+    margin-bottom: 28px; 
     flex-wrap: wrap;
+  }
+  .period-selector { 
+    display: flex; gap: 6px;
     background: var(--gray-100);
     padding: 6px;
     border-radius: 50px;
-    width: fit-content;
+    flex-wrap: wrap;
   }
   .period-btn { 
     padding: 10px 22px; 
@@ -315,14 +338,43 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     background: transparent; 
     border-radius: 50px; 
     cursor: pointer; 
-    font-family: inherit;
-    font-weight: 600; 
-    font-size: 0.85rem; 
+    font-family: var(--font-main);
+    font-weight: 700; 
+    font-size: 0.78rem; 
     color: var(--gray-700);
     transition: all 0.2s ease;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
   .period-btn:hover { color: var(--black); }
   .period-btn.active { background: var(--white); color: var(--black); box-shadow: var(--shadow-sm); }
+  .custom-range {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--white);
+    border: 1.5px solid var(--gray-200);
+    border-radius: 50px;
+    padding: 6px 8px 6px 18px;
+  }
+  .custom-range label { font-size: 0.72rem; font-weight: 700; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.06em; }
+  .custom-range input[type="date"] {
+    border: none; background: transparent;
+    font-family: var(--font-main);
+    font-size: 0.85rem; color: var(--black);
+    padding: 6px 8px; cursor: pointer;
+  }
+  .custom-range input[type="date"]:focus { outline: none; }
+  .custom-range .apply-btn {
+    background: var(--black); color: var(--white);
+    border: none; padding: 8px 18px;
+    border-radius: 50px;
+    font-family: var(--font-main);
+    font-size: 0.72rem; font-weight: 700;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    transition: background 0.2s;
+  }
+  .custom-range .apply-btn:hover { background: var(--green-dark); }
 
   /* KPI CARDS */
   .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
@@ -344,33 +396,33 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .kpi.green .kpi-sub { color: rgba(255,255,255,0.65); }
   .kpi.gold { background: var(--gold-light); border-color: var(--gold); }
   .kpi-label { 
-    font-size: 0.75rem; 
+    font-size: 0.7rem; 
     text-transform: uppercase; 
-    letter-spacing: 0.08em; 
-    font-weight: 600; 
+    letter-spacing: 0.1em; 
+    font-weight: 700; 
     color: var(--gray-500);
-    margin-bottom: 12px;
+    margin-bottom: 14px;
   }
   .kpi-value { 
-    font-family: 'Playfair Display', serif;
-    font-size: 2rem; 
+    font-family: var(--font-main);
+    font-size: 1.9rem; 
     font-weight: 700;
     line-height: 1.1;
     margin-bottom: 6px;
-    letter-spacing: -0.02em;
+    letter-spacing: 0.01em;
   }
-  .kpi-sub { font-size: 0.78rem; color: var(--gray-500); }
+  .kpi-sub { font-size: 0.74rem; color: var(--gray-500); letter-spacing: 0.04em; }
 
   /* FORMS */
   .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; }
   .form-group { display: flex; flex-direction: column; gap: 8px; }
-  .form-group label { font-weight: 600; color: var(--black); font-size: 0.85rem; letter-spacing: -0.005em; }
+  .form-group label { font-weight: 700; color: var(--black); font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; }
   .form-group input, .form-group select { 
     padding: 13px 16px; 
     border: 1.5px solid var(--gray-200); 
     border-radius: var(--radius-md); 
     font-size: 0.95rem; 
-    font-family: inherit;
+    font-family: var(--font-main);
     background: var(--white);
     color: var(--black);
     transition: all 0.2s ease;
@@ -386,18 +438,19 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     border: none; 
     padding: 16px 32px; 
     border-radius: var(--radius-md); 
-    font-size: 0.95rem; 
-    font-family: inherit;
-    font-weight: 600; 
+    font-size: 0.85rem; 
+    font-family: var(--font-main);
+    font-weight: 700; 
     cursor: pointer; 
     width: 100%; 
     margin-top: 20px; 
     transition: all 0.2s ease;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
   .btn-primary:hover { background: var(--green-dark); transform: translateY(-1px); box-shadow: var(--shadow-md); }
 
-  /* RESULTS GRID */
+  /* RESULTS */
   .results { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-top: 28px; }
   .result-card { 
     background: var(--gray-100); 
@@ -408,8 +461,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   }
   .result-card.positive { background: var(--green-light); border-color: var(--green-primary); }
   .result-card.negative { background: var(--red-light); border-color: var(--red); }
-  .result-label { font-size: 0.72rem; color: var(--gray-500); text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 8px; }
-  .result-value { font-family: 'Playfair Display', serif; font-size: 1.35rem; font-weight: 700; color: var(--black); letter-spacing: -0.02em; }
+  .result-label { font-size: 0.68rem; color: var(--gray-500); text-transform: uppercase; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 8px; }
+  .result-value { font-family: var(--font-main); font-size: 1.25rem; font-weight: 700; color: var(--black); letter-spacing: 0.01em; }
 
   /* MARKETPLACE GRID */
   .mp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
@@ -422,9 +475,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     transition: all 0.25s ease;
   }
   .mp-card:hover { border-color: var(--green-primary); transform: translateY(-3px); box-shadow: var(--shadow-md); }
-  .mp-name { font-family: 'Playfair Display', serif; font-size: 1.2rem; font-weight: 700; color: var(--black); margin-bottom: 14px; letter-spacing: -0.01em; }
+  .mp-name { font-family: var(--font-main); font-size: 1.1rem; font-weight: 700; color: var(--black); margin-bottom: 6px; letter-spacing: 0.02em; text-transform: uppercase; }
+  .mp-pay { font-size: 0.7rem; color: var(--gray-500); margin-bottom: 14px; letter-spacing: 0.04em; }
   .mp-fees { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.85rem; color: var(--gray-700); }
-  .mp-fees strong { color: var(--gray-500); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 2px; font-weight: 600; }
+  .mp-fees strong { color: var(--gray-500); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; display: block; margin-bottom: 2px; font-weight: 700; }
 
   /* BEST SELLERS */
   .bs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; }
@@ -454,24 +508,25 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .bs-image-placeholder { color: var(--gray-300); font-size: 3rem; }
   .bs-body { padding: 20px; }
   .bs-title { 
-    font-family: 'Playfair Display', serif;
+    font-family: var(--font-main);
     font-weight: 700; color: var(--black); 
-    font-size: 1.05rem; margin-bottom: 4px; 
+    font-size: 1rem; margin-bottom: 4px; 
     line-height: 1.3; 
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-    letter-spacing: -0.01em;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
   }
-  .bs-variant { font-size: 0.78rem; color: var(--gray-500); margin-bottom: 14px; }
+  .bs-variant { font-size: 0.74rem; color: var(--gray-500); margin-bottom: 14px; letter-spacing: 0.03em; }
   .bs-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .bs-stat { padding: 10px 12px; background: var(--gray-100); border-radius: var(--radius-sm); }
-  .bs-stat-label { font-size: 0.65rem; color: var(--gray-500); text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 4px; }
-  .bs-stat-value { font-weight: 700; color: var(--black); font-size: 0.95rem; }
+  .bs-stat-label { font-size: 0.6rem; color: var(--gray-500); text-transform: uppercase; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 4px; }
+  .bs-stat-value { font-weight: 700; color: var(--black); font-size: 0.9rem; }
   .bs-stat.fatturato { background: var(--gold-light); }
   .bs-stat.ricavo { background: var(--green-light); color: var(--green-dark); }
   .bs-stat.ricavo .bs-stat-value { color: var(--green-dark); }
   .bs-empty { text-align: center; padding: 80px 20px; color: var(--gray-500); font-style: italic; grid-column: 1 / -1; }
 
-  /* COMPARE TABLE */
+  /* COMPARE */
   .confronto-form { background: var(--cream); padding: 24px; border-radius: var(--radius-md); margin-bottom: 24px; border: 1px solid var(--gray-200); }
   .table-wrap { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--gray-200); }
   .compare-table { width: 100%; border-collapse: collapse; background: var(--white); }
@@ -479,13 +534,13 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .compare-table th { 
     padding: 16px 14px; 
     text-align: left; 
-    font-size: 0.72rem; 
+    font-size: 0.68rem; 
     text-transform: uppercase; 
-    letter-spacing: 0.08em; 
-    font-weight: 600; 
+    letter-spacing: 0.1em; 
+    font-weight: 700; 
     white-space: nowrap;
   }
-  .compare-table td { padding: 16px 14px; border-bottom: 1px solid var(--gray-100); font-size: 0.9rem; color: var(--gray-900); }
+  .compare-table td { padding: 16px 14px; border-bottom: 1px solid var(--gray-100); font-size: 0.88rem; color: var(--gray-900); }
   .compare-table tbody tr { transition: background 0.15s ease; }
   .compare-table tbody tr:hover { background: var(--cream); }
   .compare-table tr.best { background: var(--green-light); }
@@ -498,10 +553,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     display: inline-block; 
     padding: 3px 10px; 
     border-radius: 20px; 
-    font-size: 0.68rem; 
+    font-size: 0.62rem; 
     font-weight: 700; 
     margin-left: 8px;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
   }
   .mp-pill.win { background: var(--green-primary); color: var(--white); }
@@ -513,19 +568,21 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .summary-card.best-mp { background: var(--green-light); border-color: var(--green-primary); }
   .summary-card.worst-mp { background: var(--red-light); border-color: var(--red); }
   .summary-card.info { background: var(--gold-light); border-color: var(--gold); }
-  .summary-label { font-size: 0.72rem; color: var(--gray-700); text-transform: uppercase; font-weight: 600; letter-spacing: 0.06em; margin-bottom: 8px; }
-  .summary-value { font-family: 'Playfair Display', serif; font-size: 1.3rem; font-weight: 700; color: var(--black); letter-spacing: -0.01em; }
-  .summary-detail { margin-top: 6px; font-size: 0.85rem; color: var(--gray-700); }
+  .summary-label { font-size: 0.68rem; color: var(--gray-700); text-transform: uppercase; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 8px; }
+  .summary-value { font-family: var(--font-main); font-size: 1.2rem; font-weight: 700; color: var(--black); letter-spacing: 0.02em; text-transform: uppercase; }
+  .summary-detail { margin-top: 6px; font-size: 0.82rem; color: var(--gray-700); }
 
   @media (max-width: 768px) { 
     .container { padding: 16px; }
     .header { padding: 24px; }
-    .logo { font-size: 1.8rem; }
+    .logo { font-size: 1.9rem; }
     .section { padding: 24px; }
     .tabs { flex-direction: column; }
     .tab { min-width: auto; }
     .header-divider { display: none; }
-    .kpi-value { font-size: 1.6rem; }
+    .kpi-value { font-size: 1.5rem; }
+    .filter-bar { flex-direction: column; align-items: stretch; }
+    .custom-range { flex-wrap: wrap; }
   }
 </style>
 </head>
@@ -535,11 +592,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <!-- HEADER -->
   <div class="header">
     <div class="header-left">
-      <div class="logo">T<span class="dot">.</span>LUXY</div>
+      <div class="logo">T<span class="dot">.</span> LUXY</div>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v3.3</p>
+        <p>Business Intelligence Dashboard · v3.4</p>
       </div>
     </div>
     <div class="header-right">
@@ -571,12 +628,22 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
       <div class="info-box">I valori netti sono calcolati scorporando l'IVA effettiva di ogni ordine, gestita da Shopify in base al paese del cliente.</div>
-      <div class="period-selector">
-        <button class="period-btn active" onclick="setPeriod('today', event)">Oggi</button>
-        <button class="period-btn" onclick="setPeriod('yesterday', event)">Ieri</button>
-        <button class="period-btn" onclick="setPeriod('week', event)">Settimana</button>
-        <button class="period-btn" onclick="setPeriod('month', event)">Mese</button>
-        <button class="period-btn" onclick="setPeriod('quarter', event)">Trimestre</button>
+      <div class="filter-bar">
+        <div class="period-selector">
+          <button class="period-btn active" onclick="setPeriod('today', event)">Oggi</button>
+          <button class="period-btn" onclick="setPeriod('yesterday', event)">Ieri</button>
+          <button class="period-btn" onclick="setPeriod('week', event)">Settimana</button>
+          <button class="period-btn" onclick="setPeriod('month', event)">Mese</button>
+          <button class="period-btn" onclick="setPeriod('quarter', event)">Trimestre</button>
+          <button class="period-btn" onclick="setPeriod('year', event)">Anno</button>
+        </div>
+        <div class="custom-range">
+          <label>Da</label>
+          <input type="date" id="date-from">
+          <label>A</label>
+          <input type="date" id="date-to">
+          <button class="apply-btn" onclick="applyCustomRange()">Applica</button>
+        </div>
       </div>
       <div class="kpi-grid">
         <div class="kpi primary">
@@ -618,11 +685,21 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
       <div class="info-box">Foto, prezzo unitario e ricavo stimato per i prodotti più venduti nel periodo selezionato.</div>
-      <div class="period-selector">
-        <button class="period-btn" onclick="loadBestSellers('today', event)">Oggi</button>
-        <button class="period-btn" onclick="loadBestSellers('week', event)">Settimana</button>
-        <button class="period-btn active" onclick="loadBestSellers('month', event)">Mese</button>
-        <button class="period-btn" onclick="loadBestSellers('quarter', event)">Trimestre</button>
+      <div class="filter-bar">
+        <div class="period-selector">
+          <button class="period-btn" onclick="loadBestSellers('today', event)">Oggi</button>
+          <button class="period-btn" onclick="loadBestSellers('week', event)">Settimana</button>
+          <button class="period-btn active" onclick="loadBestSellers('month', event)">Mese</button>
+          <button class="period-btn" onclick="loadBestSellers('quarter', event)">Trimestre</button>
+          <button class="period-btn" onclick="loadBestSellers('year', event)">Anno</button>
+        </div>
+        <div class="custom-range">
+          <label>Da</label>
+          <input type="date" id="bs-date-from">
+          <label>A</label>
+          <input type="date" id="bs-date-to">
+          <button class="apply-btn" onclick="applyBsCustomRange()">Applica</button>
+        </div>
       </div>
       <div id="bs-content" class="bs-grid">
         <div class="bs-empty">Caricamento prodotti...</div>
@@ -639,7 +716,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="section-subtitle">Margine effettivo a parità di prezzo, costo e spedizione</div>
         </div>
       </div>
-      <div class="info-box">Modifica i valori per vedere il confronto aggiornato in tempo reale su tutti i 10 marketplace.</div>
+      <div class="info-box">Modifica i valori per vedere il confronto aggiornato in tempo reale su tutti i marketplace.</div>
       <div class="confronto-form">
         <div class="form-grid">
           <div class="form-group"><label>Prezzo IVA inclusa (€)</label><input type="number" id="c-prezzo" value="100" step="0.01" oninput="confronta()"></div>
@@ -745,7 +822,8 @@ const PERIODS_DEMO = {
   yesterday: { lordo: 12890, iva: 2324, costi: 7016, netto: 3550, margine: 27.5 },
   week: { lordo: 89350, iva: 16110, costi: 48670, netto: 24570, margine: 27.5 },
   month: { lordo: 342180, iva: 61688, costi: 187242, netto: 93250, margine: 27.2 },
-  quarter: { lordo: 1024680, iva: 184731, costi: 558559, netto: 281390, margine: 27.5 }
+  quarter: { lordo: 1024680, iva: 184731, costi: 558559, netto: 281390, margine: 27.5 },
+  year: { lordo: 4128500, iva: 743130, costi: 2249340, netto: 1136030, margine: 27.5 }
 };
 const BS_DEMO = [
   { rank: 1, titolo: 'Sneakers Premium Bianche', variante: 'Taglia 42', sku: 'SNK-001', prezzo_unit_lordo: 189, quantita_venduta: 24, fatturato_lordo: 4536, ricavo_stimato: 1240, immagine: null },
@@ -764,11 +842,9 @@ function showTab(name, ev) {
   if (name === 'bestsellers' && document.getElementById('bs-content').querySelector('.bs-empty')) loadBestSellers('month', { target: document.querySelectorAll('#bestsellers-tab .period-btn')[2] });
 }
 
-async function setPeriod(p, ev) {
-  document.querySelectorAll('#analytics-tab .period-btn').forEach(b => b.classList.remove('active'));
-  ev.target.classList.add('active');
+async function fetchAnalytics(url) {
   try {
-    const res = await fetch('/api/analytics?periodo=' + p);
+    const res = await fetch(url);
     const data = await res.json();
     if (data.success) {
       document.getElementById('lordo').textContent = '€' + Math.round(data.lordo_iva_inclusa).toLocaleString('it-IT');
@@ -776,24 +852,61 @@ async function setPeriod(p, ev) {
       document.getElementById('costi').textContent = '€' + Math.round(data.costi_totali).toLocaleString('it-IT');
       document.getElementById('netto').textContent = '€' + Math.round(data.margine_netto).toLocaleString('it-IT');
       document.getElementById('margine').textContent = data.margine_percentuale.toFixed(1) + '%';
-      return;
+      return true;
     }
   } catch(e) {}
-  const d = PERIODS_DEMO[p];
-  document.getElementById('lordo').textContent = '€' + d.lordo.toLocaleString('it-IT');
-  document.getElementById('iva').textContent = '€' + d.iva.toLocaleString('it-IT');
-  document.getElementById('costi').textContent = '€' + d.costi.toLocaleString('it-IT');
-  document.getElementById('netto').textContent = '€' + d.netto.toLocaleString('it-IT');
-  document.getElementById('margine').textContent = d.margine + '%';
+  return false;
+}
+
+async function setPeriod(p, ev) {
+  document.querySelectorAll('#analytics-tab .period-btn').forEach(b => b.classList.remove('active'));
+  if (ev) ev.target.classList.add('active');
+  const ok = await fetchAnalytics('/api/analytics?periodo=' + p);
+  if (!ok) {
+    const d = PERIODS_DEMO[p] || PERIODS_DEMO.today;
+    document.getElementById('lordo').textContent = '€' + d.lordo.toLocaleString('it-IT');
+    document.getElementById('iva').textContent = '€' + d.iva.toLocaleString('it-IT');
+    document.getElementById('costi').textContent = '€' + d.costi.toLocaleString('it-IT');
+    document.getElementById('netto').textContent = '€' + d.netto.toLocaleString('it-IT');
+    document.getElementById('margine').textContent = d.margine + '%';
+  }
+}
+
+async function applyCustomRange() {
+  const from = document.getElementById('date-from').value;
+  const to = document.getElementById('date-to').value;
+  if (!from || !to) { alert('Seleziona data Da e A'); return; }
+  if (from > to) { alert('La data "Da" deve essere precedente alla data "A"'); return; }
+  document.querySelectorAll('#analytics-tab .period-btn').forEach(b => b.classList.remove('active'));
+  await fetchAnalytics('/api/analytics?from=' + from + '&to=' + to);
 }
 
 async function loadBestSellers(p, ev) {
   document.querySelectorAll('#bestsellers-tab .period-btn').forEach(b => b.classList.remove('active'));
-  ev.target.classList.add('active');
+  if (ev) ev.target.classList.add('active');
   const cont = document.getElementById('bs-content');
   cont.innerHTML = '<div class="bs-empty">Caricamento prodotti...</div>';
   try {
     const res = await fetch('/api/bestsellers?periodo=' + p);
+    const data = await res.json();
+    if (data.success && data.prodotti.length > 0) {
+      renderBestSellers(data.prodotti);
+      return;
+    }
+  } catch(e) {}
+  renderBestSellers(BS_DEMO);
+}
+
+async function applyBsCustomRange() {
+  const from = document.getElementById('bs-date-from').value;
+  const to = document.getElementById('bs-date-to').value;
+  if (!from || !to) { alert('Seleziona data Da e A'); return; }
+  if (from > to) { alert('La data "Da" deve essere precedente alla data "A"'); return; }
+  document.querySelectorAll('#bestsellers-tab .period-btn').forEach(b => b.classList.remove('active'));
+  const cont = document.getElementById('bs-content');
+  cont.innerHTML = '<div class="bs-empty">Caricamento prodotti...</div>';
+  try {
+    const res = await fetch('/api/bestsellers?from=' + from + '&to=' + to);
     const data = await res.json();
     if (data.success && data.prodotti.length > 0) {
       renderBestSellers(data.prodotti);
@@ -945,11 +1058,15 @@ function loadMarketplaces() {
     const card = document.createElement('div');
     card.className = 'mp-card';
     card.onclick = () => { select.value = key; showTab('calculator', { target: document.querySelectorAll('.tab')[3] }); calcola(); };
-    card.innerHTML = '<div class="mp-name">' + mp.nome + '</div><div class="mp-fees">' +
+    card.innerHTML = '<div class="mp-name">' + mp.nome + '</div>' +
+      '<div class="mp-pay">Pagamento: ' + (mp.pagamento || 'N/D') + '</div>' +
+      '<div class="mp-fees">' +
       '<div><strong>Sconto</strong>' + mp.sconto_percentuale + '%</div>' +
-      '<div><strong>Fee</strong>' + mp.fee_principale + '%</div>' +
+      '<div><strong>Fee Princ.</strong>' + mp.fee_principale + '%</div>' +
+      '<div><strong>Fee Sec.</strong>' + (mp.fee_secondaria || 0) + '%</div>' +
       '<div><strong>Trasporto</strong>€' + (mp.fee_fissa_trasporto || 0) + '</div>' +
       '<div><strong>Packaging</strong>€' + (mp.fee_fissa_packaging || 0) + '</div>' +
+      (mp.fee_accessoria ? '<div><strong>Fee Acc.</strong>' + mp.fee_accessoria + '%</div>' : '') +
     '</div>';
     grid.appendChild(card);
   });
@@ -957,6 +1074,13 @@ function loadMarketplaces() {
 
 document.addEventListener('DOMContentLoaded', () => {
   loadMarketplaces();
+  // Imposta date default ultimo mese
+  const today = new Date();
+  const monthAgo = new Date();
+  monthAgo.setMonth(monthAgo.getMonth() - 1);
+  const fmt = d => d.toISOString().split('T')[0];
+  ['date-from', 'bs-date-from'].forEach(id => { const el = document.getElementById(id); if (el) el.value = fmt(monthAgo); });
+  ['date-to', 'bs-date-to'].forEach(id => { const el = document.getElementById(id); if (el) el.value = fmt(today); });
   setTimeout(() => { calcola(); confronta(); }, 300);
 });
 </script>
@@ -980,19 +1104,22 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET' && path === '/api') {
       return res.json({
-        sistema: 'T. Luxy ERP — Marginalità v3.3',
+        sistema: 'T. Luxy ERP — Marginalità v3.4',
         status: 'LIVE',
         store: SHOPIFY_STORE,
         credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET),
-        funzionalita: ['Analytics live', 'Best Seller Top 20', 'Confronto Marketplace', 'Calcolatore', 'Scorporo IVA', 'Riconoscimento marketplace'],
-        endpoints: ['/', '/api', '/api/analytics?periodo=today', '/api/bestsellers?periodo=month', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders']
+        funzionalita: ['Analytics live', 'Best Seller Top 20', 'Confronto Marketplace', 'Calcolatore', 'Filtro periodo custom', 'Italist incluso'],
+        marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length,
+        endpoints: ['/', '/api', '/api/analytics?periodo=today | ?from=YYYY-MM-DD&to=YYYY-MM-DD', '/api/bestsellers?periodo=month | ?from=...&to=...', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders']
       });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
       const periodo = query.get('periodo') || 'today';
+      const from = query.get('from');
+      const to = query.get('to');
       try {
-        const ordini = await getShopifyOrders(periodo);
+        const ordini = await getShopifyOrders(periodo, from, to);
         let lordo_iva_inclusa = 0, iva_totale = 0, costi_totali = 0, margine_netto = 0;
         const breakdown_marketplace = {};
         ordini.forEach(ordine => {
@@ -1012,7 +1139,14 @@ export default async function handler(req, res) {
           breakdown_marketplace[mp.key].margine += ris.margine_netto;
         });
         const margine_percentuale = lordo_iva_inclusa > 0 ? (margine_netto / lordo_iva_inclusa * 100) : 0;
-        return res.json({ success: true, periodo, ordini_totali: ordini.length, lordo_iva_inclusa, iva_totale, costi_totali, margine_netto, margine_percentuale, breakdown_marketplace, ultima_sincronizzazione: new Date().toISOString() });
+        return res.json({ 
+          success: true, 
+          periodo: from && to ? `Custom: ${from} → ${to}` : periodo, 
+          ordini_totali: ordini.length, 
+          lordo_iva_inclusa, iva_totale, costi_totali, margine_netto, margine_percentuale, 
+          breakdown_marketplace, 
+          ultima_sincronizzazione: new Date().toISOString() 
+        });
       } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
       }
@@ -1020,11 +1154,18 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET' && path === '/api/bestsellers') {
       const periodo = query.get('periodo') || 'month';
+      const from = query.get('from');
+      const to = query.get('to');
       try {
-        const ordini = await getShopifyOrders(periodo);
+        const ordini = await getShopifyOrders(periodo, from, to);
         let prodotti = calcolaBestSellers(ordini, 20);
         prodotti = await arricchisciConImmagini(prodotti);
-        return res.json({ success: true, periodo, totale_prodotti_unici: prodotti.length, prodotti });
+        return res.json({ 
+          success: true, 
+          periodo: from && to ? `Custom: ${from} → ${to}` : periodo, 
+          totale_prodotti_unici: prodotti.length, 
+          prodotti 
+        });
       } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
       }
