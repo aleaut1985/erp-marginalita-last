@@ -1,0 +1,9 @@
+{
+  "name": "erp-marginalita",
+  "version": "1.0.0",
+  "description": "Sistema ERP per calcolo marginalità marketplace",
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
