@@ -1,4 +1,4 @@
-// ERP Marginalità v5.2 - Fix regex parseCSV in template literal
+// ERP Marginalità v5.4 - Winkelstraat detection via email/shipping/tag/copernicus
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'autore-luxit.myshopify.com';
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
@@ -93,6 +93,61 @@ function isDuoSku(sku) {
   return !!(sku && typeof sku === 'string' && /^DUO-/i.test(sku.trim()));
 }
 
+// ============ CURRENCY HELPERS ============
+// Tassi di cambio fallback (aggiornare periodicamente). Usati SOLO se Shopify non fornisce shop_money
+// (caso estremamente raro: ordini molto vecchi pre-multi-currency).
+const SHOP_CURRENCY = 'EUR';
+const FALLBACK_RATES_TO_EUR = {
+  EUR: 1.0,
+  USD: 0.92,
+  GBP: 1.17,
+  SEK: 0.087,
+  NOK: 0.086,
+  DKK: 0.134,
+  CHF: 1.05,
+  PLN: 0.23,
+  CZK: 0.041,
+  HUF: 0.0026,
+  JPY: 0.0061,
+  CAD: 0.67,
+  AUD: 0.61,
+  SGD: 0.68,
+  HKD: 0.118,
+  RON: 0.20
+};
+
+// Converte un prezzo in EUR. Prova nell'ordine:
+//   1) money_set.shop_money (già convertito da Shopify al cambio del giorno — il più accurato)
+//   2) calcolo manuale con tasso fallback
+//   3) prezzo originale se già in EUR
+function toEurAmount(moneySet, fallbackAmount, fallbackCurrency) {
+  // moneySet = esempio ordine.total_price_set (o line_item.price_set)
+  if (moneySet && moneySet.shop_money && moneySet.shop_money.amount !== undefined) {
+    const amt = parseFloat(moneySet.shop_money.amount);
+    if (!isNaN(amt) && (moneySet.shop_money.currency_code === SHOP_CURRENCY || !moneySet.shop_money.currency_code)) {
+      return amt;
+    }
+  }
+  // Fallback: conversione manuale
+  const amt = parseFloat(fallbackAmount);
+  if (isNaN(amt)) return 0;
+  const cur = (fallbackCurrency || SHOP_CURRENCY).toUpperCase();
+  if (cur === SHOP_CURRENCY) return amt;
+  const rate = FALLBACK_RATES_TO_EUR[cur];
+  if (rate) return amt * rate;
+  return amt; // ultima spiaggia: ritorna così com'è
+}
+
+// Estrae info valuta di un ordine
+function getOrderCurrencyInfo(ordine) {
+  const originalCurrency = ordine.currency || SHOP_CURRENCY;
+  const isForeign = originalCurrency !== SHOP_CURRENCY;
+  const eurTotal = toEurAmount(ordine.total_price_set, ordine.total_price, originalCurrency);
+  const originalTotal = parseFloat(ordine.total_price) || 0;
+  const exchangeRate = isForeign && originalTotal > 0 ? eurTotal / originalTotal : 1;
+  return { originalCurrency, isForeign, eurTotal, originalTotal, exchangeRate };
+}
+
 let cachedToken = null;
 let tokenExpiry = null;
 
@@ -169,6 +224,33 @@ function getIvaPerPaese(countryCode) {
   return IVA_PER_PAESE[countryCode.toUpperCase()] ?? 0;
 }
 
+function isWinkelstraatOrder(ordine) {
+  // Controllo multi-criterio in OR
+  const email = (ordine.email || ordine.customer?.email || '').toLowerCase();
+  if (email.includes('@winkelstraat.nl')) return 'email';
+  
+  const tags = (ordine.tags || '').toLowerCase();
+  if (tags.includes('winkelstraat')) return 'tag';
+  
+  // source_name può contenere "copernicus" per import automatici
+  const sourceName = (ordine.source_name || '').toLowerCase();
+  if (sourceName.includes('copernicus') || sourceName.includes('winkelstraat')) return 'source_name';
+  
+  // Note ordine e note attributes
+  const note = (ordine.note || '').toLowerCase();
+  if (note.includes('winkelstraat') || note.includes('copernicus')) return 'note';
+  
+  const noteAttrs = (ordine.note_attributes || []).map(a => ((a.name || '') + ' ' + (a.value || '')).toLowerCase()).join(' ');
+  if (noteAttrs.includes('winkelstraat') || noteAttrs.includes('copernicus')) return 'note_attributes';
+  
+  // Shipping address: address1, address2, name, company
+  const ship = ordine.shipping_address || {};
+  const shipFields = [ship.address1, ship.address2, ship.name, ship.company, ship.first_name, ship.last_name].filter(Boolean).map(s => s.toLowerCase()).join(' ');
+  if (shipFields.includes('winkelstraat')) return 'shipping_address';
+  
+  return null;
+}
+
 function riconosciMarketplace(ordine) {
   const rawSource = (ordine.source_name || '').trim();
   const sourceName = normalizeSourceName(rawSource);
@@ -178,6 +260,12 @@ function riconosciMarketplace(ordine) {
   // Brandsgateway è un dropship fornitore, arriva con source=web ma va classificato come BRANDSGATEWAY
   if (tags.includes('brandsgateway')) {
     return { key: 'BRANDSGATEWAY', config: MARKETPLACE_CONFIGS.BRANDSGATEWAY };
+  }
+  
+  // PRIORITÀ 2: Winkelstraat via Copernicus (import da external) - multi-criterio
+  const wsMatch = isWinkelstraatOrder(ordine);
+  if (wsMatch) {
+    return { key: 'WINKELSTRAAT', config: MARKETPLACE_CONFIGS.WINKELSTRAAT };
   }
   
   // Match diretto normalizzato su source_name
@@ -589,9 +677,11 @@ function calcolaBestSellers(ordini, top = 20, variantCosts = {}) {
   ordini.forEach(ordine => {
     const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
     const ivaPerc = getIvaPerPaese(country);
+    const ordCurrency = ordine.currency || SHOP_CURRENCY;
     (ordine.line_items || []).forEach(item => {
       const productId = item.product_id || item.variant_id || item.title;
-      const prezzo_unit_lordo = parseFloat(item.price) || 0;
+      // PREZZO IN EUR (da price_set.shop_money quando disponibile)
+      const prezzo_unit_lordo = toEurAmount(item.price_set, item.price, ordCurrency);
       const quantity = parseInt(item.quantity) || 0;
       const prezzo_unit_netto = prezzo_unit_lordo / (1 + ivaPerc / 100);
       const costo_unit_reale = item.variant_id && variantCosts[item.variant_id] != null ? variantCosts[item.variant_id] : 0;
@@ -820,7 +910,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.2</p>
+        <p>Business Intelligence Dashboard · v5.4</p>
       </div>
     </div>
     <div class="header-right">
@@ -859,6 +949,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="kpi green"><div class="kpi-label">Margine Netto</div><div class="kpi-value" id="netto">—</div><div class="kpi-sub">Profitto reale</div></div>
         <div class="kpi gold"><div class="kpi-label">Margine %</div><div class="kpi-value" id="margine">—</div><div class="kpi-sub">Su lordo</div></div>
       </div>
+      <div id="foreign-currency-panel"></div>
       <div id="errors-panel"></div>
       <div class="breakdown-section">
         <div class="breakdown-title">Breakdown per Marketplace</div>
@@ -992,10 +1083,31 @@ function renderErrors(ordiniConErrori) {
   if (!ordiniConErrori || ordiniConErrori.length === 0) { panel.innerHTML = ''; return; }
   const rows = ordiniConErrori.slice(0, 50).map(o => {
     const prods = o.prodotti_senza_costo.map(p => '&nbsp;&nbsp;&nbsp;• ' + (p.title || 'Senza titolo') + (p.sku ? ' [SKU: ' + p.sku + ']' : '')).join('<br>');
-    return '<div><strong>Ordine #' + (o.order_number || o.name || o.id) + '</strong> (' + o.marketplace + ', €' + o.total_price + ')<br>' + prods + '</div>';
+    const origPrice = o.currency && o.currency !== 'EUR' ? o.currency + ' ' + o.total_price + ' → €' + (o.total_price_eur || 0).toFixed(2) : '€' + o.total_price;
+    return '<div><strong>Ordine #' + (o.order_number || o.name || o.id) + '</strong> (' + o.marketplace + ', ' + origPrice + ')<br>' + prods + '</div>';
   }).join('');
   const moreMsg = ordiniConErrori.length > 50 ? '<div style="margin-top:8px; font-style:italic;">... e altri ' + (ordiniConErrori.length - 50) + ' ordini</div>' : '';
   panel.innerHTML = '<div class="error-box"><strong>⚠ ' + ordiniConErrori.length + ' ordini esclusi: prodotti senza "Cost per item" su Shopify</strong>Aggiungi il costo su Shopify → Prodotti → Inventario.<div class="error-list">' + rows + moreMsg + '</div></div>';
+}
+
+function renderForeignCurrency(ordiniEstero) {
+  const panel = document.getElementById('foreign-currency-panel');
+  if (!panel) return;
+  if (!ordiniEstero || ordiniEstero.length === 0) { panel.innerHTML = ''; return; }
+  // Raggruppa per valuta
+  const byCurrency = {};
+  ordiniEstero.forEach(o => {
+    if (!byCurrency[o.currency]) byCurrency[o.currency] = { count: 0, total_orig: 0, total_eur: 0, rates: [] };
+    byCurrency[o.currency].count++;
+    byCurrency[o.currency].total_orig += o.total_original;
+    byCurrency[o.currency].total_eur += o.total_eur;
+    byCurrency[o.currency].rates.push(o.exchange_rate);
+  });
+  const summary = Object.entries(byCurrency).map(([cur, info]) => {
+    const avgRate = info.rates.reduce((a, b) => a + b, 0) / info.rates.length;
+    return '<div style="padding:6px 0; border-bottom:1px dotted #E8C77A;"><strong>' + cur + '</strong>: ' + info.count + ' ordini · ' + cur + ' ' + info.total_orig.toFixed(2) + ' → <strong>€' + info.total_eur.toFixed(2) + '</strong> (cambio medio ~' + avgRate.toFixed(4) + ')</div>';
+  }).join('');
+  panel.innerHTML = '<div style="background:#FFF4D6; border-left:4px solid #E8C77A; border-radius:8px; padding:14px 18px; margin-bottom:16px;"><div style="font-weight:700; color:#8B6914; margin-bottom:8px;">💱 ' + ordiniEstero.length + ' ordine' + (ordiniEstero.length > 1 ? ' in' : '') + ' valuta estera (convertit' + (ordiniEstero.length > 1 ? 'i' : 'o') + ' in EUR al cambio storico Shopify)</div><div style="font-size:0.82rem; color:#6B4E0E;">' + summary + '</div></div>';
 }
 
 function renderBreakdown(breakdown) {
@@ -1017,11 +1129,15 @@ function renderBreakdown(breakdown) {
         const orderNumFmt = o.name || ('#' + o.order_number);
         const articoli = (o.articoli || []).map(a => {
           const ricavoUnit = a.prezzo_unit - a.cost_unit;
-          const ricavoCls = ricavoUnit >= 0 ? 'margin-pos' : 'margin-neg';
-          return '<div style="padding:4px 0; border-bottom:1px dotted var(--gray-200);"><strong style="font-size:0.82rem;">' + a.title + '</strong><br><span style="font-size:0.72rem; color:var(--gray-500);">SKU: ' + a.sku + ' · qty ' + a.quantity + '</span><br><span style="font-size:0.75rem;">Prezzo: <strong>€' + a.prezzo_unit.toFixed(2) + '</strong> · Costo: <strong>€' + a.cost_unit.toFixed(2) + '</strong> · <span class="' + ricavoCls + '">Δ €' + ricavoUnit.toFixed(2) + '</span></span></div>';
+          const badgeStyle = ricavoUnit >= 0
+            ? 'display:inline-block; background:var(--green-light); color:var(--green-dark); border:1px solid rgba(0,128,96,0.3); padding:2px 9px; border-radius:6px; font-weight:700; font-size:0.78rem;'
+            : 'display:inline-block; background:var(--red-light); color:var(--red); border:1px solid rgba(191,71,71,0.3); padding:2px 9px; border-radius:6px; font-weight:700; font-size:0.78rem;';
+          const segno = ricavoUnit >= 0 ? '+' : '';
+          return '<div style="padding:4px 0; border-bottom:1px dotted var(--gray-200);"><strong style="font-size:0.82rem;">' + a.title + '</strong><br><span style="font-size:0.72rem; color:var(--gray-500);">SKU: ' + a.sku + ' · qty ' + a.quantity + '</span><br><span style="font-size:0.75rem;">Prezzo: <strong>€' + a.prezzo_unit.toFixed(2) + '</strong> · Costo: <strong>€' + a.cost_unit.toFixed(2) + '</strong> · <span style="' + badgeStyle + '">' + segno + '€' + ricavoUnit.toFixed(2) + '</span></span></div>';
         }).join('');
         const marginCls2 = o.margine_netto >= 0 ? 'margin-pos' : 'margin-neg';
-        return '<tr><td><strong>' + orderNumFmt + '</strong></td><td>' + dataFmt + '</td><td>' + (o.country || '—') + '</td><td style="max-width:340px;">' + articoli + '</td><td class="num">€' + o.fatturato.toFixed(2) + '</td><td class="num">€' + o.iva.toFixed(2) + '</td><td class="num">€' + o.costo_merce.toFixed(2) + '</td><td class="num">€' + o.fees_marketplace.toFixed(2) + '</td><td class="num ' + marginCls2 + '">€' + o.margine_netto.toFixed(2) + '</td><td class="num ' + marginCls2 + '">' + o.margine_percentuale.toFixed(1) + '%</td></tr>';
+        const currencyBadge = o.is_foreign_currency ? '<span style="display:inline-block; background:#FFF4D6; color:#8B6914; padding:2px 7px; border-radius:10px; font-size:0.68rem; font-weight:700; margin-left:6px; border:1px solid #E8C77A;" title="Ordine in ' + o.currency + ' convertito in EUR al cambio del giorno (' + o.exchange_rate.toFixed(4) + ')">💱 ' + o.currency + ' ' + (o.total_original || 0).toFixed(0) + '</span>' : '';
+        return '<tr><td><strong>' + orderNumFmt + '</strong>' + currencyBadge + '</td><td>' + dataFmt + '</td><td>' + (o.country || '—') + '</td><td style="max-width:340px;">' + articoli + '</td><td class="num">€' + o.fatturato.toFixed(2) + '</td><td class="num">€' + o.iva.toFixed(2) + '</td><td class="num">€' + o.costo_merce.toFixed(2) + '</td><td class="num">€' + o.fees_marketplace.toFixed(2) + '</td><td class="num ' + marginCls2 + '">€' + o.margine_netto.toFixed(2) + '</td><td class="num ' + marginCls2 + '">' + o.margine_percentuale.toFixed(1) + '%</td></tr>';
       }).join('') +
       '</tbody></table></div></td></tr>';
     return mainRow + detailRow;
@@ -1060,6 +1176,7 @@ async function fetchAnalytics(url) {
       document.getElementById('ordini-count').textContent = countLabel;
       renderBreakdown(data.breakdown_marketplace);
       renderErrors(data.ordini_con_errori || []);
+      renderForeignCurrency(data.ordini_valuta_estera || []);
       return true;
     }
   } catch(e) { console.error(e); }
@@ -1378,7 +1495,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.2', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, funzionalita: ['Fix regex parseCSV', 'KV multi-format detection', 'KV storage costi persistenti', 'Simulatore DUO con CSV import', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Products/{id}.json strategy', 'Fuso Roma reale', 'Poizon + Secret Sales', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-costs', '/api/debug-single-cost'] });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.4', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, funzionalita: ['Winkelstraat detection (email/shipping/tag/copernicus)', 'Conversione valuta automatica (shop_money)', 'Fix regex parseCSV', 'KV multi-format detection', 'KV storage costi persistenti', 'Simulatore DUO con CSV import', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Products/{id}.json strategy', 'Fuso Roma reale', 'Poizon + Secret Sales', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-winkelstraat', '/api/debug-costs', '/api/debug-single-cost'] });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -1421,25 +1538,45 @@ export default async function handler(req, res) {
         let lordo_iva_inclusa = 0, iva_totale = 0, costi_totali = 0, margine_netto = 0;
         const breakdown_marketplace = {};
         const ordini_con_errori = [];
+        const ordini_valuta_estera = []; // Tracciamento ordini convertiti
         ordini.forEach(ordine => {
           const { costo: costo_merce, errori } = calcolaCostoOrdine(ordine, variantCosts, duoUserCosts);
           const mp = riconosciMarketplace(ordine);
+          const currencyInfo = getOrderCurrencyInfo(ordine);
           if (errori.length > 0) {
-            ordini_con_errori.push({ id: ordine.id, order_number: ordine.order_number, name: ordine.name, total_price: ordine.total_price, marketplace: mp.config.nome, prodotti_senza_costo: errori });
+            ordini_con_errori.push({ id: ordine.id, order_number: ordine.order_number, name: ordine.name, total_price: ordine.total_price, total_price_eur: currencyInfo.eurTotal, currency: currencyInfo.originalCurrency, marketplace: mp.config.nome, prodotti_senza_costo: errori });
             return;
           }
-          const prezzo_lordo = parseFloat(ordine.total_price) || 0;
-          const spedizione = (ordine.shipping_lines || []).reduce((sum, line) => sum + parseFloat(line.price || 0), 0);
+          // USA SEMPRE IL PREZZO IN EUR (convertito da Shopify al cambio del giorno)
+          const prezzo_lordo = currencyInfo.eurTotal;
+          // Spedizione: usa shop_money se disponibile
+          const spedizione = (ordine.shipping_lines || []).reduce((sum, line) => {
+            return sum + toEurAmount(line.price_set, line.price, currencyInfo.originalCurrency);
+          }, 0);
           const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
           // Poizon usa sempre IVA IT
           const ivaPerc = mp.key === 'POIZON' ? 22 : getIvaPerPaese(country);
-          const shopifyTax = parseFloat(ordine.total_tax) || 0;
-          const iva_scorporata = shopifyTax > 0 ? shopifyTax : (prezzo_lordo - prezzo_lordo / (1 + ivaPerc / 100));
+          // Tax: converti in EUR
+          const shopifyTaxEur = toEurAmount(ordine.total_tax_set, ordine.total_tax, currencyInfo.originalCurrency);
+          const iva_scorporata = shopifyTaxEur > 0 ? shopifyTaxEur : (prezzo_lordo - prezzo_lordo / (1 + ivaPerc / 100));
           const ris = calcolaMarginalita(prezzo_lordo, iva_scorporata, costo_merce, spedizione, mp.config, mp.key);
           lordo_iva_inclusa += ris.prezzo_lordo_iva_inclusa;
           iva_totale += ris.iva_scorporata;
           costi_totali += ris.costi_totali;
           margine_netto += ris.margine_netto;
+          
+          if (currencyInfo.isForeign) {
+            ordini_valuta_estera.push({
+              order_number: ordine.order_number,
+              name: ordine.name,
+              currency: currencyInfo.originalCurrency,
+              total_original: currencyInfo.originalTotal,
+              total_eur: currencyInfo.eurTotal,
+              exchange_rate: currencyInfo.exchangeRate,
+              marketplace: mp.config.nome
+            });
+          }
+          
           if (!breakdown_marketplace[mp.key]) breakdown_marketplace[mp.key] = { nome: mp.config.nome, ordini: 0, fatturato: 0, iva: 0, costo_merce: 0, margine: 0, dettaglio_ordini: [] };
           breakdown_marketplace[mp.key].ordini += 1;
           breakdown_marketplace[mp.key].fatturato += ris.prezzo_lordo_iva_inclusa;
@@ -1460,11 +1597,16 @@ export default async function handler(req, res) {
             spedizione,
             margine_netto: ris.margine_netto,
             margine_percentuale: ris.margine_percentuale,
+            // Info valuta
+            currency: currencyInfo.originalCurrency,
+            is_foreign_currency: currencyInfo.isForeign,
+            total_original: currencyInfo.originalTotal,
+            exchange_rate: currencyInfo.exchangeRate,
             articoli: (ordine.line_items || []).map(item => ({
               title: item.title,
               sku: item.sku || '',
               quantity: parseInt(item.quantity) || 0,
-              prezzo_unit: parseFloat(item.price) || 0,
+              prezzo_unit: toEurAmount(item.price_set, item.price, currencyInfo.originalCurrency),
               cost_unit: (function() {
                 if (item.variant_id && variantCosts[item.variant_id] !== null && variantCosts[item.variant_id] !== undefined) return variantCosts[item.variant_id];
                 if (isDuoSku(item.sku) && item.variant_id && duoUserCosts[item.variant_id] !== undefined) return duoUserCosts[item.variant_id];
@@ -1475,7 +1617,7 @@ export default async function handler(req, res) {
         });
         const ordini_validi = ordini.length - ordini_con_errori.length;
         const margine_percentuale = lordo_iva_inclusa > 0 ? (margine_netto / lordo_iva_inclusa * 100) : 0;
-        return res.json({ success: true, periodo: from && to ? `${from} → ${to}` : periodo, ordini_totali: ordini_validi, ordini_con_errori_count: ordini_con_errori.length, ordini_con_errori, lordo_iva_inclusa, iva_totale, costi_totali, margine_netto, margine_percentuale, breakdown_marketplace, fetch_stats: fetchStats, ultima_sincronizzazione: new Date().toISOString() });
+        return res.json({ success: true, periodo: from && to ? `${from} → ${to}` : periodo, ordini_totali: ordini_validi, ordini_con_errori_count: ordini_con_errori.length, ordini_con_errori, lordo_iva_inclusa, iva_totale, costi_totali, margine_netto, margine_percentuale, breakdown_marketplace, ordini_valuta_estera, fetch_stats: fetchStats, ultima_sincronizzazione: new Date().toISOString() });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
@@ -1688,6 +1830,46 @@ export default async function handler(req, res) {
     }
 
     // Health check KV
+    // Debug Winkelstraat: mostra ordini riconosciuti come WINKELSTRAAT e il motivo
+    if (req.method === 'GET' && path === '/api/debug-winkelstraat') {
+      try {
+        const periodo = query.get('periodo') || 'month';
+        const ordini = await getShopifyOrders(periodo);
+        const winkelstraatOrders = [];
+        const fallbackDefaultOrders = []; // ordini che non hanno matchato e finiscono in TLUXY_SITE (candidati mancati?)
+        ordini.forEach(o => {
+          const match = isWinkelstraatOrder(o);
+          const mp = riconosciMarketplace(o);
+          const email = (o.email || o.customer?.email || '').toLowerCase();
+          const ship = o.shipping_address || {};
+          const info = {
+            order_number: o.order_number,
+            name: o.name,
+            created_at: o.created_at,
+            source_name: o.source_name,
+            email,
+            tags: o.tags,
+            note: o.note,
+            shipping_address1: ship.address1,
+            shipping_company: ship.company,
+            shipping_name: [ship.first_name, ship.last_name].filter(Boolean).join(' '),
+            marketplace_assegnato: mp.config.nome,
+            winkelstraat_match: match // null oppure il campo che ha matchato
+          };
+          if (match) winkelstraatOrders.push(info);
+          else if (mp.key === 'TLUXY_SITE') fallbackDefaultOrders.push(info);
+        });
+        return res.json({
+          success: true,
+          periodo,
+          totale_ordini: ordini.length,
+          winkelstraat_riconosciuti: winkelstraatOrders.length,
+          ordini_winkelstraat: winkelstraatOrders,
+          ordini_tluxy_site_campione: fallbackDefaultOrders.slice(0, 20) // per capire se qualcuno è sfuggito
+        });
+      } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
+    }
+
     if (req.method === 'GET' && path === '/api/kv-status') {
       const envVarsDetected = {
         KV_REST_API_URL: !!process.env.KV_REST_API_URL,
