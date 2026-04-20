@@ -1,4 +1,4 @@
-// ERP Marginalità v5.8.3 - Cache KV 24h su forecast + inventory-discovery (con ?refresh=1)
+// ERP Marginalità v5.9 - Snapshot Inventario (categorie × gender, filtro DUO)
 
 import * as crypto from 'node:crypto';
 
@@ -1241,7 +1241,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.8.3</p>
+        <p>Business Intelligence Dashboard · v5.9</p>
       </div>
     </div>
     <div class="header-right">
@@ -1258,6 +1258,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <button class="tab" data-tab="marketplaces">Marketplace</button>
       <button class="tab" data-tab="duo">Simulatore DUO</button>
       <button class="tab" data-tab="forecast">💰 Previsioni Incassi</button>
+      <button class="tab" data-tab="inventory">📦 Inventario</button>
     </div>
   </div>
   <div id="analytics-tab" class="tab-content active">
@@ -1409,6 +1410,28 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
       <div id="forecast-content">
         <div class="bs-empty">Clicca "Ricalcola" per generare le previsioni.</div>
+      </div>
+    </div>
+  </div>
+  <div id="inventory-tab" class="tab-content">
+    <div class="section">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Snapshot inventario</div>
+          <div class="section-subtitle">Pezzi attivi con stock > 0 · categoria × gender · cache 24h</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="apply-btn" id="inventory-reload" style="background:var(--gray-700);" title="Carica dalla cache">Mostra</button>
+          <button class="apply-btn" id="inventory-refresh" style="background:var(--black);" title="Rifà fetch da Shopify (lento)">🔄 Aggiorna ora</button>
+        </div>
+      </div>
+      <div style="margin:12px 0 16px; display:inline-flex; gap:0; background:var(--gray-100); border-radius:8px; padding:3px;" id="inventory-filter-group">
+        <button class="inv-filter active" data-filter="tutto" style="border:none; background:var(--white); color:var(--black); padding:6px 14px; font-size:0.82rem; font-weight:600; border-radius:6px; cursor:pointer;">Tutti</button>
+        <button class="inv-filter" data-filter="own" style="border:none; background:transparent; color:var(--gray-700); padding:6px 14px; font-size:0.82rem; font-weight:400; border-radius:6px; cursor:pointer;">Solo mio stock</button>
+        <button class="inv-filter" data-filter="duo" style="border:none; background:transparent; color:var(--gray-700); padding:6px 14px; font-size:0.82rem; font-weight:400; border-radius:6px; cursor:pointer;">Solo DUO</button>
+      </div>
+      <div id="inventory-content">
+        <div class="bs-empty">Clicca "Mostra" o "Aggiorna ora" per caricare lo snapshot.</div>
       </div>
     </div>
   </div>
@@ -2026,6 +2049,117 @@ async function deleteRicarica(id) {
   } catch(e) { alert('Errore: ' + e.message); }
 }
 
+// ============ INVENTORY SNAPSHOT ============
+let inventoryData = null;
+let inventoryFilter = 'tutto';
+
+async function loadInventory(forceRefresh) {
+  const cont = document.getElementById('inventory-content');
+  cont.innerHTML = '<div class="bs-empty">' + (forceRefresh ? '🔄 Fetch catalogo da Shopify in corso (20-60 secondi)...' : 'Caricamento snapshot...') + '</div>';
+  try {
+    const url = forceRefresh ? '/api/inventory?refresh=1' : '/api/inventory';
+    const data = await fetchNoCache(url);
+    if (!data.success) { cont.innerHTML = '<div class="bs-empty" style="color:var(--red);">Errore: ' + (data.error || 'sconosciuto') + '</div>'; return; }
+    inventoryData = data;
+    renderInventory();
+  } catch(e) { cont.innerHTML = '<div class="bs-empty" style="color:var(--red);">Errore: ' + e.message + '</div>'; }
+}
+
+function renderInventory() {
+  if (!inventoryData) return;
+  const d = inventoryData;
+  const cont = document.getElementById('inventory-content');
+  const snap = d.snapshot[inventoryFilter];
+  
+  // Header info
+  let subtitle = '';
+  if (inventoryFilter === 'tutto') subtitle = d.totale_prodotti_attivi_con_stock + ' prodotti · ' + d.totale_pezzi.toLocaleString('it-IT') + ' pezzi (di cui ' + d.duo_prodotti + ' DUO)';
+  else if (inventoryFilter === 'own') subtitle = d.own_prodotti + ' prodotti · ' + d.own_pezzi.toLocaleString('it-IT') + ' pezzi (esclusi ' + d.duo_prodotti + ' DUO)';
+  else subtitle = d.duo_prodotti + ' prodotti DUO · ' + d.duo_pezzi.toLocaleString('it-IT') + ' pezzi';
+  
+  // Banner cache
+  let cacheHtml = '';
+  if (d.dalla_cache_discovery && d.cached_at) {
+    const age = Math.round((Date.now() - new Date(d.cached_at).getTime()) / 3600000 * 10) / 10;
+    cacheHtml = '<div style="background:#E8F0F5; border-left:3px solid #4A7FBC; border-radius:6px; padding:8px 14px; margin-bottom:16px; font-size:0.78rem; color:#1A4A78;">⚡ Dati dalla cache · aggiornati ' + age + ' ore fa</div>';
+  } else {
+    cacheHtml = '<div style="background:#E6F4EE; border-left:3px solid var(--green-primary); border-radius:6px; padding:8px 14px; margin-bottom:16px; font-size:0.78rem; color:var(--green-dark);">✅ Dati appena scaricati da Shopify e salvati in cache (24h)</div>';
+  }
+  
+  // Tabella categoria × gender
+  const CATEGORIE = [
+    { key: 'bag', nome: 'Bag' },
+    { key: 'shoes', nome: 'Shoes' },
+    { key: 'accessori', nome: 'Accessori' },
+    { key: 'clothing', nome: 'Clothing' }
+  ];
+  
+  function fmtCell(p, pz) {
+    return '<td class="num" style="font-variant-numeric:tabular-nums;"><span style="color:var(--gray-500);">' + p.toLocaleString('it-IT') + '</span> · <strong>' + pz.toLocaleString('it-IT') + '</strong></td>';
+  }
+  
+  let rows = '';
+  let totDonnaP = 0, totDonnaPz = 0, totUomoP = 0, totUomoPz = 0, totUniP = 0, totUniPz = 0;
+  CATEGORIE.forEach(cat => {
+    const c = snap[cat.key];
+    const rowP = c.donna.prodotti + c.uomo.prodotti + c.unisex.prodotti;
+    const rowPz = c.donna.pezzi + c.uomo.pezzi + c.unisex.pezzi;
+    totDonnaP += c.donna.prodotti; totDonnaPz += c.donna.pezzi;
+    totUomoP += c.uomo.prodotti; totUomoPz += c.uomo.pezzi;
+    totUniP += c.unisex.prodotti; totUniPz += c.unisex.pezzi;
+    rows += '<tr>' +
+      '<td style="font-weight:600;">' + cat.nome + '</td>' +
+      fmtCell(c.donna.prodotti, c.donna.pezzi) +
+      fmtCell(c.uomo.prodotti, c.uomo.pezzi) +
+      fmtCell(c.unisex.prodotti, c.unisex.pezzi) +
+      '<td class="num" style="font-variant-numeric:tabular-nums; background:var(--gray-100);"><span style="color:var(--gray-500);">' + rowP.toLocaleString('it-IT') + '</span> · <strong style="font-size:1.05rem;">' + rowPz.toLocaleString('it-IT') + '</strong></td>' +
+    '</tr>';
+  });
+  const totRowP = totDonnaP + totUomoP + totUniP;
+  const totRowPz = totDonnaPz + totUomoPz + totUniPz;
+  rows += '<tr style="background:var(--gray-100); font-weight:700;">' +
+    '<td>Totale</td>' +
+    fmtCell(totDonnaP, totDonnaPz) +
+    fmtCell(totUomoP, totUomoPz) +
+    fmtCell(totUniP, totUniPz) +
+    '<td class="num" style="font-variant-numeric:tabular-nums; background:var(--gray-200);"><span style="color:var(--gray-500);">' + totRowP.toLocaleString('it-IT') + '</span> · <strong style="font-size:1.1rem;">' + totRowPz.toLocaleString('it-IT') + '</strong></td>' +
+  '</tr>';
+  
+  const tableHtml = '<div style="background:var(--white); border:1px solid var(--gray-200); border-radius:12px; padding:14px 18px; margin-bottom:16px;">' +
+    '<div style="font-size:0.82rem; color:var(--gray-700); margin-bottom:10px;">' + subtitle + '</div>' +
+    '<table class="breakdown-table" style="width:100%;">' +
+      '<thead><tr>' +
+        '<th style="width:120px;">Categoria</th>' +
+        '<th class="num">Donna <span style="font-weight:400; font-size:0.72rem; color:var(--gray-500);">prod · pezzi</span></th>' +
+        '<th class="num">Uomo <span style="font-weight:400; font-size:0.72rem; color:var(--gray-500);">prod · pezzi</span></th>' +
+        '<th class="num">Unisex <span style="font-weight:400; font-size:0.72rem; color:var(--gray-500);">prod · pezzi</span></th>' +
+        '<th class="num" style="background:var(--gray-100);">Totale <span style="font-weight:400; font-size:0.72rem; color:var(--gray-500);">prod · pezzi</span></th>' +
+      '</tr></thead>' +
+      '<tbody>' + rows + '</tbody>' +
+    '</table>' +
+  '</div>';
+  
+  // Non classificati
+  let orfaniHtml = '';
+  const nc = d.non_classificati;
+  if (nc && nc.prodotti > 0) {
+    const orfaniTop = (nc.product_types_orfani || []).slice(0, 10).map(o => 
+      '<div style="padding:4px 0; font-size:0.82rem;"><strong>' + o.product_type + '</strong> · ' + o.count + ' prodotti</div>'
+    ).join('');
+    const sampleHtml = (nc.sample_orfani || []).slice(0, 5).map(s => 
+      '<div style="padding:4px 0; font-size:0.78rem; color:var(--gray-700); border-bottom:1px dotted var(--gray-200);"><strong>' + s.title + '</strong><br><span style="color:var(--gray-500);">product_type: "' + (s.product_type || '(vuoto)') + '" · stock: ' + s.stock + '</span></div>'
+    ).join('');
+    orfaniHtml = '<div style="background:#FFF4D6; border-left:4px solid #E8C77A; border-radius:8px; padding:14px 18px; margin-bottom:16px;">' +
+      '<div style="font-weight:700; color:#8B6914; margin-bottom:8px; font-size:0.92rem;">⚠️ ' + nc.prodotti + ' prodotti non classificati (' + nc.pezzi.toLocaleString('it-IT') + ' pezzi)</div>' +
+      '<div style="font-size:0.8rem; color:#6B4E0E; margin-bottom:10px;">Product types orfani più frequenti — dimmeli nella chat per aggiungerli alla classificazione:</div>' +
+      '<div style="margin-bottom:10px;">' + orfaniTop + '</div>' +
+      '<details style="margin-top:6px;"><summary style="cursor:pointer; font-size:0.78rem; color:#6B4E0E; font-weight:600;">📋 Esempi di prodotti orfani</summary><div style="margin-top:8px;">' + sampleHtml + '</div></details>' +
+    '</div>';
+  }
+  
+  cont.innerHTML = cacheHtml + orfaniHtml + tableHtml;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadMarketplaces();
   const today = new Date(); const monthAgo = new Date(); monthAgo.setMonth(monthAgo.getMonth() - 1);
@@ -2036,6 +2170,7 @@ document.addEventListener('DOMContentLoaded', () => {
     showTab(btn.dataset.tab);
     if (btn.dataset.tab === 'duo') { checkKvStatus(); if (duoProducts.length === 0) loadDuoProducts(); }
     if (btn.dataset.tab === 'forecast') { if (!forecastData) loadForecast(); }
+    if (btn.dataset.tab === 'inventory') { if (!inventoryData) loadInventory(false); }
   }));
   document.querySelectorAll('[data-analytics-periods] .period-btn').forEach(btn => btn.addEventListener('click', () => setPeriod(btn.dataset.period, btn)));
   document.querySelectorAll('[data-bs-periods] .period-btn').forEach(btn => btn.addEventListener('click', () => loadBestSellers(btn.dataset.period, btn)));
@@ -2050,6 +2185,30 @@ document.addEventListener('DOMContentLoaded', () => {
   const fcRefresh = document.getElementById('forecast-refresh');
   if (fcRefresh) fcRefresh.addEventListener('click', () => {
     if (confirm('Ricalcolare tutte le previsioni? Richiede 10-30 secondi.')) loadForecast(true);
+  });
+  
+  // Inventory listeners
+  const invBtn = document.getElementById('inventory-reload');
+  if (invBtn) invBtn.addEventListener('click', () => loadInventory(false));
+  const invRefresh = document.getElementById('inventory-refresh');
+  if (invRefresh) invRefresh.addEventListener('click', () => {
+    if (confirm('Scaricare di nuovo tutto il catalogo da Shopify? Richiede 20-60 secondi.')) loadInventory(true);
+  });
+  document.querySelectorAll('.inv-filter').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.inv-filter').forEach(b => {
+        b.classList.remove('active');
+        b.style.background = 'transparent';
+        b.style.color = 'var(--gray-700)';
+        b.style.fontWeight = '400';
+      });
+      btn.classList.add('active');
+      btn.style.background = 'var(--white)';
+      btn.style.color = 'var(--black)';
+      btn.style.fontWeight = '600';
+      inventoryFilter = btn.dataset.filter;
+      if (inventoryData) renderInventory();
+    });
   });
   document.getElementById('duo-csv-file').addEventListener('change', e => { if (e.target.files[0]) handleCsvImport(e.target.files[0]); });
   document.getElementById('duo-search').addEventListener('input', filterDuoProducts);
@@ -2217,7 +2376,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.8.3', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['Cache KV 24h (forecast + discovery)', 'Previsioni Incassi (scadenziari MP)', 'Balardi wallet prepagato', 'Gestione resi/refund (full + partial)', 'Magic link auth (Resend)', 'Winkelstraat detection', 'Conversione valuta automatica', 'KV storage costi', 'Simulatore DUO', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Fuso Roma reale', 'Poizon + Secret Sales'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/login', '/logout', '/api', '/api/request-magic-link', '/api/verify-magic-link', '/api/logout', '/api/auth-status', '/api/analytics', '/api/bestsellers', '/api/forecast', '/api/balardi-ricarica', '/api/balardi-ricarica-delete', '/api/inventory-discovery', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-winkelstraat', '/api/debug-costs', '/api/debug-single-cost'] });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.9', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['Snapshot Inventario (cat × gender, filtro DUO)', 'Cache KV 24h (forecast + discovery + inventory)', 'Previsioni Incassi (scadenziari MP)', 'Balardi wallet prepagato', 'Gestione resi/refund (full + partial)', 'Magic link auth (Resend)', 'Winkelstraat detection', 'Conversione valuta automatica', 'KV storage costi', 'Simulatore DUO', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Fuso Roma reale', 'Poizon + Secret Sales'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/login', '/logout', '/api', '/api/request-magic-link', '/api/verify-magic-link', '/api/logout', '/api/auth-status', '/api/analytics', '/api/bestsellers', '/api/forecast', '/api/balardi-ricarica', '/api/balardi-ricarica-delete', '/api/inventory', '/api/inventory-discovery', '/api/inventory-discovery-reset', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-winkelstraat', '/api/debug-costs', '/api/debug-single-cost'] });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -3087,6 +3246,218 @@ export default async function handler(req, res) {
         await kvDel('inventory_discovery_cache_v1');
         return res.json({ success: true, message: 'Cache resettata. Prossima chiamata farà fetch fresco.' });
       } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
+    }
+
+    // ============ INVENTORY SNAPSHOT ============
+    // Snapshot categorizzato (bag/shoes/accessori/clothing × donna/uomo/unisex)
+    // Usa la stessa cache discovery (raw products già scaricati)
+    if (req.method === 'GET' && path === '/api/inventory') {
+      try {
+        const forceRefresh = query.get('refresh') === '1';
+        const cacheKey = 'inventory_discovery_cache_v1';
+        let discoveryData = null;
+        
+        // Prova a prendere dalla cache discovery (che contiene già i products raw)
+        if (!forceRefresh && KV_ENABLED) {
+          try {
+            const cached = await kvGet(cacheKey);
+            if (cached) {
+              discoveryData = JSON.parse(cached);
+            }
+          } catch (e) { /* ignore */ }
+        }
+        
+        // Se niente cache, chiama lo stesso endpoint discovery per popolarla
+        // (ma noi abbiamo bisogno di più dati: product_type + tags + stock per ogni prodotto, non solo aggregati)
+        // Scarichiamo da zero con gli stessi parametri
+        if (!discoveryData || !discoveryData._raw_products) {
+          // Full fetch: scarica tutti i prodotti
+          const token = await getShopifyAccessToken();
+          const allProducts = [];
+          let nextPageInfo = null;
+          let pagesDone = 0;
+          const MAX_PAGES = 60;
+          
+          while (pagesDone < MAX_PAGES) {
+            let url;
+            if (nextPageInfo) {
+              url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?limit=250&page_info=${encodeURIComponent(nextPageInfo)}`;
+            } else {
+              url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?status=active&limit=250&fields=id,title,handle,product_type,vendor,tags,status,variants`;
+            }
+            const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' } });
+            if (!r.ok) { const t = await r.text(); return res.status(500).json({ success: false, error: `Shopify ${r.status}: ${t.substring(0, 300)}` }); }
+            const data = await r.json();
+            const batch = data.products || [];
+            allProducts.push(...batch);
+            pagesDone++;
+            const linkHeader = r.headers.get('link') || r.headers.get('Link') || '';
+            const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+            if (nextMatch && batch.length === 250) {
+              const piMatch = nextMatch[1].match(/page_info=([^&>]+)/);
+              if (piMatch) nextPageInfo = decodeURIComponent(piMatch[1]);
+              else break;
+            } else break;
+          }
+          
+          discoveryData = { _raw_products: allProducts, pagine_scaricate: pagesDone, generated_at: Date.now() };
+          if (KV_ENABLED) {
+            try {
+              // Salva cache per riuso (24h). Salviamo i raw products per il categorizer
+              const cacheable = { ...discoveryData, cached_at: new Date().toISOString() };
+              await kvSetEx(cacheKey, 86400, JSON.stringify(cacheable));
+            } catch (e) { /* ignore */ }
+          }
+        }
+        
+        const products = discoveryData._raw_products || [];
+        
+        // ============ CATEGORIZER ============
+        // Parole chiave per categoria (priorità: più specifica vince)
+        // Match case-insensitive su: product_type, tags, title
+        const CATEGORIE = {
+          bag: { 
+            label: 'Bag',
+            keywords: ['bag', 'handbag', 'shoulder', 'crossbody', 'tote', 'clutch', 'pochette', 'borsa', 'borse', 'zaino', 'backpack', 'sacca', 'shopper', 'hobo', 'bauletto', 'marsupio', 'belt bag']
+          },
+          shoes: {
+            label: 'Shoes',
+            keywords: ['shoe', 'shoes', 'sneaker', 'sneakers', 'boot', 'boots', 'stivale', 'stivali', 'decolleté', 'décolleté', 'sandalo', 'sandali', 'sandal', 'mocassino', 'loafer', 'heel', 'heels', 'tacco', 'ballerina', 'flat', 'scarpa', 'scarpe', 'espadrilla', 'stringata', 'ankle boot', 'slipper']
+          },
+          accessori: {
+            label: 'Accessori',
+            keywords: ['accessor', 'cintura', 'cinture', 'belt', 'portafoglio', 'portafogli', 'wallet', 'cappello', 'hat', 'cap', 'occhiali', 'sunglasses', 'eyewear', 'bijoux', 'jewel', 'gioiello', 'collana', 'necklace', 'bracciale', 'bracelet', 'anello', 'ring', 'orecchino', 'earring', 'sciarpa', 'scarf', 'foulard', 'guanti', 'gloves', 'cravatta', 'tie', 'papillon', 'card holder', 'porta carte', 'key', 'chiave']
+          },
+          clothing: {
+            label: 'Clothing',
+            keywords: ['jacket', 'giacca', 'coat', 'cappotto', 'parka', 'piumino', 'blazer', 'giubbotto', 'bomber', 'shirt', 'camicia', 't-shirt', 'tshirt', 'polo', 'maglia', 'sweater', 'felpa', 'hoodie', 'sweatshirt', 'maglione', 'cardigan', 'pant', 'pants', 'pantalone', 'pantaloni', 'jeans', 'leggings', 'shorts', 'bermuda', 'skirt', 'gonna', 'dress', 'abito', 'vestito', 'top', 'tank', 'body', 'bodysuit', 'tuta', 'jumpsuit', 'blouse', 'camicetta', 'knit', 'intimo', 'underwear', 'costume', 'swimsuit', 'bikini', 'trench', 'gilet', 'vest', 'pigiama', 'pajama']
+          }
+        };
+        
+        // Keyword gender
+        const KW_WOMAN = ['woman', 'women', 'ladies', 'donna', 'donne', 'female', 'femme', 'mujer', 'w-', ' w ', 'femminile'];
+        const KW_MAN = ['man', 'men', 'uomo', 'uomini', 'male', 'homme', 'hombre', 'm-', ' m ', 'maschile'];
+        const KW_UNISEX = ['unisex', 'bambino', 'bambini', 'kid', 'kids', 'child', 'children', 'junior', 'baby'];
+        
+        function detectCategoria(searchText) {
+          const t = ' ' + searchText.toLowerCase() + ' ';
+          // Check più specifico per primo
+          for (const [key, cfg] of Object.entries(CATEGORIE)) {
+            for (const kw of cfg.keywords) {
+              // Match con word boundary
+              if (t.includes(' ' + kw.toLowerCase() + ' ') || t.includes(' ' + kw.toLowerCase()) || t.includes(kw.toLowerCase() + ' ')) {
+                return key;
+              }
+            }
+          }
+          return null;
+        }
+        
+        function detectGender(searchText) {
+          const t = ' ' + searchText.toLowerCase() + ' ';
+          // Unisex/kids ha precedenza
+          for (const kw of KW_UNISEX) if (t.includes(kw)) return 'unisex';
+          // Check woman e man
+          const isW = KW_WOMAN.some(kw => t.includes(kw));
+          const isM = KW_MAN.some(kw => t.includes(kw));
+          if (isW && !isM) return 'donna';
+          if (isM && !isW) return 'uomo';
+          if (isW && isM) return 'unisex'; // ambiguo
+          return null;
+        }
+        
+        function isDuoProduct(product) {
+          // DUO: se lo SKU della prima variante matcha il pattern isDuoSku
+          const firstVariantSku = (product.variants && product.variants[0]) ? product.variants[0].sku : null;
+          if (firstVariantSku && isDuoSku(firstVariantSku)) return true;
+          // Oppure se ha un tag DUO esplicito
+          const tags = (product.tags || '').toLowerCase();
+          if (tags.includes('tlx_product:duo') || tags.includes('duo')) return true;
+          return false;
+        }
+        
+        // ============ CLASSIFICAZIONE ============
+        const snapshot = {
+          tutto: { bag: {}, shoes: {}, accessori: {}, clothing: {} },
+          own:   { bag: {}, shoes: {}, accessori: {}, clothing: {} },
+          duo:   { bag: {}, shoes: {}, accessori: {}, clothing: {} }
+        };
+        
+        // Inizializza struttura
+        for (const group of ['tutto', 'own', 'duo']) {
+          for (const cat of ['bag', 'shoes', 'accessori', 'clothing']) {
+            snapshot[group][cat] = {
+              donna: { prodotti: 0, pezzi: 0 },
+              uomo: { prodotti: 0, pezzi: 0 },
+              unisex: { prodotti: 0, pezzi: 0 }
+            };
+          }
+        }
+        
+        const nonClassificati = { prodotti: 0, pezzi: 0, product_types_orfani: {}, sample_orfani: [] };
+        let totPezzi = 0, totProdotti = 0, totDuoProdotti = 0, totDuoPezzi = 0;
+        
+        products.forEach(p => {
+          if (p.status !== 'active') return;
+          
+          const qty = (p.variants || []).reduce((s, v) => s + Math.max(0, parseInt(v.inventory_quantity) || 0), 0);
+          if (qty <= 0) return; // Esclude qty = 0 (come da requisito utente)
+          
+          totProdotti++;
+          totPezzi += qty;
+          
+          const isDuo = isDuoProduct(p);
+          if (isDuo) { totDuoProdotti++; totDuoPezzi += qty; }
+          
+          // Cerca categoria e gender in product_type + tags + title
+          const searchText = [p.product_type || '', p.tags || '', p.title || ''].join(' ');
+          const cat = detectCategoria(searchText);
+          const gender = detectGender(searchText) || 'unisex'; // fallback unisex
+          
+          if (!cat) {
+            nonClassificati.prodotti++;
+            nonClassificati.pezzi += qty;
+            const pt = (p.product_type || '(vuoto)').trim();
+            nonClassificati.product_types_orfani[pt] = (nonClassificati.product_types_orfani[pt] || 0) + 1;
+            if (nonClassificati.sample_orfani.length < 10) {
+              nonClassificati.sample_orfani.push({ id: p.id, title: p.title, product_type: p.product_type, tags: p.tags, stock: qty });
+            }
+            return;
+          }
+          
+          // Aggrega in tutto/own/duo
+          snapshot.tutto[cat][gender].prodotti++;
+          snapshot.tutto[cat][gender].pezzi += qty;
+          
+          if (isDuo) {
+            snapshot.duo[cat][gender].prodotti++;
+            snapshot.duo[cat][gender].pezzi += qty;
+          } else {
+            snapshot.own[cat][gender].prodotti++;
+            snapshot.own[cat][gender].pezzi += qty;
+          }
+        });
+        
+        // Converti sample orfani in array ordinato
+        nonClassificati.product_types_orfani = Object.entries(nonClassificati.product_types_orfani)
+          .sort((a, b) => b[1] - a[1])
+          .map(([pt, count]) => ({ product_type: pt, count }));
+        
+        return res.json({
+          success: true,
+          generated_at: new Date().toISOString(),
+          dalla_cache_discovery: !forceRefresh && discoveryData && discoveryData.cached_at ? true : false,
+          cached_at: discoveryData?.cached_at || null,
+          totale_prodotti_attivi_con_stock: totProdotti,
+          totale_pezzi: totPezzi,
+          duo_prodotti: totDuoProdotti,
+          duo_pezzi: totDuoPezzi,
+          own_prodotti: totProdotti - totDuoProdotti,
+          own_pezzi: totPezzi - totDuoPezzi,
+          snapshot,
+          non_classificati: nonClassificati
+        });
+      } catch (e) { return res.status(500).json({ success: false, error: e.message, stack: e.stack }); }
     }
 
     if (req.method === 'GET' && path === '/api/debug-winkelstraat') {
