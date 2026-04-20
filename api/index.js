@@ -1,4 +1,4 @@
-// ERP Marginalità v4.0 - Fix fuso orario Roma reale, Secret Sales, Poizon
+// ERP Marginalità v4.1 - Fix lettura cost_per_item (endpoint corretto)
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'autore-luxit.myshopify.com';
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
@@ -165,22 +165,58 @@ async function processOrders(ordini) {
 }
 
 // ============ COSTO REALE ============
-async function fetchVariantCosts(variantIds) {
+// FIX v4.1: L'endpoint /variants.json?ids= di fatto non funziona. Usiamo
+// /variants/{id}.json uno per uno (con concorrenza limitata), poi 
+// /inventory_items.json?ids= in batch (che invece funziona bene).
+async function fetchVariantCosts(variantIds, orderProductIds = []) {
   if (variantIds.length === 0) return {};
   const token = await getShopifyAccessToken();
-  const uniqueIds = [...new Set(variantIds.filter(Boolean))];
+  const uniqueVariantIds = [...new Set(variantIds.filter(Boolean))];
   const variantToInventoryItem = {};
-  const variantChunks = [];
-  for (let i = 0; i < uniqueIds.length; i += 100) variantChunks.push(uniqueIds.slice(i, i + 100));
-  for (const chunk of variantChunks) {
-    try {
-      const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/variants.json?ids=${chunk.join(',')}&fields=id,inventory_item_id`;
-      const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
-      if (!response.ok) continue;
-      const data = await response.json();
-      (data.variants || []).forEach(v => { variantToInventoryItem[v.id] = v.inventory_item_id; });
-    } catch (e) {}
+  
+  // STRATEGIA A: usa /products.json?ids= per ottenere TUTTE le varianti in batch.
+  // Questo endpoint invece funziona bene con ids multipli.
+  const uniqueProductIds = [...new Set(orderProductIds.filter(Boolean))];
+  if (uniqueProductIds.length > 0) {
+    const productChunks = [];
+    for (let i = 0; i < uniqueProductIds.length; i += 100) productChunks.push(uniqueProductIds.slice(i, i + 100));
+    for (const chunk of productChunks) {
+      try {
+        const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?ids=${chunk.join(',')}&fields=id,variants`;
+        const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
+        if (!response.ok) continue;
+        const data = await response.json();
+        (data.products || []).forEach(p => {
+          (p.variants || []).forEach(v => {
+            if (v.id && v.inventory_item_id) variantToInventoryItem[v.id] = v.inventory_item_id;
+          });
+        });
+      } catch (e) {}
+    }
   }
+  
+  // STRATEGIA B (fallback): per ogni variant_id non ancora mappato, chiama singolarmente
+  // /variants/{id}.json — con concorrenza limitata per evitare rate limit
+  const missingVariants = uniqueVariantIds.filter(id => !(id in variantToInventoryItem));
+  if (missingVariants.length > 0) {
+    const concurrency = 5;
+    for (let i = 0; i < missingVariants.length; i += concurrency) {
+      const batch = missingVariants.slice(i, i + concurrency);
+      await Promise.all(batch.map(async (vid) => {
+        try {
+          const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/variants/${vid}.json?fields=id,inventory_item_id`;
+          const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
+          if (!response.ok) return;
+          const data = await response.json();
+          if (data.variant && data.variant.inventory_item_id) {
+            variantToInventoryItem[vid] = data.variant.inventory_item_id;
+          }
+        } catch (e) {}
+      }));
+    }
+  }
+  
+  // STEP 2: fetch inventory_items in batch (questo endpoint FUNZIONA con ids multipli)
   const inventoryIds = [...new Set(Object.values(variantToInventoryItem).filter(Boolean))];
   const inventoryToCost = {};
   const invChunks = [];
@@ -197,6 +233,8 @@ async function fetchVariantCosts(variantIds) {
       });
     } catch (e) {}
   }
+  
+  // Map variant_id → cost
   const variantToCost = {};
   Object.entries(variantToInventoryItem).forEach(([variantId, invId]) => {
     variantToCost[variantId] = invId && inventoryToCost[invId] !== undefined ? inventoryToCost[invId] : null;
@@ -554,7 +592,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v4.0</p>
+        <p>Business Intelligence Dashboard · v4.1</p>
       </div>
     </div>
     <div class="header-right">
@@ -873,7 +911,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v4.0', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), funzionalita: ['Fuso Roma reale', 'Costo REALE da Shopify', 'Poizon + Secret Sales riconosciuti', 'Breakdown MP', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-costs'] });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v4.1', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), funzionalita: ['Fix cost_per_item', 'Fuso Roma reale', 'Costo REALE da Shopify', 'Poizon + Secret Sales riconosciuti', 'Breakdown MP', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-costs'] });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -883,8 +921,12 @@ export default async function handler(req, res) {
         let ordini = await getShopifyOrders(periodo, from, to);
         ordini = await processOrders(ordini);
         const variantIds = new Set();
-        ordini.forEach(o => (o.line_items || []).forEach(item => { if (item.variant_id) variantIds.add(item.variant_id); }));
-        const variantCosts = await fetchVariantCosts([...variantIds]);
+        const productIds = new Set();
+        ordini.forEach(o => (o.line_items || []).forEach(item => { 
+          if (item.variant_id) variantIds.add(item.variant_id);
+          if (item.product_id) productIds.add(item.product_id);
+        }));
+        const variantCosts = await fetchVariantCosts([...variantIds], [...productIds]);
         let lordo_iva_inclusa = 0, iva_totale = 0, costi_totali = 0, margine_netto = 0;
         const breakdown_marketplace = {};
         const ordini_con_errori = [];
@@ -927,8 +969,12 @@ export default async function handler(req, res) {
         let ordini = await getShopifyOrders(periodo, from, to);
         ordini = await processOrders(ordini);
         const variantIds = new Set();
-        ordini.forEach(o => (o.line_items || []).forEach(item => { if (item.variant_id) variantIds.add(item.variant_id); }));
-        const variantCosts = await fetchVariantCosts([...variantIds]);
+        const productIds = new Set();
+        ordini.forEach(o => (o.line_items || []).forEach(item => { 
+          if (item.variant_id) variantIds.add(item.variant_id);
+          if (item.product_id) productIds.add(item.product_id);
+        }));
+        const variantCosts = await fetchVariantCosts([...variantIds], [...productIds]);
         let prodotti = calcolaBestSellers(ordini, 20, variantCosts);
         prodotti = await arricchisciConImmagini(prodotti);
         return res.json({ success: true, periodo: from && to ? `${from} → ${to}` : periodo, totale_prodotti_unici: prodotti.length, prodotti });
@@ -941,8 +987,12 @@ export default async function handler(req, res) {
         const ordini = await getShopifyOrders(periodo);
         const processati = await processOrders(ordini);
         const variantIds = new Set();
-        processati.forEach(o => (o.line_items || []).forEach(item => { if (item.variant_id) variantIds.add(item.variant_id); }));
-        const variantCosts = await fetchVariantCosts([...variantIds]);
+        const productIds = new Set();
+        processati.forEach(o => (o.line_items || []).forEach(item => { 
+          if (item.variant_id) variantIds.add(item.variant_id);
+          if (item.product_id) productIds.add(item.product_id);
+        }));
+        const variantCosts = await fetchVariantCosts([...variantIds], [...productIds]);
         const debug = processati.map(o => {
           const { costo, errori } = calcolaCostoOrdine(o, variantCosts);
           return {
@@ -981,59 +1031,7 @@ export default async function handler(req, res) {
         return res.json({ success: true, periodo, totale_ordini_jammy_dude: jdOrders.length, ordini_inclusi_dopo_filtro: inclusi, ordini_esclusi_dopo_filtro: breakdown.length - inclusi, dettaglio_ordini: breakdown });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
-// DIAGNOSTIC ENDPOINT: traccia cosa risponde Shopify per un singolo variant
-    if (req.method === 'GET' && path === '/api/debug-single-cost') {
-      try {
-        const variantId = query.get('variant_id') || '47254190325972';
-        const token = await getShopifyAccessToken();
-        
-        // STEP 1: fetch variant
-        const v1url = `https://${SHOPIFY_STORE}/admin/api/2024-01/variants/${variantId}.json`;
-        const v1res = await fetch(v1url, { headers: { 'X-Shopify-Access-Token': token } });
-        const v1status = v1res.status;
-        const v1body = await v1res.text();
-        
-        let inventoryItemId = null;
-        let v1parsed = null;
-        try { 
-          v1parsed = JSON.parse(v1body);
-          inventoryItemId = v1parsed?.variant?.inventory_item_id;
-        } catch(e) {}
-        
-        // STEP 2: fetch inventory_item singolo
-        let step2 = null;
-        if (inventoryItemId) {
-          const i1url = `https://${SHOPIFY_STORE}/admin/api/2024-01/inventory_items/${inventoryItemId}.json`;
-          const i1res = await fetch(i1url, { headers: { 'X-Shopify-Access-Token': token } });
-          const i1body = await i1res.text();
-          let i1parsed = null;
-          try { i1parsed = JSON.parse(i1body); } catch(e) {}
-          step2 = { url: i1url, status: i1res.status, response: i1parsed || i1body.substring(0, 500) };
-        }
-        
-        // STEP 3: fetch inventory_items con ids= (come fa il codice attuale)
-        let step3 = null;
-        if (inventoryItemId) {
-          const i2url = `https://${SHOPIFY_STORE}/admin/api/2024-01/inventory_items.json?ids=${inventoryItemId}`;
-          const i2res = await fetch(i2url, { headers: { 'X-Shopify-Access-Token': token } });
-          const i2body = await i2res.text();
-          let i2parsed = null;
-          try { i2parsed = JSON.parse(i2body); } catch(e) {}
-          step3 = { url: i2url, status: i2res.status, response: i2parsed || i2body.substring(0, 500) };
-        }
-        
-        return res.json({
-          success: true,
-          variant_id_testato: variantId,
-          step1_variant: { url: v1url, status: v1status, response: v1parsed || v1body.substring(0, 500) },
-          inventory_item_id_estratto: inventoryItemId,
-          step2_inventory_item_singolo: step2,
-          step3_inventory_items_con_ids: step3
-        });
-      } catch (error) {
-        return res.status(500).json({ success: false, error: error.message, stack: error.stack });
-      }
-    }
+
     if (req.method === 'GET' && path === '/api/test-shopify') {
       try {
         const token = await getShopifyAccessToken();
