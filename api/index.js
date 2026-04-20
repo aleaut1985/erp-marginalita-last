@@ -1,12 +1,39 @@
-// ERP Marginalità v5.0 - DB persistente costi + Simulatore DUO
+// ERP Marginalità v5.1 - DB persistente costi + Simulatore DUO (multi-format KV)
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'autore-luxit.myshopify.com';
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
 const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || '';
 
-// Vercel KV / Upstash Redis - supporta entrambi i nomi di env vars
-const KV_REST_API_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || '';
-const KV_REST_API_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || '';
+// ============ KV ENV DETECTION ============
+// Vercel può creare env vars con nomi diversi a seconda della versione integrazione:
+// - KV_REST_API_URL + KV_REST_API_TOKEN (vecchio Vercel KV)
+// - UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN (Upstash diretto)
+// - KV_REDIS_URL (nuovo Upstash marketplace — formato rediss://default:TOKEN@HOST:PORT)
+// Questo codice prova tutti e 3 i formati automaticamente.
+function detectKvCredentials() {
+  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+    return { url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN, source: 'kv_rest' };
+  }
+  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+    return { url: process.env.UPSTASH_REDIS_REST_URL, token: process.env.UPSTASH_REDIS_REST_TOKEN, source: 'upstash_rest' };
+  }
+  const redisUrl = process.env.KV_REDIS_URL || process.env.REDIS_URL;
+  if (redisUrl) {
+    try {
+      const u = new URL(redisUrl);
+      const token = u.password || u.username;
+      const host = u.hostname;
+      if (host && token) {
+        return { url: `https://${host}`, token, source: 'parsed_from_redis_url' };
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+const KV_CREDENTIALS = detectKvCredentials();
+const KV_REST_API_URL = KV_CREDENTIALS ? KV_CREDENTIALS.url : '';
+const KV_REST_API_TOKEN = KV_CREDENTIALS ? KV_CREDENTIALS.token : '';
+const KV_SOURCE = KV_CREDENTIALS ? KV_CREDENTIALS.source : null;
 const KV_ENABLED = !!(KV_REST_API_URL && KV_REST_API_TOKEN);
 
 const SHOPIFY_FEE_PERCENT = 0.0015;
@@ -793,7 +820,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.0</p>
+        <p>Business Intelligence Dashboard · v5.1</p>
       </div>
     </div>
     <div class="header-right">
@@ -1351,7 +1378,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.0', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), kv_enabled: KV_ENABLED, funzionalita: ['KV storage costi persistenti', 'Simulatore DUO con CSV import', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Products/{id}.json strategy', 'Fuso Roma reale', 'Poizon + Secret Sales', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-costs', '/api/debug-single-cost'] });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.1', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, funzionalita: ['KV multi-format detection', 'KV storage costi persistenti', 'Simulatore DUO con CSV import', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Products/{id}.json strategy', 'Fuso Roma reale', 'Poizon + Secret Sales', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-costs', '/api/debug-single-cost'] });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -1662,14 +1689,37 @@ export default async function handler(req, res) {
 
     // Health check KV
     if (req.method === 'GET' && path === '/api/kv-status') {
-      if (!KV_ENABLED) return res.json({ kv_enabled: false, message: 'KV non configurato. Vai su Vercel → Storage → Create KV Database.' });
+      const envVarsDetected = {
+        KV_REST_API_URL: !!process.env.KV_REST_API_URL,
+        KV_REST_API_TOKEN: !!process.env.KV_REST_API_TOKEN,
+        UPSTASH_REDIS_REST_URL: !!process.env.UPSTASH_REDIS_REST_URL,
+        UPSTASH_REDIS_REST_TOKEN: !!process.env.UPSTASH_REDIS_REST_TOKEN,
+        KV_REDIS_URL: !!process.env.KV_REDIS_URL,
+        REDIS_URL: !!process.env.REDIS_URL
+      };
+      if (!KV_ENABLED) {
+        return res.json({
+          kv_enabled: false,
+          kv_source: null,
+          env_vars_detected: envVarsDetected,
+          message: 'Nessuna credenziale KV trovata. Verifica che Vercel abbia creato le env vars.'
+        });
+      }
       try {
         const testKey = '__kv_test__';
         const testVal = String(Date.now());
-        await kvSet(testKey, testVal);
+        const writeOk = await kvSet(testKey, testVal);
         const read = await kvGet(testKey);
-        return res.json({ kv_enabled: true, write_ok: true, read_ok: read === testVal, read_value: read });
-      } catch (error) { return res.json({ kv_enabled: true, error: error.message }); }
+        return res.json({
+          kv_enabled: true,
+          kv_source: KV_SOURCE,
+          kv_url_host: KV_REST_API_URL.replace(/^https?:\/\//, '').split('/')[0],
+          env_vars_detected: envVarsDetected,
+          write_ok: !!writeOk,
+          read_ok: read === testVal,
+          read_value: read
+        });
+      } catch (error) { return res.json({ kv_enabled: true, kv_source: KV_SOURCE, error: error.message }); }
     }
 
     if (req.method === 'GET' && path === '/api/debug-single-cost') {
