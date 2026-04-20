@@ -1,4 +1,4 @@
-// ERP Marginalità v5.9 - Snapshot Inventario (categorie × gender, filtro DUO)
+// ERP Marginalità v5.9.2 - DUO senza foto + cost Shopify batch + on-demand
 
 import * as crypto from 'node:crypto';
 
@@ -1241,7 +1241,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.9</p>
+        <p>Business Intelligence Dashboard · v5.9.2</p>
       </div>
     </div>
     <div class="header-right">
@@ -1730,37 +1730,45 @@ function renderDuoProducts(products) {
   if (!products || products.length === 0) { cont.innerHTML = '<div class="bs-empty">Nessun prodotto DUO trovato (SKU che inizia con "DUO-").</div>'; return; }
   const mpOptions = Object.entries(MARKETPLACES).map(([k, v]) => '<option value="' + k + '">' + v.nome + '</option>').join('');
   cont.innerHTML = '<div class="duo-grid">' + products.map(p => {
-    const imgHtml = p.image ? '<img src="' + p.image + '" alt="" loading="lazy">' : '<div class="bs-image-placeholder">◇</div>';
+    // Placeholder compatto con iniziale + sfondo colorato (no immagini)
+    const initial = (p.title || 'D').charAt(0).toUpperCase();
+    const hue = ((p.variant_id || 0) % 360);
     const costoSaved = p.costo_fornitore !== null && p.costo_fornitore !== undefined ? p.costo_fornitore : '';
+    const costBadge = p.costo_fornitore !== null 
+      ? '<span style="display:inline-block; background:#E6F4EE; color:var(--green-dark); padding:1px 6px; border-radius:8px; font-size:0.65rem; font-weight:700; margin-left:4px;">Cost Shopify</span>'
+      : '<span style="display:inline-block; background:#FCEEEE; color:var(--red); padding:1px 6px; border-radius:8px; font-size:0.65rem; font-weight:700; margin-left:4px;">Cost mancante</span>';
     return '<div class="duo-card" data-vid="' + p.variant_id + '">' +
-      '<div class="duo-img">' + imgHtml + '</div>' +
-      '<div class="duo-body">' +
-        '<div class="duo-title">' + p.title + '</div>' +
-        '<div class="duo-meta">SKU: ' + p.sku + ' · Stock: ' + p.inventory_quantity + '</div>' +
-        '<div class="duo-listino">Listino Shopify: <strong>€' + p.prezzo_listino.toFixed(2) + '</strong>' + (p.compare_at_price > 0 ? ' <span style="text-decoration:line-through; color:var(--gray-500); margin-left:6px;">€' + p.compare_at_price.toFixed(2) + '</span>' : '') + '</div>' +
-        '<div class="duo-input-row"><label>Costo fornitore €</label><input type="number" class="duo-cost" value="' + costoSaved + '" step="0.01" min="0" data-vid="' + p.variant_id + '"></div>' +
+      '<div class="duo-body" style="padding:14px;">' +
+        '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">' +
+          '<div style="width:36px; height:36px; border-radius:8px; background:hsl(' + hue + ', 35%, 88%); color:hsl(' + hue + ', 45%, 30%); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.95rem; flex-shrink:0;">' + initial + '</div>' +
+          '<div style="flex:1; min-width:0;">' +
+            '<div class="duo-title" style="font-size:0.88rem; font-weight:600; line-height:1.3;">' + p.title + '</div>' +
+            '<div class="duo-meta" style="font-size:0.72rem; color:var(--gray-500);">SKU: ' + p.sku + ' · Stock: ' + p.inventory_quantity + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="duo-listino" style="font-size:0.82rem; margin-bottom:8px;">Listino: <strong>€' + p.prezzo_listino.toFixed(2) + '</strong>' + (p.compare_at_price > 0 ? ' <span style="text-decoration:line-through; color:var(--gray-500); margin-left:4px;">€' + p.compare_at_price.toFixed(2) + '</span>' : '') + costBadge + '</div>' +
+        '<div class="duo-input-row"><label>Costo €</label><input type="number" class="duo-cost" value="' + costoSaved + '" step="0.01" min="0" data-vid="' + p.variant_id + '"></div>' +
         '<div class="duo-input-row"><label>Marketplace</label><select class="duo-mp" data-vid="' + p.variant_id + '"><option value="">— scegli —</option>' + mpOptions + '</select></div>' +
-        '<div class="duo-input-row"><label>IVA paese %</label><select class="duo-iva" data-vid="' + p.variant_id + '"><option value="22">IT (22%)</option><option value="20">FR/UK/AT (20%)</option><option value="19">DE (19%)</option><option value="21">ES/NL/BE (21%)</option><option value="23">PL/IE/PT (23%)</option><option value="25">SE/DK (25%)</option><option value="0">Extra-UE (0%)</option></select></div>' +
+        '<div class="duo-input-row"><label>IVA %</label><select class="duo-iva" data-vid="' + p.variant_id + '"><option value="22">IT (22%)</option><option value="20">FR/UK/AT (20%)</option><option value="19">DE (19%)</option><option value="21">ES/NL/BE (21%)</option><option value="23">PL/IE/PT (23%)</option><option value="25">SE/DK (25%)</option><option value="0">Extra-UE (0%)</option></select></div>' +
         '<div class="duo-input-row"><label>Prezzo test €</label><input type="number" class="duo-prezzo-test" value="' + p.prezzo_listino.toFixed(2) + '" step="0.01" data-vid="' + p.variant_id + '"></div>' +
         '<div class="duo-result" id="duo-res-' + p.variant_id + '">—</div>' +
       '</div>' +
     '</div>';
   }).join('') + '</div>';
   
-  // Listeners
+  // Listeners: solo calcolo locale, NO salvataggio KV (semplice)
   cont.querySelectorAll('.duo-cost, .duo-mp, .duo-iva, .duo-prezzo-test').forEach(el => {
     el.addEventListener('input', e => updateDuoCard(e.target.dataset.vid));
     el.addEventListener('change', e => updateDuoCard(e.target.dataset.vid));
   });
-  // Save costo on blur (persistenza KV)
-  cont.querySelectorAll('.duo-cost').forEach(el => {
-    el.addEventListener('blur', async e => {
-      const vid = e.target.dataset.vid; const cost = parseFloat(e.target.value);
-      if (!isNaN(cost) && cost >= 0) {
-        try { await fetch('/api/duo-cost-set', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({variant_id: vid, cost}) }); } catch(_) {}
-      }
+  
+  // Auto-update tutti i prodotti con costo noto (triggera calcolo margine immediato)
+  setTimeout(() => {
+    cont.querySelectorAll('.duo-card').forEach(card => {
+      const vid = card.dataset.vid;
+      if (vid) updateDuoCard(vid);
     });
-  });
+  }, 50);
 }
 
 function updateDuoCard(vid) {
@@ -2168,7 +2176,7 @@ document.addEventListener('DOMContentLoaded', () => {
   ['date-to', 'bs-date-to'].forEach(id => { const el = document.getElementById(id); if (el) el.value = fmt(today); });
   document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => {
     showTab(btn.dataset.tab);
-    if (btn.dataset.tab === 'duo') { checkKvStatus(); if (duoProducts.length === 0) loadDuoProducts(); }
+    if (btn.dataset.tab === 'duo') { checkKvStatus(); /* on-demand: niente auto-load, clicca Ricarica */ }
     if (btn.dataset.tab === 'forecast') { if (!forecastData) loadForecast(); }
     if (btn.dataset.tab === 'inventory') { if (!inventoryData) loadInventory(false); }
   }));
@@ -2376,7 +2384,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.9', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['Snapshot Inventario (cat × gender, filtro DUO)', 'Cache KV 24h (forecast + discovery + inventory)', 'Previsioni Incassi (scadenziari MP)', 'Balardi wallet prepagato', 'Gestione resi/refund (full + partial)', 'Magic link auth (Resend)', 'Winkelstraat detection', 'Conversione valuta automatica', 'KV storage costi', 'Simulatore DUO', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Fuso Roma reale', 'Poizon + Secret Sales'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/login', '/logout', '/api', '/api/request-magic-link', '/api/verify-magic-link', '/api/logout', '/api/auth-status', '/api/analytics', '/api/bestsellers', '/api/forecast', '/api/balardi-ricarica', '/api/balardi-ricarica-delete', '/api/inventory', '/api/inventory-discovery', '/api/inventory-discovery-reset', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-winkelstraat', '/api/debug-costs', '/api/debug-single-cost'] });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.9.2', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['Simulatore DUO on-demand (no foto, cost Shopify)', 'Snapshot Inventario (cat × gender, filtro DUO, fix word-boundary)', 'Cache KV 24h (forecast + discovery + inventory)', 'Previsioni Incassi (scadenziari MP)', 'Balardi wallet prepagato', 'Gestione resi/refund', 'Winkelstraat detection', 'Conversione valuta automatica', 'Breakdown MP espandibile'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -2695,7 +2703,8 @@ export default async function handler(req, res) {
       try {
         const token = await getShopifyAccessToken();
         const products = [];
-        let url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?limit=250&status=active&fields=id,title,image,variants`;
+        // NB: aggiungiamo inventory_item_id per poter recuperare i cost in batch dopo
+        let url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?limit=250&status=active&fields=id,title,variants`;
         let pageCount = 0;
         const maxPages = 30;
         while (url && pageCount < maxPages) {
@@ -2708,8 +2717,8 @@ export default async function handler(req, res) {
                 products.push({
                   product_id: p.id,
                   variant_id: v.id,
+                  inventory_item_id: v.inventory_item_id, // serve per fetch cost batch
                   title: p.title,
-                  image: p.image?.src || null,
                   variant_title: v.title,
                   sku: v.sku,
                   prezzo_listino: parseFloat(v.price) || 0,
@@ -2725,28 +2734,53 @@ export default async function handler(req, res) {
           pageCount++;
         }
         
-        // Leggi costi salvati (se utente ha fatto import CSV o ha dati in KV)
-        const userCosts = {};
-        if (KV_ENABLED && products.length > 0) {
-          const keys = products.map(p => `duo_user_cost_${p.variant_id}`);
-          const results = await kvMGet(keys);
-          products.forEach(p => {
-            const key = `duo_user_cost_${p.variant_id}`;
-            if (results[key] !== undefined) {
-              const parsed = parseFloat(results[key]);
-              if (!isNaN(parsed)) userCosts[p.variant_id] = parsed;
-            }
-          });
+        // ============ FETCH COSTI DA SHOPIFY IN BATCH ============
+        // Shopify espone il cost via /inventory_items.json?ids=1,2,3 (max 100 per chiamata)
+        const inventoryItemIds = products.map(p => p.inventory_item_id).filter(Boolean);
+        const costsByItemId = {};
+        const BATCH_SIZE = 100;
+        for (let i = 0; i < inventoryItemIds.length; i += BATCH_SIZE) {
+          const batch = inventoryItemIds.slice(i, i + BATCH_SIZE);
+          const batchUrl = `https://${SHOPIFY_STORE}/admin/api/2024-01/inventory_items.json?ids=${batch.join(',')}&limit=${BATCH_SIZE}`;
+          try {
+            const r = await fetch(batchUrl, { headers: { 'X-Shopify-Access-Token': token } });
+            if (!r.ok) continue;
+            const data = await r.json();
+            (data.inventory_items || []).forEach(item => {
+              const c = parseFloat(item.cost);
+              if (!isNaN(c)) costsByItemId[item.id] = c;
+            });
+          } catch (e) { /* continua con batch successivo */ }
         }
         
-        // Applica costo noto e ordina: prima quelli con costo, poi senza
-        const enriched = products.map(p => ({ ...p, costo_fornitore: userCosts[p.variant_id] !== undefined ? userCosts[p.variant_id] : null }));
+        // Applica cost Shopify a ciascun prodotto (senza KV, come richiesto)
+        const enriched = products.map(p => ({
+          product_id: p.product_id,
+          variant_id: p.variant_id,
+          title: p.title,
+          variant_title: p.variant_title,
+          sku: p.sku,
+          prezzo_listino: p.prezzo_listino,
+          compare_at_price: p.compare_at_price,
+          inventory_quantity: p.inventory_quantity,
+          costo_fornitore: costsByItemId[p.inventory_item_id] !== undefined ? costsByItemId[p.inventory_item_id] : null,
+          costo_source: costsByItemId[p.inventory_item_id] !== undefined ? 'shopify' : 'missing'
+        }));
+        
+        // Ordina: prima quelli con costo, poi per titolo
         enriched.sort((a, b) => {
           if ((a.costo_fornitore !== null) !== (b.costo_fornitore !== null)) return a.costo_fornitore !== null ? -1 : 1;
           return a.title.localeCompare(b.title);
         });
         
-        return res.json({ success: true, totale: enriched.length, kv_enabled: KV_ENABLED, prodotti: enriched });
+        const withCost = enriched.filter(p => p.costo_fornitore !== null).length;
+        return res.json({
+          success: true,
+          totale: enriched.length,
+          con_costo_shopify: withCost,
+          senza_costo: enriched.length - withCost,
+          prodotti: enriched
+        });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
@@ -3334,35 +3368,40 @@ export default async function handler(req, res) {
           }
         };
         
-        // Keyword gender
-        const KW_WOMAN = ['woman', 'women', 'ladies', 'donna', 'donne', 'female', 'femme', 'mujer', 'w-', ' w ', 'femminile'];
-        const KW_MAN = ['man', 'men', 'uomo', 'uomini', 'male', 'homme', 'hombre', 'm-', ' m ', 'maschile'];
+        // Keyword gender (con regex word-boundary per evitare match errato "man" dentro "woman")
+        const KW_WOMAN = ['woman', 'women', 'ladies', 'donna', 'donne', 'female', 'femme', 'mujer', 'femminile'];
+        const KW_MAN = ['man', 'men', 'uomo', 'uomini', 'male', 'homme', 'hombre', 'maschile'];
         const KW_UNISEX = ['unisex', 'bambino', 'bambini', 'kid', 'kids', 'child', 'children', 'junior', 'baby'];
         
+        function wordMatch(text, kw) {
+          // Matcher case-insensitive con word boundary: non matcha "man" dentro "woman"
+          const re = new RegExp('(^|[^a-zàèéìòù])' + kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([^a-zàèéìòù]|$)', 'i');
+          return re.test(text);
+        }
+        
         function detectCategoria(searchText) {
-          const t = ' ' + searchText.toLowerCase() + ' ';
-          // Check più specifico per primo
+          if (!searchText) return null;
+          // Check più specifico per primo (ordine categorie è già dal più specifico)
           for (const [key, cfg] of Object.entries(CATEGORIE)) {
             for (const kw of cfg.keywords) {
-              // Match con word boundary
-              if (t.includes(' ' + kw.toLowerCase() + ' ') || t.includes(' ' + kw.toLowerCase()) || t.includes(kw.toLowerCase() + ' ')) {
-                return key;
-              }
+              if (wordMatch(searchText, kw)) return key;
             }
           }
           return null;
         }
         
         function detectGender(searchText) {
-          const t = ' ' + searchText.toLowerCase() + ' ';
-          // Unisex/kids ha precedenza
-          for (const kw of KW_UNISEX) if (t.includes(kw)) return 'unisex';
-          // Check woman e man
-          const isW = KW_WOMAN.some(kw => t.includes(kw));
-          const isM = KW_MAN.some(kw => t.includes(kw));
-          if (isW && !isM) return 'donna';
-          if (isM && !isW) return 'uomo';
-          if (isW && isM) return 'unisex'; // ambiguo
+          if (!searchText) return null;
+          // Priorità: woman PRIMA di man (altrimenti "woman bags" matcha "man")
+          // Word boundary evita match di substring
+          // 1) Woman check (con word boundary)
+          const isW = KW_WOMAN.some(kw => wordMatch(searchText, kw));
+          if (isW) return 'donna'; // se c'è woman/donna, è donna (anche se appare anche man da qualche parte)
+          // 2) Man check
+          const isM = KW_MAN.some(kw => wordMatch(searchText, kw));
+          if (isM) return 'uomo';
+          // 3) Unisex/kids check
+          for (const kw of KW_UNISEX) if (wordMatch(searchText, kw)) return 'unisex';
           return null;
         }
         
