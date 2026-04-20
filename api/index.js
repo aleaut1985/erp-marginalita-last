@@ -1,4 +1,4 @@
-// ERP Marginalità v5.1 - DB persistente costi + Simulatore DUO (multi-format KV)
+// ERP Marginalità v5.2 - Fix regex parseCSV in template literal
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'autore-luxit.myshopify.com';
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
@@ -820,7 +820,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.1</p>
+        <p>Business Intelligence Dashboard · v5.2</p>
       </div>
     </div>
     <div class="header-right">
@@ -1289,7 +1289,7 @@ async function checkKvStatus() {
 }
 
 function parseCSV(text) {
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  const lines = text.split(/\\r?\\n/).filter(l => l.trim());
   if (lines.length === 0) return { costs: {}, err: 'File vuoto' };
   const header = lines[0].split(/[,;]/).map(h => h.trim().toLowerCase().replace(/^"|"$/g, ''));
   const vidIdx = header.findIndex(h => h === 'variant_id' || h === 'variantid');
@@ -1378,7 +1378,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.1', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, funzionalita: ['KV multi-format detection', 'KV storage costi persistenti', 'Simulatore DUO con CSV import', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Products/{id}.json strategy', 'Fuso Roma reale', 'Poizon + Secret Sales', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-costs', '/api/debug-single-cost'] });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.2', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, funzionalita: ['Fix regex parseCSV', 'KV multi-format detection', 'KV storage costi persistenti', 'Simulatore DUO con CSV import', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Products/{id}.json strategy', 'Fuso Roma reale', 'Poizon + Secret Sales', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-costs', '/api/debug-single-cost'] });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
