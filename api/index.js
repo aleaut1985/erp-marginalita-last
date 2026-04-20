@@ -981,7 +981,59 @@ export default async function handler(req, res) {
         return res.json({ success: true, periodo, totale_ordini_jammy_dude: jdOrders.length, ordini_inclusi_dopo_filtro: inclusi, ordini_esclusi_dopo_filtro: breakdown.length - inclusi, dettaglio_ordini: breakdown });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
-
+// DIAGNOSTIC ENDPOINT: traccia cosa risponde Shopify per un singolo variant
+    if (req.method === 'GET' && path === '/api/debug-single-cost') {
+      try {
+        const variantId = query.get('variant_id') || '47254190325972';
+        const token = await getShopifyAccessToken();
+        
+        // STEP 1: fetch variant
+        const v1url = `https://${SHOPIFY_STORE}/admin/api/2024-01/variants/${variantId}.json`;
+        const v1res = await fetch(v1url, { headers: { 'X-Shopify-Access-Token': token } });
+        const v1status = v1res.status;
+        const v1body = await v1res.text();
+        
+        let inventoryItemId = null;
+        let v1parsed = null;
+        try { 
+          v1parsed = JSON.parse(v1body);
+          inventoryItemId = v1parsed?.variant?.inventory_item_id;
+        } catch(e) {}
+        
+        // STEP 2: fetch inventory_item singolo
+        let step2 = null;
+        if (inventoryItemId) {
+          const i1url = `https://${SHOPIFY_STORE}/admin/api/2024-01/inventory_items/${inventoryItemId}.json`;
+          const i1res = await fetch(i1url, { headers: { 'X-Shopify-Access-Token': token } });
+          const i1body = await i1res.text();
+          let i1parsed = null;
+          try { i1parsed = JSON.parse(i1body); } catch(e) {}
+          step2 = { url: i1url, status: i1res.status, response: i1parsed || i1body.substring(0, 500) };
+        }
+        
+        // STEP 3: fetch inventory_items con ids= (come fa il codice attuale)
+        let step3 = null;
+        if (inventoryItemId) {
+          const i2url = `https://${SHOPIFY_STORE}/admin/api/2024-01/inventory_items.json?ids=${inventoryItemId}`;
+          const i2res = await fetch(i2url, { headers: { 'X-Shopify-Access-Token': token } });
+          const i2body = await i2res.text();
+          let i2parsed = null;
+          try { i2parsed = JSON.parse(i2body); } catch(e) {}
+          step3 = { url: i2url, status: i2res.status, response: i2parsed || i2body.substring(0, 500) };
+        }
+        
+        return res.json({
+          success: true,
+          variant_id_testato: variantId,
+          step1_variant: { url: v1url, status: v1status, response: v1parsed || v1body.substring(0, 500) },
+          inventory_item_id_estratto: inventoryItemId,
+          step2_inventory_item_singolo: step2,
+          step3_inventory_items_con_ids: step3
+        });
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message, stack: error.stack });
+      }
+    }
     if (req.method === 'GET' && path === '/api/test-shopify') {
       try {
         const token = await getShopifyAccessToken();
