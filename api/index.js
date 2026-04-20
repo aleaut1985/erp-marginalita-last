@@ -1,4 +1,4 @@
-// ERP Marginalità v5.6.1 - Magic Link authentication via Resend (fix crypto import)
+// ERP Marginalità v5.6.2 - Fix escape apostrofi
 
 import * as crypto from 'node:crypto';
 
@@ -1681,10 +1681,10 @@ export default async function handler(req, res) {
       const err = query.get('err');
       const expired = query.get('expired');
       let msg = null, isErr = false;
-      if (sent === '1') msg = '✉️ Se l\\'email è autorizzata, riceverai il magic link a breve. Controlla la posta (anche spam).';
+      if (sent === '1') msg = "✉️ Se l'email è autorizzata, riceverai il magic link a breve. Controlla la posta (anche spam).";
       else if (err === 'invalid') { msg = 'Link non valido o già usato. Richiedine uno nuovo.'; isErr = true; }
-      else if (err === 'rate') { msg = 'Troppi tentativi. Riprova tra un\\'ora.'; isErr = true; }
-      else if (err === 'config') { msg = 'Sistema auth non configurato. Contatta l\\'amministratore.'; isErr = true; }
+      else if (err === 'rate') { msg = "Troppi tentativi. Riprova tra un'ora."; isErr = true; }
+      else if (err === 'config') { msg = "Sistema auth non configurato. Contatta l'amministratore."; isErr = true; }
       else if (expired === '1') { msg = 'Sessione scaduta, rifai login.'; isErr = true; }
       return res.status(200).send(loginHTMLPage(msg, isErr));
     }
