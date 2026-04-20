@@ -1,4 +1,4 @@
-// ERP Marginalità v5.6.2 - Fix escape apostrofi
+// ERP Marginalità v5.8 - Previsioni Incassi (scadenziari MP + wallet Balardi)
 
 import * as crypto from 'node:crypto';
 
@@ -317,6 +317,140 @@ function getOrderCurrencyInfo(ordine) {
   return { originalCurrency, isForeign, eurTotal, originalTotal, exchangeRate };
 }
 
+// Estrae info refund di un ordine (Shopify espone array refunds nel JSON ordine)
+// Restituisce: importo totale rimborsato (in EUR), articoli rimborsati, status, ecc.
+function getOrderRefundInfo(ordine) {
+  const refunds = ordine.refunds || [];
+  if (refunds.length === 0) {
+    return { hasRefund: false, isFullRefund: false, isPartialRefund: false, totalRefundedEur: 0, refundedQuantity: 0, refundedLineItems: [], refundCount: 0 };
+  }
+  const ordCurrency = ordine.currency || SHOP_CURRENCY;
+  let totalRefundedEur = 0;
+  let refundedQuantity = 0;
+  const refundedLineItems = [];
+  
+  refunds.forEach(refund => {
+    // 1) Importo monetario rimborsato (transactions di tipo 'refund')
+    (refund.transactions || []).forEach(tx => {
+      if (tx.kind === 'refund' && (tx.status === 'success' || !tx.status)) {
+        const amt = toEurAmount(tx.amount_set, tx.amount, tx.currency || ordCurrency);
+        totalRefundedEur += amt;
+      }
+    });
+    
+    // 2) Quali line_items sono stati rimborsati (per quantità)
+    (refund.refund_line_items || []).forEach(rli => {
+      const qty = parseInt(rli.quantity) || 0;
+      refundedQuantity += qty;
+      // line_item_id punta al line_item originale dell'ordine
+      const subtotalEur = toEurAmount(rli.subtotal_set, rli.subtotal, ordCurrency);
+      const totalTaxEur = toEurAmount(rli.total_tax_set, rli.total_tax, ordCurrency);
+      refundedLineItems.push({
+        line_item_id: rli.line_item_id,
+        quantity: qty,
+        subtotal_eur: subtotalEur,
+        total_tax_eur: totalTaxEur
+      });
+    });
+  });
+  
+  // Determina se è full refund: confronto con prezzo totale dell'ordine
+  const orderTotalEur = toEurAmount(ordine.total_price_set, ordine.total_price, ordCurrency);
+  const totalQty = (ordine.line_items || []).reduce((s, li) => s + (parseInt(li.quantity) || 0), 0);
+  const isFullRefund = totalRefundedEur > 0 && Math.abs(totalRefundedEur - orderTotalEur) < 0.5; // tolleranza 50 cent
+  const isPartialRefund = totalRefundedEur > 0 && !isFullRefund;
+  
+  return {
+    hasRefund: totalRefundedEur > 0,
+    isFullRefund,
+    isPartialRefund,
+    totalRefundedEur,
+    refundedQuantity,
+    totalQuantity: totalQty,
+    refundedLineItems,
+    refundCount: refunds.length
+  };
+}
+
+// ============ PAYMENT FORECAST ============
+// Dato un ordine + config MP, calcola quando arriverà il pagamento (o più pagamenti se split).
+// Ritorna array di { data: Date, importo_eur: number, nota: string, parte: number }
+function calcolaPagamentiPrevisti(dataOrdine, policy, nettoIncassato) {
+  if (!policy || nettoIncassato <= 0) return [];
+  const orderDate = new Date(dataOrdine);
+  if (isNaN(orderDate.getTime())) return [];
+  
+  const result = [];
+  
+  switch (policy.type) {
+    case 'immediate': {
+      result.push({ data: orderDate, importo_eur: nettoIncassato, nota: 'Accredito immediato', parte: 1 });
+      break;
+    }
+    case 'fixed_days': {
+      const d = new Date(orderDate);
+      d.setDate(d.getDate() + (policy.days_offset || 0));
+      result.push({ data: d, importo_eur: nettoIncassato, nota: `Ordine + ${policy.days_offset}gg`, parte: 1 });
+      break;
+    }
+    case 'weekly': {
+      // Stima: ordine + N giorni, poi arrotondato al lunedì successivo
+      const d = new Date(orderDate);
+      d.setDate(d.getDate() + (policy.days_offset || 21));
+      const dayOfWeek = d.getDay(); // 0 = domenica, 1 = lunedì
+      const daysToMonday = dayOfWeek === 0 ? 1 : (dayOfWeek === 1 ? 0 : (8 - dayOfWeek));
+      d.setDate(d.getDate() + daysToMonday);
+      result.push({ data: d, importo_eur: nettoIncassato, nota: `Settimanale (~${policy.days_offset}gg)`, parte: 1 });
+      break;
+    }
+    case 'monthly_decade': {
+      // Ordini del mese M pagati il giorno X (es. 10) del mese M + month_offset
+      const target = new Date(orderDate.getFullYear(), orderDate.getMonth() + (policy.month_offset || 2), policy.payout_day || 10);
+      result.push({ data: target, importo_eur: nettoIncassato, nota: `Prima decade mese+${policy.month_offset}`, parte: 1 });
+      break;
+    }
+    case 'monthly_mid': {
+      const target = new Date(orderDate.getFullYear(), orderDate.getMonth() + (policy.month_offset || 2), policy.payout_day || 15);
+      result.push({ data: target, importo_eur: nettoIncassato, nota: `Prima metà mese+${policy.month_offset}`, parte: 1 });
+      break;
+    }
+    case 'split': {
+      (policy.parts || []).forEach((part, idx) => {
+        const target = new Date(orderDate.getFullYear(), orderDate.getMonth() + (part.month_offset || 1), part.payout_day || 10);
+        const importoParte = nettoIncassato * (part.pct / 100);
+        result.push({ data: target, importo_eur: importoParte, nota: `${part.pct}% (mese+${part.month_offset})`, parte: idx + 1 });
+      });
+      break;
+    }
+    case 'prepaid_balance': {
+      // Non genera pagamento futuro, scala dal wallet
+      result.push({ data: orderDate, importo_eur: 0, nota: 'Wallet (scalato da credito)', parte: 1, is_wallet: true });
+      break;
+    }
+    default: {
+      // Fallback: usa data ordine + 30gg
+      const d = new Date(orderDate);
+      d.setDate(d.getDate() + 30);
+      result.push({ data: d, importo_eur: nettoIncassato, nota: 'Policy sconosciuta (+30gg)', parte: 1 });
+    }
+  }
+  
+  return result;
+}
+
+// Helper: formatta data in YYYY-MM-DD
+function fmtDateISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
+// Helper: chiave mese YYYY-MM
+function fmtMonthKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 let cachedToken = null;
 let tokenExpiry = null;
 
@@ -339,21 +473,29 @@ async function getShopifyAccessToken() {
   return cachedToken;
 }
 
+// Payment policies (da Excel TL_REGOLE_MARKET_PLACE + istruzioni utente):
+//   type: 'monthly_decade' → ordini del mese M pagati il giorno X del mese M+offset
+//   type: 'monthly_mid' → prima metà del mese (~giorno 15)
+//   type: 'split' → % al giorno X1, % al giorno X2 dopo data ordine
+//   type: 'fixed_days' → data_ordine + N giorni
+//   type: 'weekly' → payout settimanale (stima: data_ordine + N giorni)
+//   type: 'immediate' → data_ordine (accreditato ~subito)
+//   type: 'prepaid_balance' → sistema wallet (Balardi: inserisci ricariche, scali)
 const MARKETPLACE_CONFIGS = {
-  'SECRET_SALES': { nome: 'Secret Sales', sconto_percentuale: 0, fee_principale: 20, fee_secondaria: 0, fee_fissa_trasporto: 2, fee_fissa_packaging: 2, pagamento: 'Variabile' },
-  'FASHION_TAMERS': { nome: 'Fashion Tamers', sconto_percentuale: 0, fee_principale: 32, fee_secondaria: 2, fee_fissa_trasporto: 15, fee_fissa_packaging: 6, pagamento: 'Variabile' },
-  'INTRA_MIRROR': { nome: 'Intra Mirror', sconto_percentuale: 15, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Variabile' },
-  'BALARDI': { nome: 'Balardi', sconto_percentuale: 35, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Variabile' },
-  'THE_BRADERY': { nome: 'The Bradery', sconto_percentuale: 5, fee_principale: 17, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 2, pagamento: 'Variabile' },
-  'BOUTIQUE_MALL': { nome: 'Boutique Mall', sconto_percentuale: 33.3, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 10, fee_fissa_packaging: 2, pagamento: 'Variabile' },
-  'ARCHIVIST': { nome: 'Archivist', sconto_percentuale: 0, fee_principale: 22, fee_secondaria: 0, fee_fissa_trasporto: 10, fee_fissa_packaging: 2, pagamento: 'Variabile' },
-  'MIINTO': { nome: 'Miinto', sconto_percentuale: 0, fee_principale: 17.75, fee_secondaria: 2.25, fee_fissa_trasporto: 12, fee_fissa_packaging: 1.5, pagamento: 'Variabile' },
-  'WINKELSTRAAT': { nome: 'Winkelstraat', sconto_percentuale: 0, fee_principale: 17, fee_secondaria: 0, fee_accessoria: 9, fee_fissa_trasporto: 15, fee_fissa_packaging: 0, pagamento: 'Variabile' },
-  'ITALIST': { nome: 'Italist', sconto_percentuale: 0, fee_principale: 20, fee_secondaria: 25.5, fee_fissa_trasporto: 0, fee_fissa_packaging: 4, pagamento: 'Mensile (~30gg)' },
-  'JAMMY_DUDE': { nome: 'Jammy Dude', sconto_percentuale: 0, fee_principale: 19, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Variabile' },
-  'POIZON': { nome: 'Poizon', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Variabile' },
-  'BRANDSGATEWAY': { nome: 'Brandsgateway', sconto_percentuale: 13, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 0, pagamento: 'Variabile' },
-  'TLUXY_SITE': { nome: 'T. Luxy (proprio)', sconto_percentuale: 10, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1, pagamento: 'Immediato' }
+  'SECRET_SALES': { nome: 'Secret Sales', sconto_percentuale: 0, fee_principale: 20, fee_secondaria: 0, fee_fissa_trasporto: 2, fee_fissa_packaging: 2, pagamento: 'Prima metà mese+2', payment_policy: { type: 'monthly_mid', month_offset: 2, payout_day: 15 } },
+  'FASHION_TAMERS': { nome: 'Fashion Tamers', sconto_percentuale: 0, fee_principale: 32, fee_secondaria: 0, fee_accessoria: 2, fee_fissa_trasporto: 15, fee_fissa_packaging: 6, pagamento: 'Prima metà mese+2', payment_policy: { type: 'monthly_mid', month_offset: 2, payout_day: 15 } },
+  'INTRA_MIRROR': { nome: 'Intra Mirror', sconto_percentuale: 15, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', month_offset: 2, payout_day: 10 } },
+  'BALARDI': { nome: 'Balardi', sconto_percentuale: 35, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Prepagato (wallet)', payment_policy: { type: 'prepaid_balance' } },
+  'THE_BRADERY': { nome: 'The Bradery', sconto_percentuale: 5, fee_principale: 17, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 2, pagamento: 'Split 80/20 (mese+1 / mese+2)', payment_policy: { type: 'split', parts: [{ pct: 80, month_offset: 1, payout_day: 10 }, { pct: 20, month_offset: 2, payout_day: 10 }] } },
+  'BOUTIQUE_MALL': { nome: 'Boutique Mall', sconto_percentuale: 33.3, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 10, fee_fissa_packaging: 2, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', month_offset: 2, payout_day: 10 } },
+  'ARCHIVIST': { nome: 'Archivist', sconto_percentuale: 0, fee_principale: 22, fee_secondaria: 0, fee_fissa_trasporto: 10, fee_fissa_packaging: 2, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', month_offset: 2, payout_day: 10 } },
+  'MIINTO': { nome: 'Miinto', sconto_percentuale: 0, fee_principale: 17.75, fee_secondaria: 2.25, fee_fissa_trasporto: 12, fee_fissa_packaging: 1.5, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', month_offset: 2, payout_day: 10 } },
+  'WINKELSTRAAT': { nome: 'Winkelstraat', sconto_percentuale: 0, fee_principale: 17, fee_secondaria: 0, fee_accessoria: 9, fee_fissa_trasporto: 15, fee_fissa_packaging: 0, pagamento: 'Settimanale (~21gg)', payment_policy: { type: 'weekly', days_offset: 21 } },
+  'ITALIST': { nome: 'Italist', sconto_percentuale: 20, fee_principale: 25.5, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 4, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', month_offset: 2, payout_day: 10 } },
+  'JAMMY_DUDE': { nome: 'Jammy Dude', sconto_percentuale: 0, fee_principale: 19, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: '10gg data ordine', payment_policy: { type: 'fixed_days', days_offset: 10 } },
+  'POIZON': { nome: 'Poizon', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Immediato', payment_policy: { type: 'immediate' } },
+  'BRANDSGATEWAY': { nome: 'Brandsgateway', sconto_percentuale: 13, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 0, pagamento: '45gg data ordine', payment_policy: { type: 'fixed_days', days_offset: 45 } },
+  'TLUXY_SITE': { nome: 'T. Luxy (proprio)', sconto_percentuale: 10, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1, pagamento: 'Immediato (Shopify +2gg)', payment_policy: { type: 'fixed_days', days_offset: 2 } }
 };
 
 // Normalizza source_name per matching più robusto: lowercase + spazi→trattini
@@ -1079,7 +1221,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.6</p>
+        <p>Business Intelligence Dashboard · v5.8</p>
       </div>
     </div>
     <div class="header-right">
@@ -1095,6 +1237,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <button class="tab" data-tab="calculator">Calcolatore</button>
       <button class="tab" data-tab="marketplaces">Marketplace</button>
       <button class="tab" data-tab="duo">Simulatore DUO</button>
+      <button class="tab" data-tab="forecast">💰 Previsioni Incassi</button>
     </div>
   </div>
   <div id="analytics-tab" class="tab-content active">
@@ -1119,6 +1262,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="kpi green"><div class="kpi-label">Margine Netto</div><div class="kpi-value" id="netto">—</div><div class="kpi-sub">Profitto reale</div></div>
         <div class="kpi gold"><div class="kpi-label">Margine %</div><div class="kpi-value" id="margine">—</div><div class="kpi-sub">Su lordo</div></div>
       </div>
+      <div id="refunds-panel"></div>
       <div id="foreign-currency-panel"></div>
       <div id="errors-panel"></div>
       <div class="breakdown-section">
@@ -1231,6 +1375,20 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
     </div>
   </div>
+  <div id="forecast-tab" class="tab-content">
+    <div class="section">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Previsioni Incassi</div>
+          <div class="section-subtitle">Quando arriveranno i bonifici dai marketplace (regole ufficiali) · basato su ordini ultimi 120gg</div>
+        </div>
+        <button class="apply-btn" id="forecast-reload" style="background:var(--black);">🔄 Ricalcola</button>
+      </div>
+      <div id="forecast-content">
+        <div class="bs-empty">Clicca "Ricalcola" per generare le previsioni.</div>
+      </div>
+    </div>
+  </div>
 </div>
 <script>
 const MARKETPLACES = ${JSON.stringify(MARKETPLACE_CONFIGS)};
@@ -1280,6 +1438,24 @@ function renderForeignCurrency(ordiniEstero) {
   panel.innerHTML = '<div style="background:#FFF4D6; border-left:4px solid #E8C77A; border-radius:8px; padding:14px 18px; margin-bottom:16px;"><div style="font-weight:700; color:#8B6914; margin-bottom:8px;">💱 ' + ordiniEstero.length + ' ordine' + (ordiniEstero.length > 1 ? ' in' : '') + ' valuta estera (convertit' + (ordiniEstero.length > 1 ? 'i' : 'o') + ' in EUR al cambio storico Shopify)</div><div style="font-size:0.82rem; color:#6B4E0E;">' + summary + '</div></div>';
 }
 
+function renderRefunds(resi) {
+  const panel = document.getElementById('refunds-panel');
+  if (!panel) return;
+  if (!resi || resi.totale_count === 0) { panel.innerHTML = ''; return; }
+  // Riepilogo
+  const dettagliRecenti = (resi.dettaglio || []).slice(0, 8).map(r => {
+    const dataFmt = r.created_at ? new Date(r.created_at).toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit'}) : '—';
+    const tipoBadge = r.tipo === 'totale' ? '<span style="background:#FCEEEE; color:#BF4747; padding:1px 6px; border-radius:8px; font-size:0.65rem; font-weight:700; margin-left:4px;">TOTALE</span>' : '<span style="background:#FFE4D6; color:#8B4F14; padding:1px 6px; border-radius:8px; font-size:0.65rem; font-weight:700; margin-left:4px;">PARZIALE</span>';
+    return '<div style="padding:4px 0; border-bottom:1px dotted #E89A5A;"><strong>' + (r.name || '#' + r.order_number) + '</strong>' + tipoBadge + ' · ' + dataFmt + ' · ' + r.marketplace + ' · <strong>€' + r.importo_rimborsato_eur.toFixed(2) + '</strong> rimborsati' + (r.tipo === 'parziale' ? ' (' + r.quantita_rimborsata + '/' + r.quantita_totale + ' articoli)' : '') + '</div>';
+  }).join('');
+  const moreMsg = (resi.dettaglio || []).length > 8 ? '<div style="margin-top:6px; font-style:italic; font-size:0.78rem; color:#8B4F14;">... e altri ' + ((resi.dettaglio || []).length - 8) + ' resi</div>' : '';
+  panel.innerHTML = '<div style="background:#FFE4D6; border-left:4px solid #E89A5A; border-radius:8px; padding:14px 18px; margin-bottom:16px;">' +
+    '<div style="font-weight:700; color:#8B4F14; margin-bottom:10px; font-size:0.95rem;">↩️ ' + resi.totale_count + ' resi nel periodo · €' + resi.importo_totale_eur.toFixed(2) + ' rimborsati (' + resi.percentuale_su_lordo.toFixed(1) + '% del fatturato lordo)</div>' +
+    '<div style="font-size:0.78rem; color:#6B3D14; margin-bottom:8px;">📊 ' + resi.totali_count + ' totali · ' + resi.parziali_count + ' parziali · ' + resi.articoli_resi_qty + ' articoli rimborsati</div>' +
+    '<div style="font-size:0.82rem; color:#6B3D14; line-height:1.6; margin-top:10px;"><strong style="font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em;">Resi recenti:</strong><br>' + dettagliRecenti + moreMsg + '</div>' +
+  '</div>';
+}
+
 function renderBreakdown(breakdown) {
   const body = document.getElementById('breakdown-body'); const foot = document.getElementById('breakdown-foot');
   if (!breakdown || Object.keys(breakdown).length === 0) { body.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--gray-500); font-style:italic;">Nessun ordine.</td></tr>'; foot.innerHTML = ''; return; }
@@ -1312,7 +1488,8 @@ function renderBreakdown(breakdown) {
         }).join('');
         const marginCls2 = o.margine_netto >= 0 ? 'margin-pos' : 'margin-neg';
         const currencyBadge = o.is_foreign_currency ? '<span style="display:inline-block; background:#FFF4D6; color:#8B6914; padding:2px 7px; border-radius:10px; font-size:0.68rem; font-weight:700; margin-left:6px; border:1px solid #E8C77A;" title="Ordine in ' + o.currency + ' convertito in EUR al cambio del giorno (' + o.exchange_rate.toFixed(4) + ')">💱 ' + o.currency + ' ' + (o.total_original || 0).toFixed(0) + '</span>' : '';
-        return '<tr><td><strong>' + orderNumFmt + '</strong>' + currencyBadge + '</td><td>' + dataFmt + '</td><td>' + (o.country || '—') + '</td><td style="max-width:340px;">' + articoli + '</td><td class="num">€' + o.fatturato.toFixed(2) + '</td><td class="num">€' + o.iva.toFixed(2) + '</td><td class="num">€' + o.costo_merce.toFixed(2) + '</td><td class="num">€' + o.fees_marketplace.toFixed(2) + '</td><td class="num ' + marginCls2 + '">€' + o.margine_netto.toFixed(2) + '</td><td class="num ' + marginCls2 + '">' + o.margine_percentuale.toFixed(1) + '%</td></tr>';
+        const refundBadge = o.refund_status === 'partial' ? '<span style="display:inline-block; background:#FFE4D6; color:#8B4F14; padding:2px 7px; border-radius:10px; font-size:0.68rem; font-weight:700; margin-left:6px; border:1px solid #E89A5A;" title="Reso parziale: ' + (o.refund_quantity || 0) + '/' + (o.refund_total_quantity || 0) + ' articoli, €' + (o.refund_amount_eur || 0).toFixed(2) + ' rimborsati">↩️ RESO PARZIALE €' + (o.refund_amount_eur || 0).toFixed(0) + '</span>' : '';
+        return '<tr><td><strong>' + orderNumFmt + '</strong>' + currencyBadge + refundBadge + '</td><td>' + dataFmt + '</td><td>' + (o.country || '—') + '</td><td style="max-width:340px;">' + articoli + '</td><td class="num">€' + o.fatturato.toFixed(2) + '</td><td class="num">€' + o.iva.toFixed(2) + '</td><td class="num">€' + o.costo_merce.toFixed(2) + '</td><td class="num">€' + o.fees_marketplace.toFixed(2) + '</td><td class="num ' + marginCls2 + '">€' + o.margine_netto.toFixed(2) + '</td><td class="num ' + marginCls2 + '">' + o.margine_percentuale.toFixed(1) + '%</td></tr>';
       }).join('') +
       '</tbody></table></div></td></tr>';
     return mainRow + detailRow;
@@ -1352,6 +1529,7 @@ async function fetchAnalytics(url) {
       renderBreakdown(data.breakdown_marketplace);
       renderErrors(data.ordini_con_errori || []);
       renderForeignCurrency(data.ordini_valuta_estera || []);
+      renderRefunds(data.resi || null);
       return true;
     }
   } catch(e) { console.error(e); }
@@ -1627,6 +1805,189 @@ async function handleCsvImport(file) {
   } catch(e) { status.textContent = '❌ ' + e.message; status.style.color = 'var(--red)'; }
 }
 
+// ============ PREVISIONI INCASSI ============
+let forecastData = null;
+
+function fmtEur(n) { return '€' + Math.round(n).toLocaleString('it-IT'); }
+function fmtEur2(n) { return '€' + (n || 0).toFixed(2); }
+function fmtDateIT(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+function fmtMonthIT(monthKey) {
+  if (!monthKey) return '—';
+  const [y, m] = monthKey.split('-');
+  const d = new Date(parseInt(y), parseInt(m) - 1, 1);
+  return d.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
+}
+
+async function loadForecast() {
+  const cont = document.getElementById('forecast-content');
+  cont.innerHTML = '<div class="bs-empty">Calcolo previsioni in corso (legge ultimi 120gg di ordini)...</div>';
+  try {
+    const data = await fetchNoCache('/api/forecast');
+    if (!data.success) { cont.innerHTML = '<div class="bs-empty" style="color:var(--red);">Errore: ' + (data.error || 'sconosciuto') + '</div>'; return; }
+    forecastData = data;
+    renderForecast(data);
+  } catch(e) { cont.innerHTML = '<div class="bs-empty" style="color:var(--red);">Errore: ' + e.message + '</div>'; }
+}
+
+function renderForecast(data) {
+  const cont = document.getElementById('forecast-content');
+  const kpi = data.kpi;
+  const bg = data.balardi_wallet;
+  const todayStr = new Date().toISOString().split('T')[0];
+  
+  // KPI cards: solo mese corrente, mese prossimo, totale 2 mesi
+  const totale2mesi = (kpi.incasso_mese_corrente.importo || 0) + (kpi.incasso_mese_prossimo.importo || 0);
+  const count2mesi = (kpi.incasso_mese_corrente.ordini || 0) + (kpi.incasso_mese_prossimo.ordini || 0);
+  const kpiHtml = '<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin-bottom:24px;">' +
+    '<div style="background:linear-gradient(135deg, #E6F4EE 0%, #C8E8D6 100%); padding:18px 22px; border-radius:12px; border-left:4px solid var(--green-primary);">' +
+      '<div style="font-size:0.7rem; color:var(--green-dark); text-transform:uppercase; letter-spacing:0.08em; font-weight:700; margin-bottom:6px;">' + fmtMonthIT(kpi.incasso_mese_corrente.mese) + ' (corrente)</div>' +
+      '<div style="font-size:1.5rem; font-weight:800; color:var(--black);">' + fmtEur(kpi.incasso_mese_corrente.importo) + '</div>' +
+      '<div style="font-size:0.75rem; color:var(--gray-700); margin-top:2px;">' + kpi.incasso_mese_corrente.ordini + ' pagamenti</div>' +
+    '</div>' +
+    '<div style="background:linear-gradient(135deg, #FFF4D6 0%, #FFE8A8 100%); padding:18px 22px; border-radius:12px; border-left:4px solid #C9A961;">' +
+      '<div style="font-size:0.7rem; color:#8B6914; text-transform:uppercase; letter-spacing:0.08em; font-weight:700; margin-bottom:6px;">' + fmtMonthIT(kpi.incasso_mese_prossimo.mese) + ' (prossimo)</div>' +
+      '<div style="font-size:1.5rem; font-weight:800; color:var(--black);">' + fmtEur(kpi.incasso_mese_prossimo.importo) + '</div>' +
+      '<div style="font-size:0.75rem; color:var(--gray-700); margin-top:2px;">' + kpi.incasso_mese_prossimo.ordini + ' pagamenti</div>' +
+    '</div>' +
+    '<div style="background:linear-gradient(135deg, #F0EBDF 0%, #E5DDC8 100%); padding:18px 22px; border-radius:12px; border-left:4px solid var(--gray-700);">' +
+      '<div style="font-size:0.7rem; color:var(--gray-700); text-transform:uppercase; letter-spacing:0.08em; font-weight:700; margin-bottom:6px;">Totale 2 mesi</div>' +
+      '<div style="font-size:1.5rem; font-weight:800; color:var(--black);">' + fmtEur(totale2mesi) + '</div>' +
+      '<div style="font-size:0.75rem; color:var(--gray-700); margin-top:2px;">' + count2mesi + ' pagamenti</div>' +
+    '</div>' +
+  '</div>';
+  
+  // Card per marketplace con scadenziari aggregati
+  // Raggruppo i pagamenti per MP per mese
+  const breakdownMP = data.breakdown_marketplace || [];
+  const meseCorrente = kpi.incasso_mese_corrente.mese;
+  const meseProssimo = kpi.incasso_mese_prossimo.mese;
+  
+  // Raggruppa pagamenti per MP e poi per mese
+  const mpAggregato = {};
+  breakdownMP.forEach(mp => {
+    // Da pagamenti[] ricostruisco raggruppamento per mese
+    const perMese = {};
+    (mp.pagamenti || []).forEach(p => {
+      const monthKey = p.data.substring(0, 7);
+      if (!perMese[monthKey]) perMese[monthKey] = { importo: 0, count: 0, note: new Set() };
+      perMese[monthKey].importo += p.importo_eur;
+      perMese[monthKey].count++;
+      if (p.nota) perMese[monthKey].note.add(p.nota);
+    });
+    mpAggregato[mp.nome] = {
+      ...mp,
+      scadenze: Object.entries(perMese).map(([mese, info]) => ({
+        mese, importo: info.importo, count: info.count, note: [...info.note].join(' · ')
+      })).sort((a, b) => a.mese.localeCompare(b.mese))
+    };
+  });
+  
+  // Filtra scadenze: solo mese corrente in avanti
+  const mpVisibili = Object.values(mpAggregato).filter(mp => {
+    const future = mp.scadenze.filter(s => s.mese >= meseCorrente);
+    mp.scadenzeFuture = future;
+    return future.length > 0;
+  });
+  
+  // Ordina per: prima MP con pagamenti nel mese corrente, poi per totale futuro
+  mpVisibili.sort((a, b) => {
+    const aNow = a.scadenzeFuture.some(s => s.mese === meseCorrente) ? 1 : 0;
+    const bNow = b.scadenzeFuture.some(s => s.mese === meseCorrente) ? 1 : 0;
+    if (aNow !== bNow) return bNow - aNow;
+    const aTot = a.scadenzeFuture.reduce((s, x) => s + x.importo, 0);
+    const bTot = b.scadenzeFuture.reduce((s, x) => s + x.importo, 0);
+    return bTot - aTot;
+  });
+  
+  const MP_BADGE_COLORS = { Miinto:'#008060', 'The Bradery':'#C9A961', Brandsgateway:'#4A7FBC', Winkelstraat:'#479CCF', 'Secret Sales':'#6B5320', Italist:'#2D2D2D', Archivist:'#004C3F', 'Intra Mirror':'#B89550', 'Fashion Tamers':'#5C5C5C', 'Boutique Mall':'#E8573A', 'Jammy Dude':'#8E4FBF', 'T. Luxy (proprio)':'#1A1A1A', Poizon:'#D4397A' };
+  
+  const cardsHtml = '<div style="margin-bottom:12px; font-size:1rem; font-weight:700; color:var(--black);">Scadenziario per marketplace</div>' +
+    '<div style="display:flex; flex-direction:column; gap:10px; margin-bottom:24px;">' +
+    (mpVisibili.length > 0 ? mpVisibili.map(mp => {
+      const color = MP_BADGE_COLORS[mp.nome] || '#8E8E8E';
+      const totaleFuturo = mp.scadenzeFuture.reduce((s, x) => s + x.importo, 0);
+      const scadenzeHtml = mp.scadenzeFuture.map(sc => {
+        const isCorrente = sc.mese === meseCorrente;
+        const isProssimo = sc.mese === meseProssimo;
+        const mensileLabel = isCorrente ? ' (corrente)' : (isProssimo ? ' (prossimo)' : '');
+        const color2 = isCorrente ? 'var(--green-dark)' : (isProssimo ? '#8B6914' : 'var(--gray-700)');
+        return '<div style="display:flex; justify-content:space-between; align-items:baseline; padding:5px 0; font-size:0.88rem;">' +
+          '<span style="color:' + color2 + ';"><strong style="text-transform:capitalize;">' + fmtMonthIT(sc.mese) + '</strong>' + mensileLabel + ' · ' + sc.count + ' ord.' + (sc.note ? ' <span style="color:var(--gray-500); font-size:0.78rem;">(' + sc.note + ')</span>' : '') + '</span>' +
+          '<span style="font-weight:700; font-variant-numeric:tabular-nums;">' + fmtEur(sc.importo) + '</span>' +
+        '</div>';
+      }).join('');
+      return '<div style="background:var(--white); border:1px solid var(--gray-200); border-radius:12px; padding:14px 18px;">' +
+        '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:10px; border-bottom:1px solid var(--gray-100);">' +
+          '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">' +
+            '<span class="mp-badge" style="background:' + color + '; font-size:0.8rem;">' + mp.nome + '</span>' +
+            '<span style="font-size:0.78rem; color:var(--gray-700); font-style:italic;">' + (mp.pagamento_desc || '') + '</span>' +
+          '</div>' +
+          '<div style="font-size:1.05rem; font-weight:800;">Totale <span style="color:var(--black);">' + fmtEur(totaleFuturo) + '</span></div>' +
+        '</div>' +
+        scadenzeHtml +
+      '</div>';
+    }).join('') : '<div style="text-align:center; padding:24px; color:var(--gray-500); font-style:italic;">Nessun pagamento previsto nei prossimi 2 mesi.</div>') +
+    '</div>';
+  
+  // Balardi — pannello compatto in basso
+  const residuo = bg.credito_residuo;
+  const percConsumo = bg.credito_ricaricato > 0 ? (bg.credito_consumato / bg.credito_ricaricato * 100) : 0;
+  const residuoClass = residuo > 300 ? 'var(--green-primary)' : (residuo > 0 ? '#C9A961' : 'var(--red)');
+  const residuoLabel = residuo < 300 && residuo >= 0 ? ' ⚠️ Ricarica presto' : (residuo < 0 ? ' 🔴 Credito esaurito' : '');
+  const ricaricheHtml = (bg.ricariche || []).slice().reverse().slice(0, 5).map(r => 
+    '<div style="padding:5px 0; border-bottom:1px dotted var(--gray-200); font-size:0.8rem; display:flex; justify-content:space-between;">' +
+      '<span>' + fmtDateIT(r.data_ricarica) + (r.nota ? ' · <span style="color:var(--gray-500);">' + r.nota + '</span>' : '') + '</span>' +
+      '<span><strong>+' + fmtEur2(r.importo) + '</strong> <button onclick="deleteRicarica(' + r.id + ')" style="background:none; border:none; color:var(--red); cursor:pointer; font-size:0.75rem; margin-left:6px;" title="Elimina">✕</button></span>' +
+    '</div>'
+  ).join('');
+  const balardiHtml = '<div style="background:var(--gray-100); border-radius:12px; padding:14px 18px;">' +
+    '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">' +
+      '<div>' +
+        '<div style="font-size:0.7rem; color:var(--gray-700); text-transform:uppercase; letter-spacing:0.08em; font-weight:700; margin-bottom:4px;">💳 Balardi · credito prepagato</div>' +
+        '<div style="font-size:0.92rem;">Residuo <strong style="color:' + residuoClass + ';">' + fmtEur2(residuo) + '</strong>' + residuoLabel + ' · ricaricato ' + fmtEur2(bg.credito_ricaricato) + ' · consumato ' + fmtEur2(bg.credito_consumato) + ' (' + percConsumo.toFixed(0) + '%)</div>' +
+      '</div>' +
+      '<div style="display:flex; gap:6px; align-items:center;">' +
+        '<input type="number" id="balardi-new-importo" placeholder="€ importo" step="0.01" style="padding:6px 10px; border:1px solid var(--gray-200); border-radius:6px; width:100px; font-size:0.85rem;">' +
+        '<input type="text" id="balardi-new-nota" placeholder="Nota" style="padding:6px 10px; border:1px solid var(--gray-200); border-radius:6px; width:120px; font-size:0.85rem;">' +
+        '<button id="balardi-ricarica-btn" class="apply-btn" style="background:var(--green-primary); padding:6px 12px; font-size:0.82rem;">+ Ricarica</button>' +
+      '</div>' +
+    '</div>' +
+    (ricaricheHtml ? '<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:0.78rem; color:var(--gray-700); font-weight:600;">Ultime ricariche (' + (bg.ricariche || []).length + ')</summary><div style="margin-top:6px;">' + ricaricheHtml + '</div></details>' : '') +
+  '</div>';
+  
+  cont.innerHTML = kpiHtml + cardsHtml + balardiHtml;
+  
+  // Handler ricarica Balardi
+  const ricBtn = document.getElementById('balardi-ricarica-btn');
+  if (ricBtn) {
+    ricBtn.addEventListener('click', async () => {
+      const importo = parseFloat(document.getElementById('balardi-new-importo').value);
+      const nota = document.getElementById('balardi-new-nota').value;
+      if (isNaN(importo) || importo <= 0) { alert('Inserisci un importo valido'); return; }
+      ricBtn.disabled = true; ricBtn.textContent = '...';
+      try {
+        const res = await fetch('/api/balardi-ricarica', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ importo, nota }) });
+        const r = await res.json();
+        if (r.success) { loadForecast(); } else { alert('Errore: ' + (r.error || 'sconosciuto')); ricBtn.disabled = false; ricBtn.textContent = '+ Ricarica'; }
+      } catch(e) { alert('Errore: ' + e.message); ricBtn.disabled = false; ricBtn.textContent = '+ Ricarica'; }
+    });
+  }
+}
+
+async function deleteRicarica(id) {
+  if (!confirm('Eliminare questa ricarica?')) return;
+  try {
+    const res = await fetch('/api/balardi-ricarica-delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id }) });
+    const r = await res.json();
+    if (r.success) loadForecast();
+    else alert('Errore: ' + (r.error || 'sconosciuto'));
+  } catch(e) { alert('Errore: ' + e.message); }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadMarketplaces();
   const today = new Date(); const monthAgo = new Date(); monthAgo.setMonth(monthAgo.getMonth() - 1);
@@ -1636,6 +1997,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => {
     showTab(btn.dataset.tab);
     if (btn.dataset.tab === 'duo') { checkKvStatus(); if (duoProducts.length === 0) loadDuoProducts(); }
+    if (btn.dataset.tab === 'forecast') { if (!forecastData) loadForecast(); }
   }));
   document.querySelectorAll('[data-analytics-periods] .period-btn').forEach(btn => btn.addEventListener('click', () => setPeriod(btn.dataset.period, btn)));
   document.querySelectorAll('[data-bs-periods] .period-btn').forEach(btn => btn.addEventListener('click', () => loadBestSellers(btn.dataset.period, btn)));
@@ -1645,6 +2007,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('calcola-btn').addEventListener('click', calcola);
   // DUO listeners
   document.getElementById('duo-reload').addEventListener('click', loadDuoProducts);
+  const fcBtn = document.getElementById('forecast-reload');
+  if (fcBtn) fcBtn.addEventListener('click', loadForecast);
   document.getElementById('duo-csv-file').addEventListener('change', e => { if (e.target.files[0]) handleCsvImport(e.target.files[0]); });
   document.getElementById('duo-search').addEventListener('input', filterDuoProducts);
   // Logout handler
@@ -1811,7 +2175,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.6', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['Magic link auth (Resend)', 'Winkelstraat detection', 'Conversione valuta automatica', 'KV storage costi', 'Simulatore DUO', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Fuso Roma reale', 'Poizon + Secret Sales'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/login', '/logout', '/api', '/api/request-magic-link', '/api/verify-magic-link', '/api/logout', '/api/auth-status', '/api/analytics', '/api/bestsellers', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-winkelstraat', '/api/debug-costs', '/api/debug-single-cost'] });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.8', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['Previsioni Incassi (scadenziari MP)', 'Balardi wallet prepagato', 'Gestione resi/refund (full + partial)', 'Magic link auth (Resend)', 'Winkelstraat detection', 'Conversione valuta automatica', 'KV storage costi', 'Simulatore DUO', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Fuso Roma reale', 'Poizon + Secret Sales'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/login', '/logout', '/api', '/api/request-magic-link', '/api/verify-magic-link', '/api/logout', '/api/auth-status', '/api/analytics', '/api/bestsellers', '/api/forecast', '/api/balardi-ricarica', '/api/balardi-ricarica-delete', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-winkelstraat', '/api/debug-costs', '/api/debug-single-cost'] });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -1852,30 +2216,82 @@ export default async function handler(req, res) {
         }
         
         let lordo_iva_inclusa = 0, iva_totale = 0, costi_totali = 0, margine_netto = 0;
+        // Aggregati refund (separati per analisi)
+        let resi_totale_eur = 0, resi_count = 0, resi_full_count = 0, resi_partial_count = 0;
+        let resi_articoli_qty = 0;
         const breakdown_marketplace = {};
         const ordini_con_errori = [];
-        const ordini_valuta_estera = []; // Tracciamento ordini convertiti
+        const ordini_valuta_estera = [];
+        const ordini_con_resi = []; // dettaglio resi per visualizzazione
         ordini.forEach(ordine => {
           const { costo: costo_merce, errori } = calcolaCostoOrdine(ordine, variantCosts, duoUserCosts);
           const mp = riconosciMarketplace(ordine);
           const currencyInfo = getOrderCurrencyInfo(ordine);
+          const refundInfo = getOrderRefundInfo(ordine);
           if (errori.length > 0) {
             ordini_con_errori.push({ id: ordine.id, order_number: ordine.order_number, name: ordine.name, total_price: ordine.total_price, total_price_eur: currencyInfo.eurTotal, currency: currencyInfo.originalCurrency, marketplace: mp.config.nome, prodotti_senza_costo: errori });
             return;
           }
-          // USA SEMPRE IL PREZZO IN EUR (convertito da Shopify al cambio del giorno)
-          const prezzo_lordo = currencyInfo.eurTotal;
-          // Spedizione: usa shop_money se disponibile
-          const spedizione = (ordine.shipping_lines || []).reduce((sum, line) => {
-            return sum + toEurAmount(line.price_set, line.price, currencyInfo.originalCurrency);
-          }, 0);
+          // PREZZO LORDO IN EUR (al netto refund)
+          const prezzo_lordo_originale = currencyInfo.eurTotal;
+          const prezzo_lordo = Math.max(0, prezzo_lordo_originale - refundInfo.totalRefundedEur); // sottrae i refund
+          const spedizione = (ordine.shipping_lines || []).reduce((sum, line) => sum + toEurAmount(line.price_set, line.price, currencyInfo.originalCurrency), 0);
           const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
-          // Poizon usa sempre IVA IT
           const ivaPerc = mp.key === 'POIZON' ? 22 : getIvaPerPaese(country);
-          // Tax: converti in EUR
           const shopifyTaxEur = toEurAmount(ordine.total_tax_set, ordine.total_tax, currencyInfo.originalCurrency);
           const iva_scorporata = shopifyTaxEur > 0 ? shopifyTaxEur : (prezzo_lordo - prezzo_lordo / (1 + ivaPerc / 100));
-          const ris = calcolaMarginalita(prezzo_lordo, iva_scorporata, costo_merce, spedizione, mp.config, mp.key);
+          
+          // Costo merce: se reso totale → 0 (la merce torna a magazzino), se reso parziale → proporzionale
+          let costo_merce_effettivo = costo_merce;
+          if (refundInfo.isFullRefund) {
+            costo_merce_effettivo = 0;
+          } else if (refundInfo.isPartialRefund && refundInfo.totalQuantity > 0) {
+            // Sottrai costo della quantità rimborsata (proporzionale)
+            const ratioReso = refundInfo.refundedQuantity / refundInfo.totalQuantity;
+            costo_merce_effettivo = costo_merce * (1 - ratioReso);
+          }
+          
+          const ris = calcolaMarginalita(prezzo_lordo, iva_scorporata, costo_merce_effettivo, spedizione, mp.config, mp.key);
+          
+          // Se reso totale → conta come 0 fatturato/margine (ma traccialo a parte)
+          if (refundInfo.isFullRefund) {
+            // Non sommare nulla ai KPI principali, registra solo come reso
+            resi_totale_eur += refundInfo.totalRefundedEur;
+            resi_count++;
+            resi_full_count++;
+            resi_articoli_qty += refundInfo.refundedQuantity;
+            ordini_con_resi.push({
+              order_number: ordine.order_number,
+              name: ordine.name,
+              created_at: ordine.created_at,
+              marketplace: mp.config.nome,
+              tipo: 'totale',
+              importo_originale_eur: prezzo_lordo_originale,
+              importo_rimborsato_eur: refundInfo.totalRefundedEur,
+              quantita_rimborsata: refundInfo.refundedQuantity,
+              quantita_totale: refundInfo.totalQuantity
+            });
+            return; // skip aggiunta breakdown
+          }
+          
+          if (refundInfo.isPartialRefund) {
+            resi_totale_eur += refundInfo.totalRefundedEur;
+            resi_count++;
+            resi_partial_count++;
+            resi_articoli_qty += refundInfo.refundedQuantity;
+            ordini_con_resi.push({
+              order_number: ordine.order_number,
+              name: ordine.name,
+              created_at: ordine.created_at,
+              marketplace: mp.config.nome,
+              tipo: 'parziale',
+              importo_originale_eur: prezzo_lordo_originale,
+              importo_rimborsato_eur: refundInfo.totalRefundedEur,
+              quantita_rimborsata: refundInfo.refundedQuantity,
+              quantita_totale: refundInfo.totalQuantity
+            });
+          }
+          
           lordo_iva_inclusa += ris.prezzo_lordo_iva_inclusa;
           iva_totale += ris.iva_scorporata;
           costi_totali += ris.costi_totali;
@@ -1893,13 +2309,16 @@ export default async function handler(req, res) {
             });
           }
           
-          if (!breakdown_marketplace[mp.key]) breakdown_marketplace[mp.key] = { nome: mp.config.nome, ordini: 0, fatturato: 0, iva: 0, costo_merce: 0, margine: 0, dettaglio_ordini: [] };
+          if (!breakdown_marketplace[mp.key]) breakdown_marketplace[mp.key] = { nome: mp.config.nome, ordini: 0, fatturato: 0, iva: 0, costo_merce: 0, margine: 0, resi_count: 0, resi_eur: 0, dettaglio_ordini: [] };
           breakdown_marketplace[mp.key].ordini += 1;
           breakdown_marketplace[mp.key].fatturato += ris.prezzo_lordo_iva_inclusa;
           breakdown_marketplace[mp.key].iva += ris.iva_scorporata;
-          breakdown_marketplace[mp.key].costo_merce += costo_merce;
+          breakdown_marketplace[mp.key].costo_merce += costo_merce_effettivo;
           breakdown_marketplace[mp.key].margine += ris.margine_netto;
-          // Dettaglio ordine per drill-down
+          if (refundInfo.hasRefund) {
+            breakdown_marketplace[mp.key].resi_count += 1;
+            breakdown_marketplace[mp.key].resi_eur += refundInfo.totalRefundedEur;
+          }
           breakdown_marketplace[mp.key].dettaglio_ordini.push({
             order_number: ordine.order_number,
             name: ordine.name,
@@ -1907,17 +2326,21 @@ export default async function handler(req, res) {
             country,
             fatturato: ris.prezzo_lordo_iva_inclusa,
             iva: ris.iva_scorporata,
-            costo_merce,
+            costo_merce: costo_merce_effettivo,
             fees_marketplace: ris.fees_marketplace,
             fees_shopify: ris.fees_shopify,
             spedizione,
             margine_netto: ris.margine_netto,
             margine_percentuale: ris.margine_percentuale,
-            // Info valuta
             currency: currencyInfo.originalCurrency,
             is_foreign_currency: currencyInfo.isForeign,
             total_original: currencyInfo.originalTotal,
             exchange_rate: currencyInfo.exchangeRate,
+            // Info refund
+            refund_status: refundInfo.isFullRefund ? 'full' : (refundInfo.isPartialRefund ? 'partial' : 'none'),
+            refund_amount_eur: refundInfo.totalRefundedEur,
+            refund_quantity: refundInfo.refundedQuantity,
+            refund_total_quantity: refundInfo.totalQuantity,
             articoli: (ordine.line_items || []).map(item => ({
               title: item.title,
               sku: item.sku || '',
@@ -1931,9 +2354,36 @@ export default async function handler(req, res) {
             }))
           });
         });
-        const ordini_validi = ordini.length - ordini_con_errori.length;
+        const ordini_validi = ordini.length - ordini_con_errori.length - resi_full_count;
         const margine_percentuale = lordo_iva_inclusa > 0 ? (margine_netto / lordo_iva_inclusa * 100) : 0;
-        return res.json({ success: true, periodo: from && to ? `${from} → ${to}` : periodo, ordini_totali: ordini_validi, ordini_con_errori_count: ordini_con_errori.length, ordini_con_errori, lordo_iva_inclusa, iva_totale, costi_totali, margine_netto, margine_percentuale, breakdown_marketplace, ordini_valuta_estera, fetch_stats: fetchStats, ultima_sincronizzazione: new Date().toISOString() });
+        // Ordina i resi più recenti prima
+        ordini_con_resi.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        return res.json({
+          success: true,
+          periodo: from && to ? `${from} → ${to}` : periodo,
+          ordini_totali: ordini_validi,
+          ordini_con_errori_count: ordini_con_errori.length,
+          ordini_con_errori,
+          lordo_iva_inclusa,
+          iva_totale,
+          costi_totali,
+          margine_netto,
+          margine_percentuale,
+          // Sezione resi
+          resi: {
+            totale_count: resi_count,
+            totali_count: resi_full_count,
+            parziali_count: resi_partial_count,
+            articoli_resi_qty: resi_articoli_qty,
+            importo_totale_eur: resi_totale_eur,
+            percentuale_su_lordo: lordo_iva_inclusa > 0 ? (resi_totale_eur / (lordo_iva_inclusa + resi_totale_eur) * 100) : 0,
+            dettaglio: ordini_con_resi.slice(0, 100)
+          },
+          breakdown_marketplace,
+          ordini_valuta_estera,
+          fetch_stats: fetchStats,
+          ultima_sincronizzazione: new Date().toISOString()
+        });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
@@ -2147,6 +2597,241 @@ export default async function handler(req, res) {
 
     // Health check KV
     // Debug Winkelstraat: mostra ordini riconosciuti come WINKELSTRAAT e il motivo
+    // ============ FORECAST INCASSI ============
+    // Calcola pagamenti previsti per il mese corrente + mese prossimo (default)
+    if (req.method === 'GET' && path === '/api/forecast') {
+      try {
+        // Periodo di LOOKUP ordini: ultimi 120 giorni (per coprire pagamenti futuri dei MP mensili)
+        const daysBack = parseInt(query.get('days_back') || '120', 10);
+        const monthsAhead = parseInt(query.get('months_ahead') || '2', 10);
+        const dateTo = new Date();
+        const dateFrom = new Date();
+        dateFrom.setDate(dateFrom.getDate() - daysBack);
+        
+        // Fetch ordini custom range
+        let ordini = await getShopifyOrders(null, fmtDateISO(dateFrom), fmtDateISO(dateTo));
+        ordini = await processOrders(ordini);
+        
+        // Fetch costi (per calcolare netto incassato)
+        const variantIds = new Set();
+        const productIds = new Set();
+        ordini.forEach(o => (o.line_items || []).forEach(item => { 
+          if (item.variant_id) variantIds.add(item.variant_id);
+          if (item.product_id) productIds.add(item.product_id);
+        }));
+        const { costs: variantCosts } = await fetchVariantCosts([...variantIds], [...productIds]);
+        
+        // Carica costi DUO user
+        const duoUserCosts = {};
+        if (KV_ENABLED) {
+          const duoVids = [];
+          ordini.forEach(o => (o.line_items || []).forEach(item => {
+            if (item.variant_id && isDuoSku(item.sku)) duoVids.push(item.variant_id);
+          }));
+          const uniq = [...new Set(duoVids)];
+          if (uniq.length > 0) {
+            const keys = uniq.map(v => `duo_user_cost_${v}`);
+            const results = await kvMGet(keys);
+            uniq.forEach(v => {
+              const key = `duo_user_cost_${v}`;
+              if (results[key] !== undefined) {
+                const parsed = parseFloat(results[key]);
+                if (!isNaN(parsed)) duoUserCosts[v] = parsed;
+              }
+            });
+          }
+        }
+        
+        // Calcola forecast per ogni ordine
+        const paymentsByDate = {}; // YYYY-MM-DD → array pagamenti
+        const paymentsByMP = {};   // MP_KEY → aggregato
+        const paymentsByMonth = {}; // YYYY-MM → aggregato
+        const balardiConsumo = { count: 0, importo_eur: 0, ordini: [] };
+        let ordiniForecast = 0;
+        let ordiniSkipped = 0;
+        
+        ordini.forEach(ordine => {
+          const mp = riconosciMarketplace(ordine);
+          const policy = mp.config.payment_policy;
+          if (!policy) { ordiniSkipped++; return; }
+          
+          const refundInfo = getOrderRefundInfo(ordine);
+          if (refundInfo.isFullRefund) { ordiniSkipped++; return; } // no forecast su resi totali
+          
+          const currencyInfo = getOrderCurrencyInfo(ordine);
+          const prezzoLordoOriginale = currencyInfo.eurTotal;
+          const prezzoLordo = Math.max(0, prezzoLordoOriginale - refundInfo.totalRefundedEur);
+          
+          // Calcola costo merce (fallback cost DUO)
+          const { costo: costoMerce } = calcolaCostoOrdine(ordine, variantCosts, duoUserCosts);
+          let costoMerceEffettivo = costoMerce;
+          if (refundInfo.isPartialRefund && refundInfo.totalQuantity > 0) {
+            const ratio = refundInfo.refundedQuantity / refundInfo.totalQuantity;
+            costoMerceEffettivo = costoMerce * (1 - ratio);
+          }
+          
+          // Spedizione EUR
+          const spedizione = (ordine.shipping_lines || []).reduce((s, line) => s + toEurAmount(line.price_set, line.price, currencyInfo.originalCurrency), 0);
+          
+          // Calcola netto per il venditore (prezzo_netto - fees - sped - packaging, MA netto merce rimane)
+          // Il "netto da incassare dal MP" = prezzo_lordo - sconto - fee_mp - fee_accessoria (NON include costo merce: quello è tuo)
+          const cfg = mp.config;
+          const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
+          const ivaPerc = mp.key === 'POIZON' ? 22 : getIvaPerPaese(country);
+          const prezzoNettoIva = prezzoLordo / (1 + ivaPerc / 100);
+          const prezzoDopoSconto = prezzoNettoIva * (1 - (cfg.sconto_percentuale || 0) / 100);
+          const feesMP = prezzoDopoSconto * ((cfg.fee_principale || 0) / 100)
+                       + prezzoDopoSconto * ((cfg.fee_secondaria || 0) / 100)
+                       + prezzoDopoSconto * ((cfg.fee_accessoria || 0) / 100);
+          const nettoFromMP = Math.max(0, prezzoDopoSconto - feesMP - (cfg.fee_fissa_trasporto === 'GLS' ? 15 : (cfg.fee_fissa_trasporto || 0)) - (cfg.fee_fissa_packaging || 0));
+          
+          const pagamenti = calcolaPagamentiPrevisti(ordine.created_at, policy, nettoFromMP);
+          if (pagamenti.length === 0) { ordiniSkipped++; return; }
+          ordiniForecast++;
+          
+          // Se è Balardi, traccia come consumo wallet (non genera incasso)
+          if (policy.type === 'prepaid_balance') {
+            balardiConsumo.count++;
+            balardiConsumo.importo_eur += nettoFromMP;
+            balardiConsumo.ordini.push({
+              order_number: ordine.order_number,
+              name: ordine.name,
+              created_at: ordine.created_at,
+              importo_consumato: nettoFromMP,
+              prezzo_lordo: prezzoLordo
+            });
+            return;
+          }
+          
+          pagamenti.forEach(pg => {
+            const dateKey = fmtDateISO(pg.data);
+            const monthKey = fmtMonthKey(pg.data);
+            if (!paymentsByDate[dateKey]) paymentsByDate[dateKey] = [];
+            paymentsByDate[dateKey].push({
+              order_number: ordine.order_number,
+              name: ordine.name,
+              created_at: ordine.created_at,
+              marketplace: mp.config.nome,
+              mp_key: mp.key,
+              importo_eur: pg.importo_eur,
+              nota: pg.nota,
+              parte: pg.parte
+            });
+            if (!paymentsByMP[mp.key]) paymentsByMP[mp.key] = { nome: mp.config.nome, pagamento_desc: mp.config.pagamento, ordini: 0, importo_totale: 0, prossimo_bonifico: null, pagamenti: [] };
+            paymentsByMP[mp.key].ordini++;
+            paymentsByMP[mp.key].importo_totale += pg.importo_eur;
+            paymentsByMP[mp.key].pagamenti.push({ data: dateKey, order_number: ordine.order_number, importo_eur: pg.importo_eur, nota: pg.nota });
+            if (!paymentsByMonth[monthKey]) paymentsByMonth[monthKey] = { mese: monthKey, importo_totale: 0, ordini_count: 0, per_mp: {} };
+            paymentsByMonth[monthKey].importo_totale += pg.importo_eur;
+            paymentsByMonth[monthKey].ordini_count++;
+            if (!paymentsByMonth[monthKey].per_mp[mp.key]) paymentsByMonth[monthKey].per_mp[mp.key] = { nome: mp.config.nome, importo: 0, count: 0 };
+            paymentsByMonth[monthKey].per_mp[mp.key].importo += pg.importo_eur;
+            paymentsByMonth[monthKey].per_mp[mp.key].count++;
+          });
+        });
+        
+        // Determina prossimo bonifico per ogni MP (data minima >= oggi)
+        const todayStr = fmtDateISO(new Date());
+        Object.keys(paymentsByMP).forEach(k => {
+          const futuri = paymentsByMP[k].pagamenti.filter(p => p.data >= todayStr).sort((a, b) => a.data.localeCompare(b.data));
+          paymentsByMP[k].prossimo_bonifico = futuri.length > 0 ? { data: futuri[0].data, importo_parziale: futuri.filter(f => f.data === futuri[0].data).reduce((s, f) => s + f.importo_eur, 0) } : null;
+        });
+        
+        // Mesi correnti e futuri
+        const oggi = new Date();
+        const meseCorrente = fmtMonthKey(oggi);
+        const meseProssimo = fmtMonthKey(new Date(oggi.getFullYear(), oggi.getMonth() + 1, 1));
+        const mesiSecondoProssimo = fmtMonthKey(new Date(oggi.getFullYear(), oggi.getMonth() + 2, 1));
+        
+        const incassoMeseCorrente = paymentsByMonth[meseCorrente] || { importo_totale: 0, ordini_count: 0 };
+        const incassoMeseProssimo = paymentsByMonth[meseProssimo] || { importo_totale: 0, ordini_count: 0 };
+        const incassoMeseSecondoProssimo = paymentsByMonth[mesiSecondoProssimo] || { importo_totale: 0, ordini_count: 0 };
+        
+        // Pending totale (da oggi in avanti)
+        let pendingTotale = 0, pendingCount = 0;
+        Object.entries(paymentsByDate).forEach(([date, arr]) => {
+          if (date >= todayStr) { arr.forEach(p => { pendingTotale += p.importo_eur; pendingCount++; }); }
+        });
+        
+        // Balardi wallet: leggi ricariche da KV
+        let balardiWallet = { credito_ricaricato: 0, credito_consumato: balardiConsumo.importo_eur, credito_residuo: -balardiConsumo.importo_eur, ricariche: [], consumo_periodo: balardiConsumo };
+        if (KV_ENABLED) {
+          try {
+            const raw = await kvGet('balardi_wallet_ricariche');
+            if (raw) {
+              const ricariche = JSON.parse(raw);
+              const totRicaricato = (ricariche || []).reduce((s, r) => s + parseFloat(r.importo || 0), 0);
+              balardiWallet.credito_ricaricato = totRicaricato;
+              balardiWallet.credito_residuo = totRicaricato - balardiConsumo.importo_eur;
+              balardiWallet.ricariche = ricariche;
+            }
+          } catch (e) {}
+        }
+        
+        // Ordina breakdown MP per prossimo bonifico
+        const breakdownMP = Object.values(paymentsByMP).sort((a, b) => {
+          if (!a.prossimo_bonifico) return 1;
+          if (!b.prossimo_bonifico) return -1;
+          return a.prossimo_bonifico.data.localeCompare(b.prossimo_bonifico.data);
+        });
+        
+        return res.json({
+          success: true,
+          periodo_analisi: { from: fmtDateISO(dateFrom), to: fmtDateISO(dateTo), days_back: daysBack },
+          ordini_analizzati: ordini.length,
+          ordini_con_forecast: ordiniForecast,
+          ordini_skipped: ordiniSkipped,
+          kpi: {
+            incasso_mese_corrente: { mese: meseCorrente, importo: incassoMeseCorrente.importo_totale, ordini: incassoMeseCorrente.ordini_count },
+            incasso_mese_prossimo: { mese: meseProssimo, importo: incassoMeseProssimo.importo_totale, ordini: incassoMeseProssimo.ordini_count },
+            incasso_mese_dopo: { mese: mesiSecondoProssimo, importo: incassoMeseSecondoProssimo.importo_totale, ordini: incassoMeseSecondoProssimo.ordini_count },
+            pending_totale: pendingTotale,
+            pending_count: pendingCount
+          },
+          breakdown_marketplace: breakdownMP,
+          timeline_mensile: Object.values(paymentsByMonth).sort((a, b) => a.mese.localeCompare(b.mese)),
+          balardi_wallet: balardiWallet,
+          ultima_sincronizzazione: new Date().toISOString()
+        });
+      } catch (error) { return res.status(500).json({ success: false, error: error.message, stack: error.stack }); }
+    }
+    
+    // Balardi wallet: aggiungi ricarica
+    if (req.method === 'POST' && path === '/api/balardi-ricarica') {
+      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV non configurato' });
+      try {
+        let body = '';
+        await new Promise((resolve, reject) => { req.on('data', c => body += c); req.on('end', resolve); req.on('error', reject); });
+        const data = JSON.parse(body || '{}');
+        const importo = parseFloat(data.importo);
+        const nota = (data.nota || '').substring(0, 200);
+        const data_ricarica = data.data_ricarica || fmtDateISO(new Date());
+        if (isNaN(importo) || importo <= 0) return res.status(400).json({ success: false, error: 'Importo non valido' });
+        const raw = await kvGet('balardi_wallet_ricariche');
+        const ricariche = raw ? JSON.parse(raw) : [];
+        ricariche.push({ id: Date.now(), data_ricarica, importo, nota, creato: new Date().toISOString() });
+        await kvSet('balardi_wallet_ricariche', JSON.stringify(ricariche));
+        return res.json({ success: true, ricariche });
+      } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
+    }
+    
+    // Balardi wallet: rimuovi ricarica
+    if (req.method === 'POST' && path === '/api/balardi-ricarica-delete') {
+      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV non configurato' });
+      try {
+        let body = '';
+        await new Promise((resolve, reject) => { req.on('data', c => body += c); req.on('end', resolve); req.on('error', reject); });
+        const data = JSON.parse(body || '{}');
+        const id = parseInt(data.id);
+        if (isNaN(id)) return res.status(400).json({ success: false, error: 'ID non valido' });
+        const raw = await kvGet('balardi_wallet_ricariche');
+        const ricariche = raw ? JSON.parse(raw) : [];
+        const filtered = ricariche.filter(r => r.id !== id);
+        await kvSet('balardi_wallet_ricariche', JSON.stringify(filtered));
+        return res.json({ success: true, ricariche: filtered });
+      } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
+    }
+
     if (req.method === 'GET' && path === '/api/debug-winkelstraat') {
       try {
         const periodo = query.get('periodo') || 'month';
