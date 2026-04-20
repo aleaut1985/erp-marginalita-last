@@ -1,4 +1,4 @@
-// ERP Marginalità v5.8 - Previsioni Incassi (scadenziari MP + wallet Balardi)
+// ERP Marginalità v5.8.1 - Aggiunto /api/inventory-discovery (pre v5.9)
 
 import * as crypto from 'node:crypto';
 
@@ -2832,6 +2832,80 @@ export default async function handler(req, res) {
       } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
     }
 
+    // ============ INVENTORY DISCOVERY (temporaneo per v5.9) ============
+    // Analizza i prodotti Shopify per capire come sono classificati product_type + tags
+    if (req.method === 'GET' && path === '/api/inventory-discovery') {
+      try {
+        const token = await getShopifyAccessToken();
+        // Fetch primi 250 prodotti attivi
+        const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?status=active&limit=250`;
+        const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
+        if (!response.ok) throw new Error(`Shopify ${response.status}`);
+        const data = await response.json();
+        const products = data.products || [];
+        
+        // Conta product_type
+        const productTypes = {};
+        const tagsCount = {};
+        const vendors = {};
+        let totalVariants = 0, totalInventory = 0;
+        
+        products.forEach(p => {
+          const pt = (p.product_type || '').trim();
+          productTypes[pt || '(vuoto)'] = (productTypes[pt || '(vuoto)'] || 0) + 1;
+          vendors[p.vendor || '(vuoto)'] = (vendors[p.vendor || '(vuoto)'] || 0) + 1;
+          const tags = (p.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+          tags.forEach(t => { tagsCount[t] = (tagsCount[t] || 0) + 1; });
+          (p.variants || []).forEach(v => {
+            totalVariants++;
+            totalInventory += parseInt(v.inventory_quantity) || 0;
+          });
+        });
+        
+        // Ordina per frequenza
+        const sortedTypes = Object.entries(productTypes).sort((a, b) => b[1] - a[1]).slice(0, 25);
+        const sortedTags = Object.entries(tagsCount).sort((a, b) => b[1] - a[1]).slice(0, 40);
+        const sortedVendors = Object.entries(vendors).sort((a, b) => b[1] - a[1]).slice(0, 15);
+        
+        // 3 prodotti campione: uno con tag DUO, uno senza, uno random
+        const campionDUO = products.find(p => (p.tags || '').toLowerCase().includes('duo'));
+        const campionNoDUO = products.find(p => !((p.tags || '').toLowerCase().includes('duo')));
+        const campionRandom = products[Math.floor(products.length / 2)];
+        const estraiCampione = (p) => p ? {
+          id: p.id,
+          title: p.title,
+          product_type: p.product_type,
+          vendor: p.vendor,
+          tags: p.tags,
+          handle: p.handle,
+          status: p.status,
+          published_at: p.published_at,
+          varianti_count: (p.variants || []).length,
+          inventario_totale: (p.variants || []).reduce((s, v) => s + (parseInt(v.inventory_quantity) || 0), 0),
+          sample_variant: (p.variants || [])[0] ? { sku: p.variants[0].sku, price: p.variants[0].price, inventory_quantity: p.variants[0].inventory_quantity } : null
+        } : null;
+        
+        return res.json({
+          success: true,
+          note: 'Endpoint temporaneo per scoperta struttura dati prodotti (v5.9 discovery)',
+          products_analizzati: products.length,
+          nota_paginazione: products.length === 250 ? 'ATTENZIONE: limite 250. Probabilmente hai più prodotti totali.' : 'Tutti i prodotti attivi analizzati',
+          stats_globali: {
+            totale_varianti: totalVariants,
+            totale_inventario_pezzi: totalInventory
+          },
+          product_types_top25: sortedTypes.map(([k, v]) => ({ type: k, count: v })),
+          tags_top40: sortedTags.map(([k, v]) => ({ tag: k, count: v })),
+          vendors_top15: sortedVendors.map(([k, v]) => ({ vendor: k, count: v })),
+          campione_con_tag_duo: estraiCampione(campionDUO),
+          campione_senza_tag_duo: estraiCampione(campionNoDUO),
+          campione_random: estraiCampione(campionRandom)
+        });
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    }
+
     if (req.method === 'GET' && path === '/api/debug-winkelstraat') {
       try {
         const periodo = query.get('periodo') || 'month';
@@ -2964,6 +3038,81 @@ export default async function handler(req, res) {
         const data = await response.json();
         return res.json({ success: true, shop_name: data.shop.name, message: 'Shopify connesso' });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
+    }
+
+    // DISCOVERY: analizza il catalogo per capire la struttura (product_type, tags, vendor)
+    if (req.method === 'GET' && path === '/api/inventory-discovery') {
+      try {
+        const token = await getShopifyAccessToken();
+        const sample = parseInt(query.get('sample') || '250', 10);
+        // Fetch fino a `sample` prodotti attivi
+        const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?status=active&limit=${Math.min(sample, 250)}&fields=id,title,handle,product_type,vendor,tags,status,variants`;
+        const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' } });
+        if (!r.ok) { const t = await r.text(); return res.status(500).json({ success: false, error: `Shopify ${r.status}: ${t.substring(0, 200)}` }); }
+        const data = await r.json();
+        const prodotti = data.products || [];
+        
+        // Conta product_type
+        const productTypes = {};
+        const vendors = {};
+        const tagsAll = {};
+        let prodottiAttivi = 0;
+        let prodottiConStock = 0;
+        let prodottiZeroStock = 0;
+        let totalePezzi = 0;
+        let totaleVarianti = 0;
+        const sampleProducts = [];
+        
+        prodotti.forEach(p => {
+          if (p.status !== 'active') return;
+          prodottiAttivi++;
+          const pt = (p.product_type || '(vuoto)').trim();
+          productTypes[pt] = (productTypes[pt] || 0) + 1;
+          const v = (p.vendor || '(vuoto)').trim();
+          vendors[v] = (vendors[v] || 0) + 1;
+          (p.tags || '').split(',').map(t => t.trim()).filter(t => t).forEach(tag => {
+            tagsAll[tag] = (tagsAll[tag] || 0) + 1;
+          });
+          // Stock
+          const qty = (p.variants || []).reduce((s, v) => s + Math.max(0, parseInt(v.inventory_quantity) || 0), 0);
+          totalePezzi += qty;
+          totaleVarianti += (p.variants || []).length;
+          if (qty > 0) prodottiConStock++;
+          else prodottiZeroStock++;
+          
+          // Sample con dettagli (primi 5)
+          if (sampleProducts.length < 5) {
+            sampleProducts.push({
+              id: p.id, title: p.title, handle: p.handle,
+              product_type: p.product_type, vendor: p.vendor,
+              tags: p.tags, stock: qty,
+              varianti_count: (p.variants || []).length,
+              prima_variante_sku: (p.variants && p.variants[0]) ? p.variants[0].sku : null
+            });
+          }
+        });
+        
+        // Ordina per frequenza
+        const sortByCount = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ valore: k, count: v }));
+        
+        return res.json({
+          success: true,
+          campione_analizzato: prodotti.length,
+          prodotti_attivi: prodottiAttivi,
+          prodotti_con_stock: prodottiConStock,
+          prodotti_zero_stock: prodottiZeroStock,
+          totale_varianti: totaleVarianti,
+          totale_pezzi_nel_campione: totalePezzi,
+          product_types_distinti: Object.keys(productTypes).length,
+          product_types: sortByCount(productTypes),
+          vendors_distinti: Object.keys(vendors).length,
+          vendors: sortByCount(vendors).slice(0, 30),
+          tags_distinti: Object.keys(tagsAll).length,
+          tags_top_50: sortByCount(tagsAll).slice(0, 50),
+          sample_prodotti: sampleProducts,
+          nota: prodotti.length < 250 ? 'Campione completo (catalogo < 250 prodotti).' : `Campione di ${prodotti.length}. Per catalogo completo chiama /api/inventory-full quando sarà disponibile.`
+        });
+      } catch (e) { return res.status(500).json({ success: false, error: e.message, stack: e.stack }); }
     }
 
     if (req.method === 'GET' && path === '/api/marketplaces') {
