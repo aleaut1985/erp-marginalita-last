@@ -1,4 +1,4 @@
-// ERP Marginalità v3.4 - Italist + Filtro Custom + Century Gothic
+// ERP Marginalità v3.5 - Fix Content-Type OAuth Shopify
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'autore-luxit.myshopify.com';
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
@@ -10,12 +10,23 @@ let tokenExpiry = null;
 async function getShopifyAccessToken() {
   if (cachedToken && tokenExpiry && Date.now() < tokenExpiry) return cachedToken;
   if (!SHOPIFY_CLIENT_ID || !SHOPIFY_CLIENT_SECRET) throw new Error('Missing credentials');
+  
+  const body = new URLSearchParams();
+  body.append('client_id', SHOPIFY_CLIENT_ID);
+  body.append('client_secret', SHOPIFY_CLIENT_SECRET);
+  body.append('grant_type', 'client_credentials');
+  
   const response = await fetch(`https://${SHOPIFY_STORE}/admin/oauth/access_token`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ client_id: SHOPIFY_CLIENT_ID, client_secret: SHOPIFY_CLIENT_SECRET, grant_type: 'client_credentials' })
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString()
   });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`HTTP ${response.status}: ${errText}`);
+  }
+  
   const data = await response.json();
   cachedToken = data.access_token;
   tokenExpiry = Date.now() + (23 * 60 * 60 * 1000);
@@ -187,206 +198,46 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     --font-main: 'Century Gothic', 'CenturyGothic', 'AppleGothic', Futura, 'Trebuchet MS', sans-serif;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { 
-    font-family: var(--font-main);
-    background: var(--beige);
-    min-height: 100vh; 
-    color: var(--black);
-    -webkit-font-smoothing: antialiased;
-    line-height: 1.5;
-    letter-spacing: 0.01em;
-  }
+  body { font-family: var(--font-main); background: var(--beige); min-height: 100vh; color: var(--black); -webkit-font-smoothing: antialiased; line-height: 1.5; letter-spacing: 0.01em; }
   .container { max-width: 1440px; margin: 0 auto; padding: 24px; }
-
-  /* HEADER */
-  .header { 
-    background: var(--white); 
-    border-radius: var(--radius-lg); 
-    padding: 32px 40px;
-    margin-bottom: 24px;
-    box-shadow: var(--shadow-md);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 20px;
-    border: 1px solid var(--gray-100);
-  }
+  .header { background: var(--white); border-radius: var(--radius-lg); padding: 32px 40px; margin-bottom: 24px; box-shadow: var(--shadow-md); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px; border: 1px solid var(--gray-100); }
   .header-left { display: flex; align-items: center; gap: 28px; }
-  .logo {
-    font-family: var(--font-main);
-    font-weight: 700;
-    font-size: 2.6rem;
-    color: var(--black);
-    letter-spacing: 0.02em;
-    line-height: 1;
-    text-transform: uppercase;
-  }
+  .logo { font-family: var(--font-main); font-weight: 700; font-size: 2.6rem; color: var(--black); letter-spacing: 0.02em; line-height: 1; text-transform: uppercase; }
   .logo .dot { color: var(--gold); }
   .header-divider { width: 1px; height: 52px; background: var(--gray-200); }
-  .header-info h1 { 
-    font-size: 1.05rem; 
-    font-weight: 700; 
-    color: var(--gray-900); 
-    margin-bottom: 3px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
+  .header-info h1 { font-size: 1.05rem; font-weight: 700; color: var(--gray-900); margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
   .header-info p { font-size: 0.8rem; color: var(--gray-500); letter-spacing: 0.03em; }
   .header-right { display: flex; align-items: center; gap: 16px; }
-  .status-pill {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 8px 16px;
-    background: var(--green-light);
-    color: var(--green-dark);
-    border-radius: 50px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    border: 1px solid rgba(0,128,96,0.15);
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }
-  .status-dot {
-    width: 7px; height: 7px;
-    background: var(--green-primary);
-    border-radius: 50%;
-    animation: pulse 2s infinite;
-  }
+  .status-pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--green-light); color: var(--green-dark); border-radius: 50px; font-size: 0.75rem; font-weight: 700; border: 1px solid rgba(0,128,96,0.15); letter-spacing: 0.05em; text-transform: uppercase; }
+  .status-dot { width: 7px; height: 7px; background: var(--green-primary); border-radius: 50%; animation: pulse 2s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
-
-  /* TABS */
   .tabs-wrap { background: var(--white); border-radius: var(--radius-lg); padding: 8px; margin-bottom: 24px; box-shadow: var(--shadow-sm); border: 1px solid var(--gray-100); }
   .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
-  .tab { 
-    flex: 1; min-width: 130px;
-    padding: 14px 20px; 
-    border: none; background: transparent; 
-    border-radius: var(--radius-md); 
-    cursor: pointer; 
-    font-family: var(--font-main);
-    font-weight: 700; 
-    font-size: 0.82rem; 
-    color: var(--gray-700);
-    transition: all 0.25s ease;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
+  .tab { flex: 1; min-width: 130px; padding: 14px 20px; border: none; background: transparent; border-radius: var(--radius-md); cursor: pointer; font-family: var(--font-main); font-weight: 700; font-size: 0.82rem; color: var(--gray-700); transition: all 0.25s ease; letter-spacing: 0.06em; text-transform: uppercase; }
   .tab:hover { background: var(--gray-100); color: var(--black); }
   .tab.active { background: var(--black); color: var(--white); }
   .tab-content { display: none; animation: fade 0.4s ease; }
   .tab-content.active { display: block; }
   @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-
-  /* SECTIONS */
-  .section { 
-    background: var(--white); 
-    border-radius: var(--radius-lg); 
-    padding: 36px; 
-    margin-bottom: 24px; 
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--gray-100);
-  }
+  .section { background: var(--white); border-radius: var(--radius-lg); padding: 36px; margin-bottom: 24px; box-shadow: var(--shadow-sm); border: 1px solid var(--gray-100); }
   .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; flex-wrap: wrap; gap: 16px; }
-  .section-title { 
-    font-family: var(--font-main);
-    font-size: 1.6rem; 
-    font-weight: 700; 
-    color: var(--black); 
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-  }
+  .section-title { font-family: var(--font-main); font-size: 1.6rem; font-weight: 700; color: var(--black); letter-spacing: 0.02em; text-transform: uppercase; }
   .section-subtitle { font-size: 0.85rem; color: var(--gray-500); margin-top: 6px; letter-spacing: 0.02em; }
-
-  /* INFO BOXES */
-  .info-box { 
-    background: var(--green-light); 
-    border-left: 3px solid var(--green-primary); 
-    padding: 14px 20px; 
-    border-radius: var(--radius-sm); 
-    margin-bottom: 24px; 
-    font-size: 0.85rem; 
-    color: var(--green-dark);
-  }
-  .warn-box { 
-    background: var(--gold-light); 
-    border-left: 3px solid var(--gold); 
-    padding: 14px 20px; 
-    border-radius: var(--radius-sm); 
-    margin-bottom: 24px; 
-    font-size: 0.85rem; 
-    color: #6B5320;
-  }
-
-  /* PERIOD SELECTOR */
-  .filter-bar { 
-    display: flex; 
-    align-items: center; 
-    gap: 16px; 
-    margin-bottom: 28px; 
-    flex-wrap: wrap;
-  }
-  .period-selector { 
-    display: flex; gap: 6px;
-    background: var(--gray-100);
-    padding: 6px;
-    border-radius: 50px;
-    flex-wrap: wrap;
-  }
-  .period-btn { 
-    padding: 10px 22px; 
-    border: none; 
-    background: transparent; 
-    border-radius: 50px; 
-    cursor: pointer; 
-    font-family: var(--font-main);
-    font-weight: 700; 
-    font-size: 0.78rem; 
-    color: var(--gray-700);
-    transition: all 0.2s ease;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
+  .info-box { background: var(--green-light); border-left: 3px solid var(--green-primary); padding: 14px 20px; border-radius: var(--radius-sm); margin-bottom: 24px; font-size: 0.85rem; color: var(--green-dark); }
+  .warn-box { background: var(--gold-light); border-left: 3px solid var(--gold); padding: 14px 20px; border-radius: var(--radius-sm); margin-bottom: 24px; font-size: 0.85rem; color: #6B5320; }
+  .filter-bar { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; }
+  .period-selector { display: flex; gap: 6px; background: var(--gray-100); padding: 6px; border-radius: 50px; flex-wrap: wrap; }
+  .period-btn { padding: 10px 22px; border: none; background: transparent; border-radius: 50px; cursor: pointer; font-family: var(--font-main); font-weight: 700; font-size: 0.78rem; color: var(--gray-700); transition: all 0.2s ease; letter-spacing: 0.06em; text-transform: uppercase; }
   .period-btn:hover { color: var(--black); }
   .period-btn.active { background: var(--white); color: var(--black); box-shadow: var(--shadow-sm); }
-  .custom-range {
-    display: flex; align-items: center; gap: 8px;
-    background: var(--white);
-    border: 1.5px solid var(--gray-200);
-    border-radius: 50px;
-    padding: 6px 8px 6px 18px;
-  }
+  .custom-range { display: flex; align-items: center; gap: 8px; background: var(--white); border: 1.5px solid var(--gray-200); border-radius: 50px; padding: 6px 8px 6px 18px; }
   .custom-range label { font-size: 0.72rem; font-weight: 700; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.06em; }
-  .custom-range input[type="date"] {
-    border: none; background: transparent;
-    font-family: var(--font-main);
-    font-size: 0.85rem; color: var(--black);
-    padding: 6px 8px; cursor: pointer;
-  }
+  .custom-range input[type="date"] { border: none; background: transparent; font-family: var(--font-main); font-size: 0.85rem; color: var(--black); padding: 6px 8px; cursor: pointer; }
   .custom-range input[type="date"]:focus { outline: none; }
-  .custom-range .apply-btn {
-    background: var(--black); color: var(--white);
-    border: none; padding: 8px 18px;
-    border-radius: 50px;
-    font-family: var(--font-main);
-    font-size: 0.72rem; font-weight: 700;
-    cursor: pointer;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    transition: background 0.2s;
-  }
+  .custom-range .apply-btn { background: var(--black); color: var(--white); border: none; padding: 8px 18px; border-radius: 50px; font-family: var(--font-main); font-size: 0.72rem; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.06em; transition: background 0.2s; }
   .custom-range .apply-btn:hover { background: var(--green-dark); }
-
-  /* KPI CARDS */
   .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
-  .kpi { 
-    background: var(--white);
-    border: 1px solid var(--gray-200);
-    border-radius: var(--radius-md); 
-    padding: 24px;
-    transition: all 0.25s ease;
-    position: relative;
-    overflow: hidden;
-  }
+  .kpi { background: var(--white); border: 1px solid var(--gray-200); border-radius: var(--radius-md); padding: 24px; transition: all 0.25s ease; position: relative; overflow: hidden; }
   .kpi:hover { border-color: var(--gray-300); transform: translateY(-2px); box-shadow: var(--shadow-md); }
   .kpi.primary { background: var(--black); color: var(--white); border-color: var(--black); }
   .kpi.primary .kpi-label { color: rgba(255,255,255,0.7); }
@@ -395,127 +246,39 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .kpi.green .kpi-label { color: rgba(255,255,255,0.85); }
   .kpi.green .kpi-sub { color: rgba(255,255,255,0.65); }
   .kpi.gold { background: var(--gold-light); border-color: var(--gold); }
-  .kpi-label { 
-    font-size: 0.7rem; 
-    text-transform: uppercase; 
-    letter-spacing: 0.1em; 
-    font-weight: 700; 
-    color: var(--gray-500);
-    margin-bottom: 14px;
-  }
-  .kpi-value { 
-    font-family: var(--font-main);
-    font-size: 1.9rem; 
-    font-weight: 700;
-    line-height: 1.1;
-    margin-bottom: 6px;
-    letter-spacing: 0.01em;
-  }
+  .kpi-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; color: var(--gray-500); margin-bottom: 14px; }
+  .kpi-value { font-family: var(--font-main); font-size: 1.9rem; font-weight: 700; line-height: 1.1; margin-bottom: 6px; letter-spacing: 0.01em; }
   .kpi-sub { font-size: 0.74rem; color: var(--gray-500); letter-spacing: 0.04em; }
-
-  /* FORMS */
   .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; }
   .form-group { display: flex; flex-direction: column; gap: 8px; }
   .form-group label { font-weight: 700; color: var(--black); font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; }
-  .form-group input, .form-group select { 
-    padding: 13px 16px; 
-    border: 1.5px solid var(--gray-200); 
-    border-radius: var(--radius-md); 
-    font-size: 0.95rem; 
-    font-family: var(--font-main);
-    background: var(--white);
-    color: var(--black);
-    transition: all 0.2s ease;
-  }
-  .form-group input:focus, .form-group select:focus { 
-    outline: none; 
-    border-color: var(--green-primary); 
-    box-shadow: 0 0 0 3px rgba(0,128,96,0.1); 
-  }
-  .btn-primary { 
-    background: var(--black); 
-    color: var(--white); 
-    border: none; 
-    padding: 16px 32px; 
-    border-radius: var(--radius-md); 
-    font-size: 0.85rem; 
-    font-family: var(--font-main);
-    font-weight: 700; 
-    cursor: pointer; 
-    width: 100%; 
-    margin-top: 20px; 
-    transition: all 0.2s ease;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
+  .form-group input, .form-group select { padding: 13px 16px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-md); font-size: 0.95rem; font-family: var(--font-main); background: var(--white); color: var(--black); transition: all 0.2s ease; }
+  .form-group input:focus, .form-group select:focus { outline: none; border-color: var(--green-primary); box-shadow: 0 0 0 3px rgba(0,128,96,0.1); }
+  .btn-primary { background: var(--black); color: var(--white); border: none; padding: 16px 32px; border-radius: var(--radius-md); font-size: 0.85rem; font-family: var(--font-main); font-weight: 700; cursor: pointer; width: 100%; margin-top: 20px; transition: all 0.2s ease; letter-spacing: 0.08em; text-transform: uppercase; }
   .btn-primary:hover { background: var(--green-dark); transform: translateY(-1px); box-shadow: var(--shadow-md); }
-
-  /* RESULTS */
   .results { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-top: 28px; }
-  .result-card { 
-    background: var(--gray-100); 
-    border-radius: var(--radius-md); 
-    padding: 18px; 
-    border: 1.5px solid transparent;
-    transition: all 0.2s ease;
-  }
+  .result-card { background: var(--gray-100); border-radius: var(--radius-md); padding: 18px; border: 1.5px solid transparent; transition: all 0.2s ease; }
   .result-card.positive { background: var(--green-light); border-color: var(--green-primary); }
   .result-card.negative { background: var(--red-light); border-color: var(--red); }
   .result-label { font-size: 0.68rem; color: var(--gray-500); text-transform: uppercase; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 8px; }
   .result-value { font-family: var(--font-main); font-size: 1.25rem; font-weight: 700; color: var(--black); letter-spacing: 0.01em; }
-
-  /* MARKETPLACE GRID */
   .mp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
-  .mp-card { 
-    background: var(--white);
-    border: 1.5px solid var(--gray-200); 
-    border-radius: var(--radius-md); 
-    padding: 24px; 
-    cursor: pointer; 
-    transition: all 0.25s ease;
-  }
+  .mp-card { background: var(--white); border: 1.5px solid var(--gray-200); border-radius: var(--radius-md); padding: 24px; cursor: pointer; transition: all 0.25s ease; }
   .mp-card:hover { border-color: var(--green-primary); transform: translateY(-3px); box-shadow: var(--shadow-md); }
   .mp-name { font-family: var(--font-main); font-size: 1.1rem; font-weight: 700; color: var(--black); margin-bottom: 6px; letter-spacing: 0.02em; text-transform: uppercase; }
   .mp-pay { font-size: 0.7rem; color: var(--gray-500); margin-bottom: 14px; letter-spacing: 0.04em; }
   .mp-fees { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.85rem; color: var(--gray-700); }
   .mp-fees strong { color: var(--gray-500); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; display: block; margin-bottom: 2px; font-weight: 700; }
-
-  /* BEST SELLERS */
   .bs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; }
-  .bs-card { 
-    background: var(--white); 
-    border: 1.5px solid var(--gray-200); 
-    border-radius: var(--radius-md); 
-    overflow: hidden; 
-    transition: all 0.25s ease; 
-    position: relative;
-  }
+  .bs-card { background: var(--white); border: 1.5px solid var(--gray-200); border-radius: var(--radius-md); overflow: hidden; transition: all 0.25s ease; position: relative; }
   .bs-card:hover { border-color: var(--gold); transform: translateY(-4px); box-shadow: var(--shadow-lg); }
-  .bs-rank { 
-    position: absolute; top: 14px; left: 14px; 
-    background: var(--black); 
-    color: var(--white); 
-    width: 36px; height: 36px; 
-    border-radius: 50%; 
-    display: flex; align-items: center; justify-content: center; 
-    font-weight: 700; font-size: 0.95rem; 
-    z-index: 2;
-    box-shadow: 0 4px 12px rgba(26,26,26,0.3);
-  }
+  .bs-rank { position: absolute; top: 14px; left: 14px; background: var(--black); color: var(--white); width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.95rem; z-index: 2; box-shadow: 0 4px 12px rgba(26,26,26,0.3); }
   .bs-rank.top3 { background: var(--gold); color: var(--black); }
   .bs-image { width: 100%; height: 220px; background: var(--gray-100); display: flex; align-items: center; justify-content: center; overflow: hidden; }
   .bs-image img { width: 100%; height: 100%; object-fit: cover; }
   .bs-image-placeholder { color: var(--gray-300); font-size: 3rem; }
   .bs-body { padding: 20px; }
-  .bs-title { 
-    font-family: var(--font-main);
-    font-weight: 700; color: var(--black); 
-    font-size: 1rem; margin-bottom: 4px; 
-    line-height: 1.3; 
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-    letter-spacing: 0.01em;
-    text-transform: uppercase;
-  }
+  .bs-title { font-family: var(--font-main); font-weight: 700; color: var(--black); font-size: 1rem; margin-bottom: 4px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; letter-spacing: 0.01em; text-transform: uppercase; }
   .bs-variant { font-size: 0.74rem; color: var(--gray-500); margin-bottom: 14px; letter-spacing: 0.03em; }
   .bs-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .bs-stat { padding: 10px 12px; background: var(--gray-100); border-radius: var(--radius-sm); }
@@ -525,21 +288,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .bs-stat.ricavo { background: var(--green-light); color: var(--green-dark); }
   .bs-stat.ricavo .bs-stat-value { color: var(--green-dark); }
   .bs-empty { text-align: center; padding: 80px 20px; color: var(--gray-500); font-style: italic; grid-column: 1 / -1; }
-
-  /* COMPARE */
   .confronto-form { background: var(--cream); padding: 24px; border-radius: var(--radius-md); margin-bottom: 24px; border: 1px solid var(--gray-200); }
   .table-wrap { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--gray-200); }
   .compare-table { width: 100%; border-collapse: collapse; background: var(--white); }
   .compare-table thead { background: var(--black); color: var(--white); }
-  .compare-table th { 
-    padding: 16px 14px; 
-    text-align: left; 
-    font-size: 0.68rem; 
-    text-transform: uppercase; 
-    letter-spacing: 0.1em; 
-    font-weight: 700; 
-    white-space: nowrap;
-  }
+  .compare-table th { padding: 16px 14px; text-align: left; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; white-space: nowrap; }
   .compare-table td { padding: 16px 14px; border-bottom: 1px solid var(--gray-100); font-size: 0.88rem; color: var(--gray-900); }
   .compare-table tbody tr { transition: background 0.15s ease; }
   .compare-table tbody tr:hover { background: var(--cream); }
@@ -549,16 +302,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .compare-table tr.worst { background: var(--red-light); }
   .compare-table tr.worst td:first-child { border-left: 3px solid var(--red); }
   .compare-table tr.worst:hover { background: #FAE0E0; }
-  .mp-pill { 
-    display: inline-block; 
-    padding: 3px 10px; 
-    border-radius: 20px; 
-    font-size: 0.62rem; 
-    font-weight: 700; 
-    margin-left: 8px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
+  .mp-pill { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.62rem; font-weight: 700; margin-left: 8px; letter-spacing: 0.08em; text-transform: uppercase; }
   .mp-pill.win { background: var(--green-primary); color: var(--white); }
   .mp-pill.lose { background: var(--red); color: var(--white); }
   .num-pos { color: var(--green-dark); font-weight: 700; }
@@ -571,43 +315,24 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .summary-label { font-size: 0.68rem; color: var(--gray-700); text-transform: uppercase; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 8px; }
   .summary-value { font-family: var(--font-main); font-size: 1.2rem; font-weight: 700; color: var(--black); letter-spacing: 0.02em; text-transform: uppercase; }
   .summary-detail { margin-top: 6px; font-size: 0.82rem; color: var(--gray-700); }
-
-  @media (max-width: 768px) { 
-    .container { padding: 16px; }
-    .header { padding: 24px; }
-    .logo { font-size: 1.9rem; }
-    .section { padding: 24px; }
-    .tabs { flex-direction: column; }
-    .tab { min-width: auto; }
-    .header-divider { display: none; }
-    .kpi-value { font-size: 1.5rem; }
-    .filter-bar { flex-direction: column; align-items: stretch; }
-    .custom-range { flex-wrap: wrap; }
-  }
+  @media (max-width: 768px) { .container { padding: 16px; } .header { padding: 24px; } .logo { font-size: 1.9rem; } .section { padding: 24px; } .tabs { flex-direction: column; } .tab { min-width: auto; } .header-divider { display: none; } .kpi-value { font-size: 1.5rem; } .filter-bar { flex-direction: column; align-items: stretch; } .custom-range { flex-wrap: wrap; } }
 </style>
 </head>
 <body>
 <div class="container">
-
-  <!-- HEADER -->
   <div class="header">
     <div class="header-left">
       <div class="logo">T<span class="dot">.</span> LUXY</div>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v3.4</p>
+        <p>Business Intelligence Dashboard · v3.5</p>
       </div>
     </div>
     <div class="header-right">
-      <div class="status-pill">
-        <div class="status-dot"></div>
-        Sistema Live
-      </div>
+      <div class="status-pill"><div class="status-dot"></div>Sistema Live</div>
     </div>
   </div>
-
-  <!-- TABS -->
   <div class="tabs-wrap">
     <div class="tabs">
       <button class="tab active" onclick="showTab('analytics', event)">Analytics</button>
@@ -617,8 +342,6 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <button class="tab" onclick="showTab('marketplaces', event)">Marketplace</button>
     </div>
   </div>
-
-  <!-- ANALYTICS -->
   <div id="analytics-tab" class="tab-content active">
     <div class="section">
       <div class="section-header">
@@ -638,44 +361,20 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           <button class="period-btn" onclick="setPeriod('year', event)">Anno</button>
         </div>
         <div class="custom-range">
-          <label>Da</label>
-          <input type="date" id="date-from">
-          <label>A</label>
-          <input type="date" id="date-to">
+          <label>Da</label><input type="date" id="date-from">
+          <label>A</label><input type="date" id="date-to">
           <button class="apply-btn" onclick="applyCustomRange()">Applica</button>
         </div>
       </div>
       <div class="kpi-grid">
-        <div class="kpi primary">
-          <div class="kpi-label">Lordo IVA inclusa</div>
-          <div class="kpi-value" id="lordo">€15.240</div>
-          <div class="kpi-sub">Vendite totali</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">IVA Scorporata</div>
-          <div class="kpi-value" id="iva">€2.748</div>
-          <div class="kpi-sub">Da versare</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">Costi Totali</div>
-          <div class="kpi-value" id="costi">€8.432</div>
-          <div class="kpi-sub">Merce + Fees + IVA</div>
-        </div>
-        <div class="kpi green">
-          <div class="kpi-label">Margine Netto</div>
-          <div class="kpi-value" id="netto">€4.060</div>
-          <div class="kpi-sub">Profitto reale</div>
-        </div>
-        <div class="kpi gold">
-          <div class="kpi-label">Margine %</div>
-          <div class="kpi-value" id="margine">26.6%</div>
-          <div class="kpi-sub">Su lordo</div>
-        </div>
+        <div class="kpi primary"><div class="kpi-label">Lordo IVA inclusa</div><div class="kpi-value" id="lordo">€15.240</div><div class="kpi-sub">Vendite totali</div></div>
+        <div class="kpi"><div class="kpi-label">IVA Scorporata</div><div class="kpi-value" id="iva">€2.748</div><div class="kpi-sub">Da versare</div></div>
+        <div class="kpi"><div class="kpi-label">Costi Totali</div><div class="kpi-value" id="costi">€8.432</div><div class="kpi-sub">Merce + Fees + IVA</div></div>
+        <div class="kpi green"><div class="kpi-label">Margine Netto</div><div class="kpi-value" id="netto">€4.060</div><div class="kpi-sub">Profitto reale</div></div>
+        <div class="kpi gold"><div class="kpi-label">Margine %</div><div class="kpi-value" id="margine">26.6%</div><div class="kpi-sub">Su lordo</div></div>
       </div>
     </div>
   </div>
-
-  <!-- BEST SELLERS -->
   <div id="bestsellers-tab" class="tab-content">
     <div class="section">
       <div class="section-header">
@@ -694,10 +393,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           <button class="period-btn" onclick="loadBestSellers('year', event)">Anno</button>
         </div>
         <div class="custom-range">
-          <label>Da</label>
-          <input type="date" id="bs-date-from">
-          <label>A</label>
-          <input type="date" id="bs-date-to">
+          <label>Da</label><input type="date" id="bs-date-from">
+          <label>A</label><input type="date" id="bs-date-to">
           <button class="apply-btn" onclick="applyBsCustomRange()">Applica</button>
         </div>
       </div>
@@ -706,8 +403,6 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
     </div>
   </div>
-
-  <!-- CONFRONTO -->
   <div id="compare-tab" class="tab-content">
     <div class="section">
       <div class="section-header">
@@ -740,14 +435,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         <table class="compare-table" id="compare-table">
           <thead>
             <tr>
-              <th>Marketplace</th>
-              <th>Sconto</th>
-              <th>Prezzo Netto</th>
-              <th>Fees Shopify</th>
-              <th>Fees MP</th>
-              <th>Margine €</th>
-              <th>Margine %</th>
-              <th>Esito</th>
+              <th>Marketplace</th><th>Sconto</th><th>Prezzo Netto</th><th>Fees Shopify</th><th>Fees MP</th><th>Margine €</th><th>Margine %</th><th>Esito</th>
             </tr>
           </thead>
           <tbody id="compare-body"></tbody>
@@ -756,8 +444,6 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="compare-summary" id="compare-summary"></div>
     </div>
   </div>
-
-  <!-- CALCOLATORE -->
   <div id="calculator-tab" class="tab-content">
     <div class="section">
       <div class="section-header">
@@ -799,8 +485,6 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
     </div>
   </div>
-
-  <!-- MARKETPLACES -->
   <div id="marketplaces-tab" class="tab-content">
     <div class="section">
       <div class="section-header">
@@ -813,7 +497,6 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="mp-grid" id="mp-grid"></div>
     </div>
   </div>
-
 </div>
 <script>
 const MARKETPLACES = ${JSON.stringify(MARKETPLACE_CONFIGS)};
@@ -925,23 +608,8 @@ function renderBestSellers(prodotti) {
   cont.innerHTML = prodotti.map((p, i) => {
     const rank = p.rank || (i + 1);
     const rankClass = rank <= 3 ? 'top3' : '';
-    const img = p.immagine 
-      ? '<img src="' + p.immagine + '" alt="' + p.titolo + '" loading="lazy">'
-      : '<div class="bs-image-placeholder">◇</div>';
-    return '<div class="bs-card">' +
-      '<div class="bs-rank ' + rankClass + '">' + rank + '</div>' +
-      '<div class="bs-image">' + img + '</div>' +
-      '<div class="bs-body">' +
-        '<div class="bs-title">' + p.titolo + '</div>' +
-        '<div class="bs-variant">' + (p.variante || '') + (p.sku ? ' · ' + p.sku : '') + '</div>' +
-        '<div class="bs-stats">' +
-          '<div class="bs-stat"><div class="bs-stat-label">Prezzo</div><div class="bs-stat-value">€' + p.prezzo_unit_lordo.toFixed(2) + '</div></div>' +
-          '<div class="bs-stat"><div class="bs-stat-label">Pezzi</div><div class="bs-stat-value">' + p.quantita_venduta + '</div></div>' +
-          '<div class="bs-stat fatturato"><div class="bs-stat-label">Fatturato</div><div class="bs-stat-value">€' + Math.round(p.fatturato_lordo).toLocaleString('it-IT') + '</div></div>' +
-          '<div class="bs-stat ricavo"><div class="bs-stat-label">Ricavo stim.</div><div class="bs-stat-value">€' + Math.round(p.ricavo_stimato).toLocaleString('it-IT') + '</div></div>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
+    const img = p.immagine ? '<img src="' + p.immagine + '" alt="' + p.titolo + '" loading="lazy">' : '<div class="bs-image-placeholder">◇</div>';
+    return '<div class="bs-card"><div class="bs-rank ' + rankClass + '">' + rank + '</div><div class="bs-image">' + img + '</div><div class="bs-body"><div class="bs-title">' + p.titolo + '</div><div class="bs-variant">' + (p.variante || '') + (p.sku ? ' · ' + p.sku : '') + '</div><div class="bs-stats"><div class="bs-stat"><div class="bs-stat-label">Prezzo</div><div class="bs-stat-value">€' + p.prezzo_unit_lordo.toFixed(2) + '</div></div><div class="bs-stat"><div class="bs-stat-label">Pezzi</div><div class="bs-stat-value">' + p.quantita_venduta + '</div></div><div class="bs-stat fatturato"><div class="bs-stat-label">Fatturato</div><div class="bs-stat-value">€' + Math.round(p.fatturato_lordo).toLocaleString('it-IT') + '</div></div><div class="bs-stat ricavo"><div class="bs-stat-label">Ricavo stim.</div><div class="bs-stat-value">€' + Math.round(p.ricavo_stimato).toLocaleString('it-IT') + '</div></div></div></div></div>';
   }).join('');
 }
 
@@ -975,37 +643,13 @@ function confronta() {
     if (i === risultati.length - 1) { cls = 'worst'; pill = '<span class="mp-pill lose">Last</span>'; }
     const numCls = r.margine >= 0 ? 'num-pos' : 'num-neg';
     const esito = r.margine >= 0 ? '✓' : '✕';
-    return '<tr class="' + cls + '">' +
-      '<td><strong>' + r.nome + '</strong>' + pill + '</td>' +
-      '<td>' + r.sconto + '%</td>' +
-      '<td>€' + r.prezzoNetto.toFixed(2) + '</td>' +
-      '<td>€' + r.feesShop.toFixed(2) + '</td>' +
-      '<td>€' + r.feesMp.toFixed(2) + '</td>' +
-      '<td class="' + numCls + '">€' + r.margine.toFixed(2) + '</td>' +
-      '<td class="' + numCls + '">' + r.margineP.toFixed(1) + '%</td>' +
-      '<td style="font-size:1.1rem; font-weight:700; color:' + (r.margine >= 0 ? 'var(--green-primary)' : 'var(--red)') + '">' + esito + '</td>' +
-    '</tr>';
+    return '<tr class="' + cls + '"><td><strong>' + r.nome + '</strong>' + pill + '</td><td>' + r.sconto + '%</td><td>€' + r.prezzoNetto.toFixed(2) + '</td><td>€' + r.feesShop.toFixed(2) + '</td><td>€' + r.feesMp.toFixed(2) + '</td><td class="' + numCls + '">€' + r.margine.toFixed(2) + '</td><td class="' + numCls + '">' + r.margineP.toFixed(1) + '%</td><td style="font-size:1.1rem; font-weight:700; color:' + (r.margine >= 0 ? 'var(--green-primary)' : 'var(--red)') + '">' + esito + '</td></tr>';
   }).join('');
 
   const redditizi = risultati.filter(r => r.margine > 0).length;
   const inPerdita = risultati.filter(r => r.margine <= 0).length;
 
-  document.getElementById('compare-summary').innerHTML = 
-    '<div class="summary-card best-mp">' +
-      '<div class="summary-label">Marketplace Migliore</div>' +
-      '<div class="summary-value">' + best.nome + '</div>' +
-      '<div class="summary-detail">€' + best.margine.toFixed(2) + ' (' + best.margineP.toFixed(1) + '%)</div>' +
-    '</div>' +
-    '<div class="summary-card worst-mp">' +
-      '<div class="summary-label">Marketplace Peggiore</div>' +
-      '<div class="summary-value">' + worst.nome + '</div>' +
-      '<div class="summary-detail">€' + worst.margine.toFixed(2) + ' (' + worst.margineP.toFixed(1) + '%)</div>' +
-    '</div>' +
-    '<div class="summary-card info">' +
-      '<div class="summary-label">Marketplace Redditizi</div>' +
-      '<div class="summary-value">' + redditizi + ' su ' + risultati.length + '</div>' +
-      '<div class="summary-detail">' + inPerdita + ' in perdita</div>' +
-    '</div>';
+  document.getElementById('compare-summary').innerHTML = '<div class="summary-card best-mp"><div class="summary-label">Marketplace Migliore</div><div class="summary-value">' + best.nome + '</div><div class="summary-detail">€' + best.margine.toFixed(2) + ' (' + best.margineP.toFixed(1) + '%)</div></div><div class="summary-card worst-mp"><div class="summary-label">Marketplace Peggiore</div><div class="summary-value">' + worst.nome + '</div><div class="summary-detail">€' + worst.margine.toFixed(2) + ' (' + worst.margineP.toFixed(1) + '%)</div></div><div class="summary-card info"><div class="summary-label">Marketplace Redditizi</div><div class="summary-value">' + redditizi + ' su ' + risultati.length + '</div><div class="summary-detail">' + inPerdita + ' in perdita</div></div>';
 }
 
 function calcola() {
@@ -1058,23 +702,13 @@ function loadMarketplaces() {
     const card = document.createElement('div');
     card.className = 'mp-card';
     card.onclick = () => { select.value = key; showTab('calculator', { target: document.querySelectorAll('.tab')[3] }); calcola(); };
-    card.innerHTML = '<div class="mp-name">' + mp.nome + '</div>' +
-      '<div class="mp-pay">Pagamento: ' + (mp.pagamento || 'N/D') + '</div>' +
-      '<div class="mp-fees">' +
-      '<div><strong>Sconto</strong>' + mp.sconto_percentuale + '%</div>' +
-      '<div><strong>Fee Princ.</strong>' + mp.fee_principale + '%</div>' +
-      '<div><strong>Fee Sec.</strong>' + (mp.fee_secondaria || 0) + '%</div>' +
-      '<div><strong>Trasporto</strong>€' + (mp.fee_fissa_trasporto || 0) + '</div>' +
-      '<div><strong>Packaging</strong>€' + (mp.fee_fissa_packaging || 0) + '</div>' +
-      (mp.fee_accessoria ? '<div><strong>Fee Acc.</strong>' + mp.fee_accessoria + '%</div>' : '') +
-    '</div>';
+    card.innerHTML = '<div class="mp-name">' + mp.nome + '</div><div class="mp-pay">Pagamento: ' + (mp.pagamento || 'N/D') + '</div><div class="mp-fees"><div><strong>Sconto</strong>' + mp.sconto_percentuale + '%</div><div><strong>Fee Princ.</strong>' + mp.fee_principale + '%</div><div><strong>Fee Sec.</strong>' + (mp.fee_secondaria || 0) + '%</div><div><strong>Trasporto</strong>€' + (mp.fee_fissa_trasporto || 0) + '</div><div><strong>Packaging</strong>€' + (mp.fee_fissa_packaging || 0) + '</div>' + (mp.fee_accessoria ? '<div><strong>Fee Acc.</strong>' + mp.fee_accessoria + '%</div>' : '') + '</div>';
     grid.appendChild(card);
   });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   loadMarketplaces();
-  // Imposta date default ultimo mese
   const today = new Date();
   const monthAgo = new Date();
   monthAgo.setMonth(monthAgo.getMonth() - 1);
@@ -1104,13 +738,13 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET' && path === '/api') {
       return res.json({
-        sistema: 'T. Luxy ERP — Marginalità v3.4',
+        sistema: 'T. Luxy ERP — Marginalità v3.5',
         status: 'LIVE',
         store: SHOPIFY_STORE,
         credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET),
         funzionalita: ['Analytics live', 'Best Seller Top 20', 'Confronto Marketplace', 'Calcolatore', 'Filtro periodo custom', 'Italist incluso'],
         marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length,
-        endpoints: ['/', '/api', '/api/analytics?periodo=today | ?from=YYYY-MM-DD&to=YYYY-MM-DD', '/api/bestsellers?periodo=month | ?from=...&to=...', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders']
+        endpoints: ['/', '/api', '/api/analytics?periodo=today', '/api/bestsellers?periodo=month', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders']
       });
     }
 
@@ -1139,14 +773,7 @@ export default async function handler(req, res) {
           breakdown_marketplace[mp.key].margine += ris.margine_netto;
         });
         const margine_percentuale = lordo_iva_inclusa > 0 ? (margine_netto / lordo_iva_inclusa * 100) : 0;
-        return res.json({ 
-          success: true, 
-          periodo: from && to ? `Custom: ${from} → ${to}` : periodo, 
-          ordini_totali: ordini.length, 
-          lordo_iva_inclusa, iva_totale, costi_totali, margine_netto, margine_percentuale, 
-          breakdown_marketplace, 
-          ultima_sincronizzazione: new Date().toISOString() 
-        });
+        return res.json({ success: true, periodo: from && to ? `Custom: ${from} → ${to}` : periodo, ordini_totali: ordini.length, lordo_iva_inclusa, iva_totale, costi_totali, margine_netto, margine_percentuale, breakdown_marketplace, ultima_sincronizzazione: new Date().toISOString() });
       } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
       }
@@ -1160,12 +787,7 @@ export default async function handler(req, res) {
         const ordini = await getShopifyOrders(periodo, from, to);
         let prodotti = calcolaBestSellers(ordini, 20);
         prodotti = await arricchisciConImmagini(prodotti);
-        return res.json({ 
-          success: true, 
-          periodo: from && to ? `Custom: ${from} → ${to}` : periodo, 
-          totale_prodotti_unici: prodotti.length, 
-          prodotti 
-        });
+        return res.json({ success: true, periodo: from && to ? `Custom: ${from} → ${to}` : periodo, totale_prodotti_unici: prodotti.length, prodotti });
       } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
       }
