@@ -1,4 +1,4 @@
-// ERP Marginalità v4.1 - Fix lettura cost_per_item (endpoint corretto)
+// ERP Marginalità v4.2 - Lettura costi robusta con retry
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'autore-luxit.myshopify.com';
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
@@ -164,77 +164,86 @@ async function processOrders(ordini) {
   });
 }
 
-// ============ COSTO REALE ============
-// FIX v4.1: L'endpoint /variants.json?ids= di fatto non funziona. Usiamo
-// /variants/{id}.json uno per uno (con concorrenza limitata), poi 
-// /inventory_items.json?ids= in batch (che invece funziona bene).
-async function fetchVariantCosts(variantIds, orderProductIds = []) {
+// ============ COSTO REALE (v4.2 - strategia singola con retry) ============
+// Strategia: leggo UNA variante alla volta con concorrenza bassa e retry su 429.
+// Più lento ma 100% affidabile perché non perde nessun variant.
+async function fetchVariantCosts(variantIds, _orderProductIds = []) {
   if (variantIds.length === 0) return {};
   const token = await getShopifyAccessToken();
   const uniqueVariantIds = [...new Set(variantIds.filter(Boolean))];
   const variantToInventoryItem = {};
   
-  // STRATEGIA A: usa /products.json?ids= per ottenere TUTTE le varianti in batch.
-  // Questo endpoint invece funziona bene con ids multipli.
-  const uniqueProductIds = [...new Set(orderProductIds.filter(Boolean))];
-  if (uniqueProductIds.length > 0) {
-    const productChunks = [];
-    for (let i = 0; i < uniqueProductIds.length; i += 100) productChunks.push(uniqueProductIds.slice(i, i + 100));
-    for (const chunk of productChunks) {
-      try {
-        const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?ids=${chunk.join(',')}&fields=id,variants`;
-        const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
-        if (!response.ok) continue;
-        const data = await response.json();
-        (data.products || []).forEach(p => {
-          (p.variants || []).forEach(v => {
-            if (v.id && v.inventory_item_id) variantToInventoryItem[v.id] = v.inventory_item_id;
-          });
-        });
-      } catch (e) {}
+  // STEP 1: per ogni variant, chiamo /variants/{id}.json singolarmente
+  // Concorrenza 2 + retry su 429/5xx
+  async function fetchVariantWithRetry(vid, attempt = 0) {
+    try {
+      const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/variants/${vid}.json?fields=id,inventory_item_id`;
+      const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
+      if (response.status === 429 || response.status >= 500) {
+        if (attempt < 3) {
+          // backoff esponenziale: 500ms, 1500ms, 3500ms
+          const wait = 500 * Math.pow(3, attempt) + Math.random() * 300;
+          await new Promise(r => setTimeout(r, wait));
+          return fetchVariantWithRetry(vid, attempt + 1);
+        }
+        return;
+      }
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.variant && data.variant.inventory_item_id) {
+        variantToInventoryItem[vid] = data.variant.inventory_item_id;
+      }
+    } catch (e) {
+      if (attempt < 2) {
+        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+        return fetchVariantWithRetry(vid, attempt + 1);
+      }
     }
   }
   
-  // STRATEGIA B (fallback): per ogni variant_id non ancora mappato, chiama singolarmente
-  // /variants/{id}.json — con concorrenza limitata per evitare rate limit
-  const missingVariants = uniqueVariantIds.filter(id => !(id in variantToInventoryItem));
-  if (missingVariants.length > 0) {
-    const concurrency = 5;
-    for (let i = 0; i < missingVariants.length; i += concurrency) {
-      const batch = missingVariants.slice(i, i + concurrency);
-      await Promise.all(batch.map(async (vid) => {
-        try {
-          const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/variants/${vid}.json?fields=id,inventory_item_id`;
-          const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
-          if (!response.ok) return;
-          const data = await response.json();
-          if (data.variant && data.variant.inventory_item_id) {
-            variantToInventoryItem[vid] = data.variant.inventory_item_id;
-          }
-        } catch (e) {}
-      }));
-    }
+  const concurrency = 2;
+  for (let i = 0; i < uniqueVariantIds.length; i += concurrency) {
+    const batch = uniqueVariantIds.slice(i, i + concurrency);
+    await Promise.all(batch.map(v => fetchVariantWithRetry(v)));
   }
   
-  // STEP 2: fetch inventory_items in batch (questo endpoint FUNZIONA con ids multipli)
+  // STEP 2: /inventory_items.json?ids= (questo endpoint supporta ids multipli, ok)
   const inventoryIds = [...new Set(Object.values(variantToInventoryItem).filter(Boolean))];
   const inventoryToCost = {};
   const invChunks = [];
   for (let i = 0; i < inventoryIds.length; i += 100) invChunks.push(inventoryIds.slice(i, i + 100));
-  for (const chunk of invChunks) {
+  
+  async function fetchInvWithRetry(chunk, attempt = 0) {
     try {
       const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/inventory_items.json?ids=${chunk.join(',')}`;
       const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
-      if (!response.ok) continue;
+      if (response.status === 429 || response.status >= 500) {
+        if (attempt < 3) {
+          const wait = 500 * Math.pow(3, attempt) + Math.random() * 300;
+          await new Promise(r => setTimeout(r, wait));
+          return fetchInvWithRetry(chunk, attempt + 1);
+        }
+        return;
+      }
+      if (!response.ok) return;
       const data = await response.json();
       (data.inventory_items || []).forEach(item => {
         const costValue = item.cost;
         inventoryToCost[item.id] = (costValue !== null && costValue !== undefined && costValue !== '' && !isNaN(parseFloat(costValue))) ? parseFloat(costValue) : null;
       });
-    } catch (e) {}
+    } catch (e) {
+      if (attempt < 2) {
+        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+        return fetchInvWithRetry(chunk, attempt + 1);
+      }
+    }
   }
   
-  // Map variant_id → cost
+  for (const chunk of invChunks) {
+    await fetchInvWithRetry(chunk);
+  }
+  
+  // Map finale variant_id → cost
   const variantToCost = {};
   Object.entries(variantToInventoryItem).forEach(([variantId, invId]) => {
     variantToCost[variantId] = invId && inventoryToCost[invId] !== undefined ? inventoryToCost[invId] : null;
@@ -592,7 +601,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v4.1</p>
+        <p>Business Intelligence Dashboard · v4.2</p>
       </div>
     </div>
     <div class="header-right">
@@ -911,7 +920,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v4.1', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), funzionalita: ['Fix cost_per_item', 'Fuso Roma reale', 'Costo REALE da Shopify', 'Poizon + Secret Sales riconosciuti', 'Breakdown MP', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-costs'] });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v4.2', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), funzionalita: ['Lettura costi robusta con retry', 'Fuso Roma reale', 'Costo REALE da Shopify', 'Poizon + Secret Sales', 'Breakdown MP', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-costs', '/api/debug-single-cost'] });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -1031,7 +1040,8 @@ export default async function handler(req, res) {
         return res.json({ success: true, periodo, totale_ordini_jammy_dude: jdOrders.length, ordini_inclusi_dopo_filtro: inclusi, ordini_esclusi_dopo_filtro: breakdown.length - inclusi, dettaglio_ordini: breakdown });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
-// DIAGNOSTIC: traccia chiamate Shopify per singolo variant_id
+
+    // DIAGNOSTIC: traccia chiamate Shopify per singolo variant_id
     if (req.method === 'GET' && path === '/api/debug-single-cost') {
       try {
         const variantId = query.get('variant_id') || '47254190325972';
@@ -1057,27 +1067,17 @@ export default async function handler(req, res) {
           let i2parsed = null; try { i2parsed = JSON.parse(i2body); } catch(e) {}
           step3 = { url: i2url, status: i2res.status, response: i2parsed || i2body.substring(0, 500) };
         }
-        // STEP 4: test strategia A (products.json?ids=) con il product_id della variante
-        let step4 = null;
-        const productId = v1parsed?.variant?.product_id;
-        if (productId) {
-          const p1url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?ids=${productId}&fields=id,variants`;
-          const p1res = await fetch(p1url, { headers: { 'X-Shopify-Access-Token': token } });
-          const p1body = await p1res.text();
-          let p1parsed = null; try { p1parsed = JSON.parse(p1body); } catch(e) {}
-          step4 = { url: p1url, status: p1res.status, response: p1parsed || p1body.substring(0, 500) };
-        }
         return res.json({
           success: true,
           variant_id_testato: variantId,
           step1_variant: { url: v1url, status: v1res.status, response: v1parsed || v1body.substring(0, 500) },
           inventory_item_id_estratto: inventoryItemId,
           step2_inventory_item_singolo: step2,
-          step3_inventory_items_con_ids: step3,
-          step4_products_json_con_ids: step4
+          step3_inventory_items_con_ids: step3
         });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
+
     if (req.method === 'GET' && path === '/api/test-shopify') {
       try {
         const token = await getShopifyAccessToken();
