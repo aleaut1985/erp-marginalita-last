@@ -1,4 +1,4 @@
-// ERP Marginalità v4.2 - Lettura costi robusta con retry
+// ERP Marginalità v4.5 - Breakdown MP espandibile con dettaglio ordini
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'autore-luxit.myshopify.com';
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
@@ -42,6 +42,7 @@ const MARKETPLACE_CONFIGS = {
   'ITALIST': { nome: 'Italist', sconto_percentuale: 0, fee_principale: 20, fee_secondaria: 25.5, fee_fissa_trasporto: 0, fee_fissa_packaging: 4, pagamento: 'Mensile (~30gg)' },
   'JAMMY_DUDE': { nome: 'Jammy Dude', sconto_percentuale: 0, fee_principale: 19, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Variabile' },
   'POIZON': { nome: 'Poizon', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Variabile' },
+  'BRANDSGATEWAY': { nome: 'Brandsgateway', sconto_percentuale: 13, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 0, pagamento: 'Variabile' },
   'TLUXY_SITE': { nome: 'T. Luxy (proprio)', sconto_percentuale: 10, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1, pagamento: 'Immediato' }
 };
 
@@ -85,8 +86,15 @@ function getIvaPerPaese(countryCode) {
 function riconosciMarketplace(ordine) {
   const rawSource = (ordine.source_name || '').trim();
   const sourceName = normalizeSourceName(rawSource);
+  const tags = (ordine.tags || '').toLowerCase();
   
-  // Match diretto normalizzato
+  // PRIORITÀ 1: tag specifici che hanno precedenza sul source_name
+  // Brandsgateway è un dropship fornitore, arriva con source=web ma va classificato come BRANDSGATEWAY
+  if (tags.includes('brandsgateway')) {
+    return { key: 'BRANDSGATEWAY', config: MARKETPLACE_CONFIGS.BRANDSGATEWAY };
+  }
+  
+  // Match diretto normalizzato su source_name
   if (SOURCE_NAME_MAP[sourceName]) return { key: SOURCE_NAME_MAP[sourceName], config: MARKETPLACE_CONFIGS[SOURCE_NAME_MAP[sourceName]] };
   
   // Poizon detection: source numerico + email customer "poizon"
@@ -102,7 +110,6 @@ function riconosciMarketplace(ordine) {
   }
   
   // Match su tags
-  const tags = (ordine.tags || '').toLowerCase();
   for (const [pattern, mpKey] of Object.entries(SOURCE_NAME_MAP)) {
     if (tags.includes(pattern)) return { key: mpKey, config: MARKETPLACE_CONFIGS[mpKey] };
   }
@@ -164,78 +171,130 @@ async function processOrders(ordini) {
   });
 }
 
-// ============ COSTO REALE (v4.2 - strategia singola con retry) ============
-// Strategia: leggo UNA variante alla volta con concorrenza bassa e retry su 429.
-// Più lento ma 100% affidabile perché non perde nessun variant.
-async function fetchVariantCosts(variantIds, _orderProductIds = []) {
-  if (variantIds.length === 0) return {};
+// ============ COSTO REALE (v4.3 - strategia products/{id}.json con logging) ============
+// Strategia: per ogni product_id unico, 1 chiamata a /products/{id}.json che ritorna
+// tutte le varianti del prodotto con i loro inventory_item_id. Poi batch /inventory_items.json
+// Aggiunge logging dettagliato delle chiamate fallite.
+async function fetchVariantCosts(variantIds, orderProductIds = []) {
+  const stats = { products_tentati: 0, products_ok: 0, products_falliti: [], variants_mappati: 0, inventory_tentati: 0, inventory_ok: 0, inventory_falliti: [] };
+  if (variantIds.length === 0) return { costs: {}, stats };
   const token = await getShopifyAccessToken();
   const uniqueVariantIds = [...new Set(variantIds.filter(Boolean))];
+  const uniqueProductIds = [...new Set(orderProductIds.filter(Boolean))];
   const variantToInventoryItem = {};
   
-  // STEP 1: per ogni variant, chiamo /variants/{id}.json singolarmente
-  // Concorrenza 2 + retry su 429/5xx
-  async function fetchVariantWithRetry(vid, attempt = 0) {
+  // STEP 1: per ogni product_id, chiamo /products/{id}.json (funziona sempre)
+  async function fetchProductWithRetry(pid, attempt = 0) {
+    stats.products_tentati++;
     try {
-      const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/variants/${vid}.json?fields=id,inventory_item_id`;
+      const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products/${pid}.json?fields=id,variants`;
       const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
       if (response.status === 429 || response.status >= 500) {
-        if (attempt < 3) {
-          // backoff esponenziale: 500ms, 1500ms, 3500ms
-          const wait = 500 * Math.pow(3, attempt) + Math.random() * 300;
+        if (attempt < 4) {
+          const wait = 600 * Math.pow(2, attempt) + Math.random() * 400;
           await new Promise(r => setTimeout(r, wait));
-          return fetchVariantWithRetry(vid, attempt + 1);
+          return fetchProductWithRetry(pid, attempt + 1);
         }
+        stats.products_falliti.push({ product_id: pid, status: response.status, reason: 'max_retries' });
         return;
       }
-      if (!response.ok) return;
+      if (!response.ok) {
+        stats.products_falliti.push({ product_id: pid, status: response.status, reason: 'http_error' });
+        return;
+      }
       const data = await response.json();
-      if (data.variant && data.variant.inventory_item_id) {
-        variantToInventoryItem[vid] = data.variant.inventory_item_id;
-      }
+      stats.products_ok++;
+      (data.product?.variants || []).forEach(v => {
+        if (v.id && v.inventory_item_id) {
+          variantToInventoryItem[v.id] = v.inventory_item_id;
+          stats.variants_mappati++;
+        }
+      });
     } catch (e) {
-      if (attempt < 2) {
-        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
-        return fetchVariantWithRetry(vid, attempt + 1);
+      if (attempt < 3) {
+        await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+        return fetchProductWithRetry(pid, attempt + 1);
       }
+      stats.products_falliti.push({ product_id: pid, status: 'exception', reason: e.message });
     }
   }
   
-  const concurrency = 2;
-  for (let i = 0; i < uniqueVariantIds.length; i += concurrency) {
-    const batch = uniqueVariantIds.slice(i, i + concurrency);
-    await Promise.all(batch.map(v => fetchVariantWithRetry(v)));
+  const concurrency = 3;
+  for (let i = 0; i < uniqueProductIds.length; i += concurrency) {
+    const batch = uniqueProductIds.slice(i, i + concurrency);
+    await Promise.all(batch.map(p => fetchProductWithRetry(p)));
   }
   
-  // STEP 2: /inventory_items.json?ids= (questo endpoint supporta ids multipli, ok)
+  // STEP 1b: per variant non trovate tramite product, fallback a /variants/{id}.json
+  const missing = uniqueVariantIds.filter(vid => !(vid in variantToInventoryItem));
+  if (missing.length > 0) {
+    async function fetchVariantSingle(vid, attempt = 0) {
+      try {
+        const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/variants/${vid}.json?fields=id,inventory_item_id`;
+        const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
+        if (response.status === 429 || response.status >= 500) {
+          if (attempt < 4) {
+            const wait = 600 * Math.pow(2, attempt) + Math.random() * 400;
+            await new Promise(r => setTimeout(r, wait));
+            return fetchVariantSingle(vid, attempt + 1);
+          }
+          return;
+        }
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data.variant && data.variant.inventory_item_id) {
+          variantToInventoryItem[vid] = data.variant.inventory_item_id;
+          stats.variants_mappati++;
+        }
+      } catch (e) {
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+          return fetchVariantSingle(vid, attempt + 1);
+        }
+      }
+    }
+    for (let i = 0; i < missing.length; i += concurrency) {
+      const batch = missing.slice(i, i + concurrency);
+      await Promise.all(batch.map(v => fetchVariantSingle(v)));
+    }
+  }
+  
+  // STEP 2: batch /inventory_items.json?ids= (questo endpoint supporta ids multipli)
   const inventoryIds = [...new Set(Object.values(variantToInventoryItem).filter(Boolean))];
   const inventoryToCost = {};
   const invChunks = [];
-  for (let i = 0; i < inventoryIds.length; i += 100) invChunks.push(inventoryIds.slice(i, i + 100));
+  for (let i = 0; i < inventoryIds.length; i += 50) invChunks.push(inventoryIds.slice(i, i + 50)); // chunk 50 invece di 100 per sicurezza
   
   async function fetchInvWithRetry(chunk, attempt = 0) {
+    stats.inventory_tentati++;
     try {
       const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/inventory_items.json?ids=${chunk.join(',')}`;
       const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
       if (response.status === 429 || response.status >= 500) {
-        if (attempt < 3) {
-          const wait = 500 * Math.pow(3, attempt) + Math.random() * 300;
+        if (attempt < 4) {
+          const wait = 600 * Math.pow(2, attempt) + Math.random() * 400;
           await new Promise(r => setTimeout(r, wait));
           return fetchInvWithRetry(chunk, attempt + 1);
         }
+        stats.inventory_falliti.push({ chunk_size: chunk.length, status: response.status, reason: 'max_retries' });
         return;
       }
-      if (!response.ok) return;
+      if (!response.ok) {
+        stats.inventory_falliti.push({ chunk_size: chunk.length, status: response.status, reason: 'http_error' });
+        return;
+      }
       const data = await response.json();
+      stats.inventory_ok++;
       (data.inventory_items || []).forEach(item => {
         const costValue = item.cost;
         inventoryToCost[item.id] = (costValue !== null && costValue !== undefined && costValue !== '' && !isNaN(parseFloat(costValue))) ? parseFloat(costValue) : null;
       });
     } catch (e) {
-      if (attempt < 2) {
-        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      if (attempt < 3) {
+        await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
         return fetchInvWithRetry(chunk, attempt + 1);
       }
+      stats.inventory_falliti.push({ chunk_size: chunk.length, status: 'exception', reason: e.message });
     }
   }
   
@@ -243,12 +302,12 @@ async function fetchVariantCosts(variantIds, _orderProductIds = []) {
     await fetchInvWithRetry(chunk);
   }
   
-  // Map finale variant_id → cost
-  const variantToCost = {};
+  // Map finale
+  const costs = {};
   Object.entries(variantToInventoryItem).forEach(([variantId, invId]) => {
-    variantToCost[variantId] = invId && inventoryToCost[invId] !== undefined ? inventoryToCost[invId] : null;
+    costs[variantId] = invId && inventoryToCost[invId] !== undefined ? inventoryToCost[invId] : null;
   });
-  return variantToCost;
+  return { costs, stats };
 }
 
 function calcolaCostoOrdine(ordine, variantCosts) {
@@ -525,6 +584,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .breakdown-table tbody tr:hover { background: var(--cream); }
   .breakdown-table tfoot td { background: var(--gray-100); font-weight: 700; padding: 16px 14px; border-top: 2px solid var(--black); border-bottom: none; font-size: 0.9rem; }
   .mp-badge { display: inline-block; padding: 4px 10px; border-radius: 50px; font-size: 0.7rem; font-weight: 700; color: var(--white); letter-spacing: 0.02em; }
+  .mp-row:hover { background: var(--green-light) !important; }
+  .toggle-arrow { display: inline-block; font-size: 0.7rem; color: var(--gray-500); margin-right: 4px; font-family: monospace; width: 12px; }
+  .detail-table { width: 100%; border-collapse: collapse; background: var(--white); border-radius: var(--radius-sm); overflow: hidden; box-shadow: inset 0 0 0 1px var(--gray-200); }
+  .detail-table thead { background: var(--gray-100); }
+  .detail-table th { padding: 10px 12px; text-align: left; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--gray-700); white-space: nowrap; border-bottom: 1.5px solid var(--gray-200); }
+  .detail-table th.num, .detail-table td.num { text-align: right; }
+  .detail-table td { padding: 12px; border-bottom: 1px solid var(--gray-100); font-size: 0.82rem; color: var(--gray-900); vertical-align: top; }
+  .detail-table tbody tr:last-child td { border-bottom: none; }
+  .detail-table tbody tr:hover { background: var(--cream); }
   .margin-pos { color: var(--green-dark); font-weight: 700; }
   .margin-neg { color: var(--red); font-weight: 700; }
   .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; }
@@ -601,7 +669,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v4.2</p>
+        <p>Business Intelligence Dashboard · v4.5</p>
       </div>
     </div>
     <div class="header-right">
@@ -642,7 +710,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div id="errors-panel"></div>
       <div class="breakdown-section">
         <div class="breakdown-title">Breakdown per Marketplace</div>
-        <div class="breakdown-sub">Ordini, fatturato e margine ripartiti per canale di vendita</div>
+        <div class="breakdown-sub">Clicca su un marketplace per vedere il dettaglio di tutti gli ordini</div>
         <div class="breakdown-table-wrap">
           <table class="breakdown-table">
             <thead><tr><th>Marketplace</th><th class="num">Ordini</th><th class="num">Fatturato</th><th class="num">IVA</th><th class="num">Costo Merce</th><th class="num">Margine Netto</th><th class="num">Margine %</th></tr></thead>
@@ -725,7 +793,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 </div>
 <script>
 const MARKETPLACES = ${JSON.stringify(MARKETPLACE_CONFIGS)};
-const MP_COLORS = { TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A' };
+const MP_COLORS = { TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC' };
 
 function setActiveButton(selector, btn) { document.querySelectorAll(selector).forEach(b => b.classList.remove('active')); if (btn) btn.classList.add('active'); }
 async function fetchNoCache(url) { const sep = url.includes('?') ? '&' : '?'; const res = await fetch(url + sep + '_=' + Date.now(), { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } }); return res.json(); }
@@ -752,7 +820,7 @@ function renderErrors(ordiniConErrori) {
 
 function renderBreakdown(breakdown) {
   const body = document.getElementById('breakdown-body'); const foot = document.getElementById('breakdown-foot');
-  if (!breakdown || Object.keys(breakdown).length === 0) { body.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--gray-500); font-style:italic;">Nessun ordine.</td></tr>'; foot.innerHTML = ''; return; }
+  if (!breakdown || Object.keys(breakdown).length === 0) { body.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--gray-500); font-style:italic;">Nessun ordine.</td></tr>'; foot.innerHTML = ''; return; }
   const arr = Object.entries(breakdown).map(([key, v]) => ({ key, ...v })); arr.sort((a, b) => b.fatturato - a.fatturato);
   let totOrdini = 0, totFatt = 0, totIva = 0, totCosti = 0, totMargine = 0;
   body.innerHTML = arr.map(r => {
@@ -760,8 +828,37 @@ function renderBreakdown(breakdown) {
     const marginePerc = r.fatturato > 0 ? (r.margine / r.fatturato * 100) : 0;
     const marginCls = r.margine >= 0 ? 'margin-pos' : 'margin-neg';
     const color = MP_COLORS[r.key] || '#8E8E8E';
-    return '<tr><td><span class="mp-badge" style="background:' + color + '">' + r.nome + '</span></td><td class="num">' + r.ordini + '</td><td class="num">€' + Math.round(r.fatturato).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(r.iva || 0).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(r.costo_merce || 0).toLocaleString('it-IT') + '</td><td class="num ' + marginCls + '">€' + Math.round(r.margine).toLocaleString('it-IT') + '</td><td class="num ' + marginCls + '">' + marginePerc.toFixed(1) + '%</td></tr>';
+    // Riga principale cliccabile + riga dettagli nascosta
+    const mainRow = '<tr class="mp-row" data-mp-key="' + r.key + '" style="cursor:pointer"><td><span class="toggle-arrow" id="arrow-' + r.key + '">▶</span>&nbsp;<span class="mp-badge" style="background:' + color + '">' + r.nome + '</span></td><td class="num">' + r.ordini + '</td><td class="num">€' + Math.round(r.fatturato).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(r.iva || 0).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(r.costo_merce || 0).toLocaleString('it-IT') + '</td><td class="num ' + marginCls + '">€' + Math.round(r.margine).toLocaleString('it-IT') + '</td><td class="num ' + marginCls + '">' + marginePerc.toFixed(1) + '%</td></tr>';
+    // Dettaglio ordini (nascosto default)
+    const detailRow = '<tr class="mp-detail" id="detail-' + r.key + '" style="display:none;"><td colspan="7" style="padding:0; background:var(--cream);"><div style="padding:16px;"><table class="detail-table"><thead><tr><th>Ordine</th><th>Data</th><th>Paese</th><th>Articoli</th><th class="num">Fatturato</th><th class="num">IVA</th><th class="num">Costo</th><th class="num">Fees MP</th><th class="num">Margine €</th><th class="num">%</th></tr></thead><tbody>' + 
+      (r.dettaglio_ordini || []).map(o => {
+        const dataFmt = o.created_at ? new Date(o.created_at).toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit', year:'2-digit'}) : '—';
+        const orderNumFmt = o.name || ('#' + o.order_number);
+        const articoli = (o.articoli || []).map(a => {
+          const ricavoUnit = a.prezzo_unit - a.cost_unit;
+          const ricavoCls = ricavoUnit >= 0 ? 'margin-pos' : 'margin-neg';
+          return '<div style="padding:4px 0; border-bottom:1px dotted var(--gray-200);"><strong style="font-size:0.82rem;">' + a.title + '</strong><br><span style="font-size:0.72rem; color:var(--gray-500);">SKU: ' + a.sku + ' · qty ' + a.quantity + '</span><br><span style="font-size:0.75rem;">Prezzo: <strong>€' + a.prezzo_unit.toFixed(2) + '</strong> · Costo: <strong>€' + a.cost_unit.toFixed(2) + '</strong> · <span class="' + ricavoCls + '">Δ €' + ricavoUnit.toFixed(2) + '</span></span></div>';
+        }).join('');
+        const marginCls2 = o.margine_netto >= 0 ? 'margin-pos' : 'margin-neg';
+        return '<tr><td><strong>' + orderNumFmt + '</strong></td><td>' + dataFmt + '</td><td>' + (o.country || '—') + '</td><td style="max-width:340px;">' + articoli + '</td><td class="num">€' + o.fatturato.toFixed(2) + '</td><td class="num">€' + o.iva.toFixed(2) + '</td><td class="num">€' + o.costo_merce.toFixed(2) + '</td><td class="num">€' + o.fees_marketplace.toFixed(2) + '</td><td class="num ' + marginCls2 + '">€' + o.margine_netto.toFixed(2) + '</td><td class="num ' + marginCls2 + '">' + o.margine_percentuale.toFixed(1) + '%</td></tr>';
+      }).join('') +
+      '</tbody></table></div></td></tr>';
+    return mainRow + detailRow;
   }).join('');
+  // Toggle handler via event delegation
+  document.querySelectorAll('.mp-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const key = row.dataset.mpKey;
+      const detail = document.getElementById('detail-' + key);
+      const arrow = document.getElementById('arrow-' + key);
+      if (detail && arrow) {
+        const isOpen = detail.style.display !== 'none';
+        detail.style.display = isOpen ? 'none' : 'table-row';
+        arrow.textContent = isOpen ? '▶' : '▼';
+      }
+    });
+  });
   const totMargPerc = totFatt > 0 ? (totMargine / totFatt * 100) : 0;
   foot.innerHTML = '<tr><td>TOTALE</td><td class="num">' + totOrdini + '</td><td class="num">€' + Math.round(totFatt).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(totIva).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(totCosti).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(totMargine).toLocaleString('it-IT') + '</td><td class="num">' + totMargPerc.toFixed(1) + '%</td></tr>';
 }
@@ -920,7 +1017,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v4.2', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), funzionalita: ['Lettura costi robusta con retry', 'Fuso Roma reale', 'Costo REALE da Shopify', 'Poizon + Secret Sales', 'Breakdown MP', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-costs', '/api/debug-single-cost'] });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v4.5', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), funzionalita: ['Breakdown MP espandibile', 'Brandsgateway via tag', 'Products/{id}.json strategy', 'Fetch stats logging', 'Fuso Roma reale', 'Poizon + Secret Sales', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-costs', '/api/debug-single-cost'] });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -935,7 +1032,9 @@ export default async function handler(req, res) {
           if (item.variant_id) variantIds.add(item.variant_id);
           if (item.product_id) productIds.add(item.product_id);
         }));
-        const variantCosts = await fetchVariantCosts([...variantIds], [...productIds]);
+        const fetchResult = await fetchVariantCosts([...variantIds], [...productIds]);
+        const variantCosts = fetchResult.costs;
+        const fetchStats = fetchResult.stats;
         let lordo_iva_inclusa = 0, iva_totale = 0, costi_totali = 0, margine_netto = 0;
         const breakdown_marketplace = {};
         const ordini_con_errori = [];
@@ -958,16 +1057,38 @@ export default async function handler(req, res) {
           iva_totale += ris.iva_scorporata;
           costi_totali += ris.costi_totali;
           margine_netto += ris.margine_netto;
-          if (!breakdown_marketplace[mp.key]) breakdown_marketplace[mp.key] = { nome: mp.config.nome, ordini: 0, fatturato: 0, iva: 0, costo_merce: 0, margine: 0 };
+          if (!breakdown_marketplace[mp.key]) breakdown_marketplace[mp.key] = { nome: mp.config.nome, ordini: 0, fatturato: 0, iva: 0, costo_merce: 0, margine: 0, dettaglio_ordini: [] };
           breakdown_marketplace[mp.key].ordini += 1;
           breakdown_marketplace[mp.key].fatturato += ris.prezzo_lordo_iva_inclusa;
           breakdown_marketplace[mp.key].iva += ris.iva_scorporata;
           breakdown_marketplace[mp.key].costo_merce += costo_merce;
           breakdown_marketplace[mp.key].margine += ris.margine_netto;
+          // Dettaglio ordine per drill-down
+          breakdown_marketplace[mp.key].dettaglio_ordini.push({
+            order_number: ordine.order_number,
+            name: ordine.name,
+            created_at: ordine.created_at,
+            country,
+            fatturato: ris.prezzo_lordo_iva_inclusa,
+            iva: ris.iva_scorporata,
+            costo_merce,
+            fees_marketplace: ris.fees_marketplace,
+            fees_shopify: ris.fees_shopify,
+            spedizione,
+            margine_netto: ris.margine_netto,
+            margine_percentuale: ris.margine_percentuale,
+            articoli: (ordine.line_items || []).map(item => ({
+              title: item.title,
+              sku: item.sku || '',
+              quantity: parseInt(item.quantity) || 0,
+              prezzo_unit: parseFloat(item.price) || 0,
+              cost_unit: item.variant_id && variantCosts[item.variant_id] !== null && variantCosts[item.variant_id] !== undefined ? variantCosts[item.variant_id] : 0
+            }))
+          });
         });
         const ordini_validi = ordini.length - ordini_con_errori.length;
         const margine_percentuale = lordo_iva_inclusa > 0 ? (margine_netto / lordo_iva_inclusa * 100) : 0;
-        return res.json({ success: true, periodo: from && to ? `${from} → ${to}` : periodo, ordini_totali: ordini_validi, ordini_con_errori_count: ordini_con_errori.length, ordini_con_errori, lordo_iva_inclusa, iva_totale, costi_totali, margine_netto, margine_percentuale, breakdown_marketplace, ultima_sincronizzazione: new Date().toISOString() });
+        return res.json({ success: true, periodo: from && to ? `${from} → ${to}` : periodo, ordini_totali: ordini_validi, ordini_con_errori_count: ordini_con_errori.length, ordini_con_errori, lordo_iva_inclusa, iva_totale, costi_totali, margine_netto, margine_percentuale, breakdown_marketplace, fetch_stats: fetchStats, ultima_sincronizzazione: new Date().toISOString() });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
@@ -983,7 +1104,7 @@ export default async function handler(req, res) {
           if (item.variant_id) variantIds.add(item.variant_id);
           if (item.product_id) productIds.add(item.product_id);
         }));
-        const variantCosts = await fetchVariantCosts([...variantIds], [...productIds]);
+        const variantCosts = (await fetchVariantCosts([...variantIds], [...productIds])).costs;
         let prodotti = calcolaBestSellers(ordini, 20, variantCosts);
         prodotti = await arricchisciConImmagini(prodotti);
         return res.json({ success: true, periodo: from && to ? `${from} → ${to}` : periodo, totale_prodotti_unici: prodotti.length, prodotti });
@@ -1001,18 +1122,19 @@ export default async function handler(req, res) {
           if (item.variant_id) variantIds.add(item.variant_id);
           if (item.product_id) productIds.add(item.product_id);
         }));
-        const variantCosts = await fetchVariantCosts([...variantIds], [...productIds]);
+        const fetchResult = await fetchVariantCosts([...variantIds], [...productIds]);
+        const variantCosts = fetchResult.costs;
         const debug = processati.map(o => {
           const { costo, errori } = calcolaCostoOrdine(o, variantCosts);
           return {
             order_number: o.order_number, name: o.name, created_at: o.created_at,
             total_price: o.total_price, country: o.shipping_address?.country_code || o.billing_address?.country_code,
             marketplace: riconosciMarketplace(o).config.nome, costo_merce_reale: costo.toFixed(2),
-            line_items: (o.line_items || []).map(item => ({ title: item.title, sku: item.sku, variant_id: item.variant_id, quantity: item.quantity, price: item.price, cost_per_unit: item.variant_id && variantCosts[item.variant_id] !== null ? variantCosts[item.variant_id] : 'MANCANTE' })),
+            line_items: (o.line_items || []).map(item => ({ title: item.title, sku: item.sku, variant_id: item.variant_id, quantity: item.quantity, price: item.price, cost_per_unit: item.variant_id && variantCosts[item.variant_id] !== null && variantCosts[item.variant_id] !== undefined ? variantCosts[item.variant_id] : 'MANCANTE' })),
             errori
           };
         });
-        return res.json({ success: true, periodo, ordini: debug });
+        return res.json({ success: true, periodo, fetch_stats: fetchResult.stats, ordini: debug });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
