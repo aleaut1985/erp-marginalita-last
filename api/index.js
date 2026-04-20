@@ -1,6 +1,6 @@
-// ERP Marginalità v5.6 - Magic Link authentication via Resend
+// ERP Marginalità v5.6.1 - Magic Link authentication via Resend (fix crypto import)
 
-import crypto from 'crypto';
+import * as crypto from 'node:crypto';
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'autore-luxit.myshopify.com';
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
