@@ -1,11 +1,70 @@
-// ERP Marginalità v4.5 - Breakdown MP espandibile con dettaglio ordini
+// ERP Marginalità v5.0 - DB persistente costi + Simulatore DUO
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'autore-luxit.myshopify.com';
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
 const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || '';
 
-const SHOPIFY_FEE_PERCENT = 0.0015; // Shopify Plus ~0.15%
+// Vercel KV / Upstash Redis - supporta entrambi i nomi di env vars
+const KV_REST_API_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || '';
+const KV_REST_API_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || '';
+const KV_ENABLED = !!(KV_REST_API_URL && KV_REST_API_TOKEN);
+
+const SHOPIFY_FEE_PERCENT = 0.0015;
 const SHOPIFY_FEE_FIXED = 0;
+
+// ============ KV STORAGE (Upstash Redis via Vercel KV) ============
+// Cache persistente dei costi: sopravvive all'archiviazione dei prodotti su Shopify.
+async function kvGet(key) {
+  if (!KV_ENABLED) return null;
+  try {
+    const res = await fetch(`${KV_REST_API_URL}/get/${encodeURIComponent(key)}`, {
+      headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.result; // string or null
+  } catch (e) { return null; }
+}
+async function kvSet(key, value) {
+  if (!KV_ENABLED) return false;
+  try {
+    const res = await fetch(`${KV_REST_API_URL}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}`, {
+      headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` }
+    });
+    return res.ok;
+  } catch (e) { return false; }
+}
+async function kvMGet(keys) {
+  if (!KV_ENABLED || keys.length === 0) return {};
+  try {
+    // MGET accetta array di keys
+    const url = `${KV_REST_API_URL}/mget/${keys.map(k => encodeURIComponent(k)).join('/')}`;
+    const res = await fetch(url, { headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` } });
+    if (!res.ok) return {};
+    const data = await res.json();
+    const results = {};
+    (data.result || []).forEach((val, idx) => { if (val !== null) results[keys[idx]] = val; });
+    return results;
+  } catch (e) { return {}; }
+}
+async function kvMSet(pairs) {
+  if (!KV_ENABLED || Object.keys(pairs).length === 0) return false;
+  try {
+    // Facciamo più SET in parallelo (Upstash non ha MSET in REST)
+    const concurrency = 5;
+    const entries = Object.entries(pairs);
+    for (let i = 0; i < entries.length; i += concurrency) {
+      const batch = entries.slice(i, i + concurrency);
+      await Promise.all(batch.map(([k, v]) => kvSet(k, v)));
+    }
+    return true;
+  } catch (e) { return false; }
+}
+
+// Riconosce prodotti DUO dallo SKU (DUO- all'inizio)
+function isDuoSku(sku) {
+  return !!(sku && typeof sku === 'string' && /^DUO-/i.test(sku.trim()));
+}
 
 let cachedToken = null;
 let tokenExpiry = null;
@@ -176,12 +235,37 @@ async function processOrders(ordini) {
 // tutte le varianti del prodotto con i loro inventory_item_id. Poi batch /inventory_items.json
 // Aggiunge logging dettagliato delle chiamate fallite.
 async function fetchVariantCosts(variantIds, orderProductIds = []) {
-  const stats = { products_tentati: 0, products_ok: 0, products_falliti: [], variants_mappati: 0, inventory_tentati: 0, inventory_ok: 0, inventory_falliti: [] };
+  const stats = { products_tentati: 0, products_ok: 0, products_falliti: [], variants_mappati: 0, inventory_tentati: 0, inventory_ok: 0, inventory_falliti: [], kv_hit: 0, kv_miss: 0, kv_new_saved: 0 };
   if (variantIds.length === 0) return { costs: {}, stats };
-  const token = await getShopifyAccessToken();
+  
   const uniqueVariantIds = [...new Set(variantIds.filter(Boolean))];
+  const costsFromKV = {};
+  
+  // STEP 0: PROVO A LEGGERE DAL KV (cache persistente) PRIMA di chiamare Shopify
+  if (KV_ENABLED) {
+    const kvKeys = uniqueVariantIds.map(v => `variant_cost_${v}`);
+    const kvResults = await kvMGet(kvKeys);
+    uniqueVariantIds.forEach(v => {
+      const key = `variant_cost_${v}`;
+      if (kvResults[key] !== undefined) {
+        const parsed = parseFloat(kvResults[key]);
+        if (!isNaN(parsed)) { costsFromKV[v] = parsed; stats.kv_hit++; }
+        else stats.kv_miss++;
+      } else stats.kv_miss++;
+    });
+  }
+  
+  // Solo variant_id che NON abbiamo già nel KV vanno chiamati su Shopify
+  const variantsToFetch = uniqueVariantIds.filter(v => !(v in costsFromKV));
   const uniqueProductIds = [...new Set(orderProductIds.filter(Boolean))];
   const variantToInventoryItem = {};
+  
+  // Se tutti i variant sono in cache, skip le chiamate Shopify
+  if (variantsToFetch.length === 0) {
+    return { costs: costsFromKV, stats };
+  }
+  
+  const token = await getShopifyAccessToken();
   
   // STEP 1: per ogni product_id, chiamo /products/{id}.json (funziona sempre)
   async function fetchProductWithRetry(pid, attempt = 0) {
@@ -302,22 +386,43 @@ async function fetchVariantCosts(variantIds, orderProductIds = []) {
     await fetchInvWithRetry(chunk);
   }
   
-  // Map finale
-  const costs = {};
+  // Map finale + salvataggio KV dei NUOVI costi letti
+  const newCostsFromShopify = {};
   Object.entries(variantToInventoryItem).forEach(([variantId, invId]) => {
-    costs[variantId] = invId && inventoryToCost[invId] !== undefined ? inventoryToCost[invId] : null;
+    const cost = invId && inventoryToCost[invId] !== undefined ? inventoryToCost[invId] : null;
+    if (cost !== null && cost !== undefined) newCostsFromShopify[variantId] = cost;
   });
+  
+  // SALVA i nuovi costi su KV per il futuro (anche se il prodotto sarà cancellato)
+  if (KV_ENABLED && Object.keys(newCostsFromShopify).length > 0) {
+    const kvPairs = {};
+    Object.entries(newCostsFromShopify).forEach(([vid, cost]) => {
+      kvPairs[`variant_cost_${vid}`] = String(cost);
+    });
+    await kvMSet(kvPairs);
+    stats.kv_new_saved = Object.keys(kvPairs).length;
+  }
+  
+  // Merge: costi da KV (già persistenti) + costi nuovi letti da Shopify
+  const costs = { ...costsFromKV, ...newCostsFromShopify };
+  // Aggiungo null per i variant che Shopify non ha restituito e che non erano in KV
+  uniqueVariantIds.forEach(v => { if (!(v in costs)) costs[v] = null; });
+  
   return { costs, stats };
 }
 
-function calcolaCostoOrdine(ordine, variantCosts) {
+function calcolaCostoOrdine(ordine, variantCosts, duoUserCosts = {}) {
   let costo_totale = 0;
   const errori = [];
   for (const item of (ordine.line_items || [])) {
     const quantity = parseInt(item.quantity) || 0;
-    const costUnit = item.variant_id ? variantCosts[item.variant_id] : null;
+    let costUnit = item.variant_id ? variantCosts[item.variant_id] : null;
+    // Fallback: per prodotti DUO, usa il costo inserito manualmente dall'utente nel simulatore
+    if ((costUnit === null || costUnit === undefined) && isDuoSku(item.sku) && item.variant_id && duoUserCosts[item.variant_id] !== undefined) {
+      costUnit = duoUserCosts[item.variant_id];
+    }
     if (costUnit === null || costUnit === undefined) {
-      errori.push({ title: item.title, sku: item.sku || '', variant_id: item.variant_id });
+      errori.push({ title: item.title, sku: item.sku || '', variant_id: item.variant_id, is_duo: isDuoSku(item.sku) });
       continue;
     }
     costo_totale += costUnit * quantity;
@@ -593,6 +698,25 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .detail-table td { padding: 12px; border-bottom: 1px solid var(--gray-100); font-size: 0.82rem; color: var(--gray-900); vertical-align: top; }
   .detail-table tbody tr:last-child td { border-bottom: none; }
   .detail-table tbody tr:hover { background: var(--cream); }
+  .duo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; margin-top: 16px; }
+  .duo-card { background: var(--white); border: 1.5px solid var(--gray-200); border-radius: var(--radius-md); overflow: hidden; transition: border-color 0.2s; }
+  .duo-card:hover { border-color: var(--gold); }
+  .duo-img { width: 100%; height: 180px; background: var(--gray-100); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .duo-img img { width: 100%; height: 100%; object-fit: cover; }
+  .duo-body { padding: 16px; }
+  .duo-title { font-weight: 700; font-size: 0.92rem; color: var(--black); margin-bottom: 4px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-transform: uppercase; letter-spacing: 0.02em; }
+  .duo-meta { font-size: 0.7rem; color: var(--gray-500); margin-bottom: 8px; font-family: monospace; }
+  .duo-listino { font-size: 0.82rem; color: var(--gray-700); margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px dotted var(--gray-200); }
+  .duo-input-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .duo-input-row label { flex: 0 0 110px; font-size: 0.7rem; color: var(--gray-700); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .duo-input-row input, .duo-input-row select { flex: 1; padding: 7px 10px; border: 1px solid var(--gray-200); border-radius: 6px; font-size: 0.85rem; font-family: var(--font-main); background: var(--white); }
+  .duo-input-row input:focus, .duo-input-row select:focus { outline: none; border-color: var(--green-primary); }
+  .duo-result { margin-top: 12px; padding: 12px; border-radius: 8px; background: var(--gray-100); font-size: 0.82rem; }
+  .duo-result.duo-pos { background: var(--green-light); border-left: 3px solid var(--green-primary); }
+  .duo-result.duo-neg { background: var(--red-light); border-left: 3px solid var(--red); }
+  .duo-main-result { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dotted var(--gray-200); }
+  .duo-result-label { font-size: 0.65rem; font-weight: 700; color: var(--gray-700); text-transform: uppercase; letter-spacing: 0.08em; }
+  .duo-breakeven { font-size: 0.78rem; color: var(--gray-700); line-height: 1.7; }
   .margin-pos { color: var(--green-dark); font-weight: 700; }
   .margin-neg { color: var(--red); font-weight: 700; }
   .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; }
@@ -669,7 +793,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v4.5</p>
+        <p>Business Intelligence Dashboard · v5.0</p>
       </div>
     </div>
     <div class="header-right">
@@ -683,6 +807,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <button class="tab" data-tab="compare">Confronto MP</button>
       <button class="tab" data-tab="calculator">Calcolatore</button>
       <button class="tab" data-tab="marketplaces">Marketplace</button>
+      <button class="tab" data-tab="duo">Simulatore DUO</button>
     </div>
   </div>
   <div id="analytics-tab" class="tab-content active">
@@ -788,6 +913,34 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="section-header"><div><div class="section-title">Portfolio Marketplace</div><div class="section-subtitle">Configurazioni canali</div></div></div>
       <div class="warn-box">Riconoscimento via <code>source_name</code>. Verifica con <code>/api/debug-orders</code>.</div>
       <div class="mp-grid" id="mp-grid"></div>
+    </div>
+  </div>
+  <div id="duo-tab" class="tab-content">
+    <div class="section">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Simulatore DUO</div>
+          <div class="section-subtitle">Prodotti dropship (fungi da marketplace) — calcola a quale prezzo ti conviene vendere</div>
+        </div>
+      </div>
+      <div id="duo-kv-status" class="warn-box">Caricamento stato KV...</div>
+      <div class="filter-bar" style="gap:12px;">
+        <button class="apply-btn" id="duo-reload" style="background:var(--black);">🔄 Ricarica prodotti</button>
+        <label class="apply-btn" style="background:var(--green-primary); cursor:pointer;">📤 Import costi CSV
+          <input type="file" id="duo-csv-file" accept=".csv" style="display:none;">
+        </label>
+        <span id="duo-import-status" style="font-size:0.85rem; color:var(--gray-700);"></span>
+        <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+          <label style="font-size:0.78rem; color:var(--gray-700); font-weight:700; text-transform:uppercase;">Cerca</label>
+          <input type="text" id="duo-search" placeholder="Titolo / SKU..." style="padding:8px 14px; border:1.5px solid var(--gray-200); border-radius:50px; font-size:0.85rem; min-width:220px;">
+        </div>
+      </div>
+      <div class="info-box" style="margin-top:12px;">
+        <strong>Come funziona</strong>: clicca "Ricarica prodotti" per vedere tutti i DUO attivi. Inserisci il costo fornitore e il prezzo vendita, scegli il marketplace → ti mostro il margine reale. Puoi anche importare tutti i costi in blocco da un file CSV con colonne <code>variant_id,cost</code> (o <code>sku,cost</code>).
+      </div>
+      <div id="duo-content">
+        <div class="bs-empty">Clicca "Ricarica prodotti" per caricare i DUO da Shopify.</div>
+      </div>
     </div>
   </div>
 </div>
@@ -981,19 +1134,200 @@ function loadMarketplaces() {
     grid.appendChild(card);
   });
 }
+
+// ============ SIMULATORE DUO ============
+let duoProducts = [];
+function calcolaMargineDUO(prezzoLordo, costo, mpKey, ivaPerc) {
+  if (!prezzoLordo || !mpKey) return null;
+  const mp = MARKETPLACES[mpKey]; if (!mp) return null;
+  const prezzoNettoIva = prezzoLordo / (1 + ivaPerc / 100);
+  const ivaScorp = prezzoLordo - prezzoNettoIva;
+  const prezzoNetto = prezzoNettoIva * (1 - mp.sconto_percentuale / 100);
+  const feesShop = mpKey === 'TLUXY_SITE' ? prezzoNetto * 0.0015 : 0;
+  const feeP = prezzoNetto * (mp.fee_principale / 100);
+  const feeS = prezzoNetto * ((mp.fee_secondaria || 0) / 100);
+  const feeA = prezzoNetto * ((mp.fee_accessoria || 0) / 100);
+  const feesMp = feeP + feeS + feeA + (mp.fee_fissa_trasporto || 0) + (mp.fee_fissa_packaging || 0);
+  const margine = prezzoNetto - feesShop - feesMp - costo;
+  const marginePerc = prezzoLordo > 0 ? (margine / prezzoLordo * 100) : 0;
+  return { margine, marginePerc, prezzoNetto, ivaScorp, feesShop, feesMp };
+}
+
+// Calcola il prezzo minimo (IVA inclusa) per raggiungere un margine target
+function prezzoMinimoPerMargine(costo, mpKey, ivaPerc, margineTargetPerc) {
+  const mp = MARKETPLACES[mpKey]; if (!mp) return null;
+  const totalPercFee = (mp.fee_principale + (mp.fee_secondaria || 0) + (mp.fee_accessoria || 0) + (mpKey === 'TLUXY_SITE' ? 0.15 : 0)) / 100;
+  const scontoPerc = mp.sconto_percentuale / 100;
+  const feeFissa = (mp.fee_fissa_trasporto || 0) + (mp.fee_fissa_packaging || 0);
+  // Formula: prezzoNetto(1-totalPercFee) - costo - feeFissa = margineTarget
+  // prezzoNetto = prezzoLordo/(1+iva) * (1-scontoPerc)
+  // prezzoLordo = X. Risolvo per X.
+  // margine = X/(1+iva)*(1-sconto)*(1-totalFee) - costo - feeFissa
+  // margineTarget = margineTargetPerc/100 * X
+  // X/(1+iva)*(1-sconto)*(1-totalFee) - costo - feeFissa = margineTargetPerc/100 * X
+  // X * [(1-sconto)*(1-totalFee)/(1+iva) - margineTargetPerc/100] = costo + feeFissa
+  const coef = (1 - scontoPerc) * (1 - totalPercFee) / (1 + ivaPerc / 100) - margineTargetPerc / 100;
+  if (coef <= 0) return Infinity; // impossibile raggiungere quel margine
+  return (costo + feeFissa) / coef;
+}
+
+async function loadDuoProducts() {
+  const cont = document.getElementById('duo-content');
+  cont.innerHTML = '<div class="bs-empty">Caricamento prodotti DUO da Shopify...</div>';
+  try {
+    const data = await fetchNoCache('/api/duo-products');
+    if (!data.success) { cont.innerHTML = '<div class="bs-empty">Errore: ' + (data.error || 'sconosciuto') + '</div>'; return; }
+    duoProducts = data.prodotti || [];
+    renderDuoProducts(duoProducts);
+  } catch(e) { cont.innerHTML = '<div class="bs-empty">Errore: ' + e.message + '</div>'; }
+}
+
+function renderDuoProducts(products) {
+  const cont = document.getElementById('duo-content');
+  if (!products || products.length === 0) { cont.innerHTML = '<div class="bs-empty">Nessun prodotto DUO trovato (SKU che inizia con "DUO-").</div>'; return; }
+  const mpOptions = Object.entries(MARKETPLACES).map(([k, v]) => '<option value="' + k + '">' + v.nome + '</option>').join('');
+  cont.innerHTML = '<div class="duo-grid">' + products.map(p => {
+    const imgHtml = p.image ? '<img src="' + p.image + '" alt="" loading="lazy">' : '<div class="bs-image-placeholder">◇</div>';
+    const costoSaved = p.costo_fornitore !== null && p.costo_fornitore !== undefined ? p.costo_fornitore : '';
+    return '<div class="duo-card" data-vid="' + p.variant_id + '">' +
+      '<div class="duo-img">' + imgHtml + '</div>' +
+      '<div class="duo-body">' +
+        '<div class="duo-title">' + p.title + '</div>' +
+        '<div class="duo-meta">SKU: ' + p.sku + ' · Stock: ' + p.inventory_quantity + '</div>' +
+        '<div class="duo-listino">Listino Shopify: <strong>€' + p.prezzo_listino.toFixed(2) + '</strong>' + (p.compare_at_price > 0 ? ' <span style="text-decoration:line-through; color:var(--gray-500); margin-left:6px;">€' + p.compare_at_price.toFixed(2) + '</span>' : '') + '</div>' +
+        '<div class="duo-input-row"><label>Costo fornitore €</label><input type="number" class="duo-cost" value="' + costoSaved + '" step="0.01" min="0" data-vid="' + p.variant_id + '"></div>' +
+        '<div class="duo-input-row"><label>Marketplace</label><select class="duo-mp" data-vid="' + p.variant_id + '"><option value="">— scegli —</option>' + mpOptions + '</select></div>' +
+        '<div class="duo-input-row"><label>IVA paese %</label><select class="duo-iva" data-vid="' + p.variant_id + '"><option value="22">IT (22%)</option><option value="20">FR/UK/AT (20%)</option><option value="19">DE (19%)</option><option value="21">ES/NL/BE (21%)</option><option value="23">PL/IE/PT (23%)</option><option value="25">SE/DK (25%)</option><option value="0">Extra-UE (0%)</option></select></div>' +
+        '<div class="duo-input-row"><label>Prezzo test €</label><input type="number" class="duo-prezzo-test" value="' + p.prezzo_listino.toFixed(2) + '" step="0.01" data-vid="' + p.variant_id + '"></div>' +
+        '<div class="duo-result" id="duo-res-' + p.variant_id + '">—</div>' +
+      '</div>' +
+    '</div>';
+  }).join('') + '</div>';
+  
+  // Listeners
+  cont.querySelectorAll('.duo-cost, .duo-mp, .duo-iva, .duo-prezzo-test').forEach(el => {
+    el.addEventListener('input', e => updateDuoCard(e.target.dataset.vid));
+    el.addEventListener('change', e => updateDuoCard(e.target.dataset.vid));
+  });
+  // Save costo on blur (persistenza KV)
+  cont.querySelectorAll('.duo-cost').forEach(el => {
+    el.addEventListener('blur', async e => {
+      const vid = e.target.dataset.vid; const cost = parseFloat(e.target.value);
+      if (!isNaN(cost) && cost >= 0) {
+        try { await fetch('/api/duo-cost-set', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({variant_id: vid, cost}) }); } catch(_) {}
+      }
+    });
+  });
+}
+
+function updateDuoCard(vid) {
+  const card = document.querySelector('.duo-card[data-vid="' + vid + '"]'); if (!card) return;
+  const costo = parseFloat(card.querySelector('.duo-cost').value) || 0;
+  const mpKey = card.querySelector('.duo-mp').value;
+  const iva = parseFloat(card.querySelector('.duo-iva').value);
+  const prezzo = parseFloat(card.querySelector('.duo-prezzo-test').value) || 0;
+  const resDiv = card.querySelector('.duo-result');
+  if (!costo || !mpKey || !prezzo) { resDiv.innerHTML = '<span style="color:var(--gray-500); font-style:italic;">Compila costo, marketplace e prezzo per vedere il margine</span>'; resDiv.className = 'duo-result'; return; }
+  const r = calcolaMargineDUO(prezzo, costo, mpKey, iva);
+  if (!r) { resDiv.innerHTML = 'Errore calcolo'; return; }
+  const prezzoBE = prezzoMinimoPerMargine(costo, mpKey, iva, 0);
+  const prezzo20 = prezzoMinimoPerMargine(costo, mpKey, iva, 20);
+  const prezzo30 = prezzoMinimoPerMargine(costo, mpKey, iva, 30);
+  const marginCls = r.margine >= 0 ? 'margin-pos' : 'margin-neg';
+  resDiv.className = 'duo-result ' + (r.margine >= 0 ? 'duo-pos' : 'duo-neg');
+  resDiv.innerHTML = '<div class="duo-main-result"><span class="duo-result-label">MARGINE</span><span class="' + marginCls + '" style="font-size:1.3rem; font-weight:700;">€' + r.margine.toFixed(2) + '</span><span class="' + marginCls + '">' + r.marginePerc.toFixed(1) + '%</span></div>' +
+    '<div class="duo-breakeven"><strong>Break-even</strong>: €' + (isFinite(prezzoBE) ? prezzoBE.toFixed(2) : '—') + '<br><strong>Per 20% margine</strong>: €' + (isFinite(prezzo20) ? prezzo20.toFixed(2) : '—') + '<br><strong>Per 30% margine</strong>: €' + (isFinite(prezzo30) ? prezzo30.toFixed(2) : '—') + '</div>';
+}
+
+function filterDuoProducts() {
+  const q = (document.getElementById('duo-search').value || '').toLowerCase().trim();
+  if (!q) { renderDuoProducts(duoProducts); return; }
+  const filtered = duoProducts.filter(p => p.title.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
+  renderDuoProducts(filtered);
+}
+
+async function checkKvStatus() {
+  const el = document.getElementById('duo-kv-status');
+  try {
+    const data = await fetchNoCache('/api/kv-status');
+    if (data.kv_enabled) {
+      el.className = 'info-box';
+      el.style.cssText = 'background:var(--green-light); border-left-color:var(--green-primary); color:var(--green-dark);';
+      el.innerHTML = '✅ <strong>DB persistente attivo</strong>: i costi vengono salvati permanentemente (non si perdono se i prodotti vengono archiviati).';
+    } else {
+      el.className = 'warn-box';
+      el.innerHTML = '⚠️ <strong>DB persistente NON configurato</strong>. Vai su Vercel → Storage → Create KV Database. Senza KV il simulatore non può salvare i costi.';
+    }
+  } catch(e) { el.innerHTML = '❌ Errore verifica KV: ' + e.message; }
+}
+
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length === 0) return { costs: {}, err: 'File vuoto' };
+  const header = lines[0].split(/[,;]/).map(h => h.trim().toLowerCase().replace(/^"|"$/g, ''));
+  const vidIdx = header.findIndex(h => h === 'variant_id' || h === 'variantid');
+  const skuIdx = header.findIndex(h => h === 'sku');
+  const costIdx = header.findIndex(h => h === 'cost' || h === 'costo' || h === 'costo_fornitore');
+  if (costIdx < 0) return { costs: {}, err: 'Colonna "cost" non trovata nel CSV' };
+  if (vidIdx < 0 && skuIdx < 0) return { costs: {}, err: 'Devi avere colonna "variant_id" o "sku"' };
+  const costs = {}; const skippedSkus = [];
+  for (let i = 1; i < lines.length; i++) {
+    const parts = lines[i].split(/[,;]/).map(p => p.trim().replace(/^"|"$/g, ''));
+    const cost = parseFloat(parts[costIdx]);
+    if (isNaN(cost)) continue;
+    let vid = null;
+    if (vidIdx >= 0 && parts[vidIdx]) vid = parts[vidIdx];
+    else if (skuIdx >= 0 && parts[skuIdx]) {
+      const sku = parts[skuIdx];
+      const match = duoProducts.find(p => p.sku === sku);
+      if (match) vid = String(match.variant_id); else { skippedSkus.push(sku); continue; }
+    }
+    if (vid) costs[vid] = cost;
+  }
+  return { costs, skippedSkus };
+}
+
+async function handleCsvImport(file) {
+  const status = document.getElementById('duo-import-status');
+  status.textContent = '📄 Lettura CSV...';
+  try {
+    const text = await file.text();
+    const { costs, err, skippedSkus } = parseCSV(text);
+    if (err) { status.textContent = '❌ ' + err; status.style.color = 'var(--red)'; return; }
+    const n = Object.keys(costs).length;
+    if (n === 0) { status.textContent = '❌ Nessun costo valido nel CSV'; status.style.color = 'var(--red)'; return; }
+    status.textContent = '💾 Salvataggio ' + n + ' costi...';
+    const res = await fetch('/api/duo-costs-import', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({costs}) });
+    const data = await res.json();
+    if (data.success) {
+      let msg = '✅ Salvati ' + data.salvati + ' costi';
+      if (skippedSkus && skippedSkus.length) msg += ' (' + skippedSkus.length + ' SKU sconosciuti skippati)';
+      status.textContent = msg; status.style.color = 'var(--green-dark)';
+      setTimeout(loadDuoProducts, 500);
+    } else { status.textContent = '❌ ' + data.error; status.style.color = 'var(--red)'; }
+  } catch(e) { status.textContent = '❌ ' + e.message; status.style.color = 'var(--red)'; }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadMarketplaces();
   const today = new Date(); const monthAgo = new Date(); monthAgo.setMonth(monthAgo.getMonth() - 1);
   const fmt = d => d.toISOString().split('T')[0];
   ['date-from', 'bs-date-from'].forEach(id => { const el = document.getElementById(id); if (el) el.value = fmt(monthAgo); });
   ['date-to', 'bs-date-to'].forEach(id => { const el = document.getElementById(id); if (el) el.value = fmt(today); });
-  document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
+  document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => {
+    showTab(btn.dataset.tab);
+    if (btn.dataset.tab === 'duo') { checkKvStatus(); if (duoProducts.length === 0) loadDuoProducts(); }
+  }));
   document.querySelectorAll('[data-analytics-periods] .period-btn').forEach(btn => btn.addEventListener('click', () => setPeriod(btn.dataset.period, btn)));
   document.querySelectorAll('[data-bs-periods] .period-btn').forEach(btn => btn.addEventListener('click', () => loadBestSellers(btn.dataset.period, btn)));
   document.getElementById('analytics-apply').addEventListener('click', applyCustomRange);
   document.getElementById('bs-apply').addEventListener('click', applyBsCustomRange);
   ['c-prezzo', 'c-iva', 'c-costo', 'c-spedizione'].forEach(id => { const el = document.getElementById(id); if (el) { el.addEventListener('input', confronta); if (el.tagName === 'SELECT') el.addEventListener('change', confronta); } });
   document.getElementById('calcola-btn').addEventListener('click', calcola);
+  // DUO listeners
+  document.getElementById('duo-reload').addEventListener('click', loadDuoProducts);
+  document.getElementById('duo-csv-file').addEventListener('change', e => { if (e.target.files[0]) handleCsvImport(e.target.files[0]); });
+  document.getElementById('duo-search').addEventListener('input', filterDuoProducts);
   setTimeout(() => { calcola(); confronta(); const todayBtn = document.querySelector('[data-analytics-periods] .period-btn[data-period="today"]'); setPeriod('today', todayBtn); }, 300);
 });
 </script>
@@ -1017,7 +1351,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v4.5', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), funzionalita: ['Breakdown MP espandibile', 'Brandsgateway via tag', 'Products/{id}.json strategy', 'Fetch stats logging', 'Fuso Roma reale', 'Poizon + Secret Sales', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-costs', '/api/debug-single-cost'] });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.0', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), kv_enabled: KV_ENABLED, funzionalita: ['KV storage costi persistenti', 'Simulatore DUO con CSV import', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Products/{id}.json strategy', 'Fuso Roma reale', 'Poizon + Secret Sales', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-costs', '/api/debug-single-cost'] });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -1035,11 +1369,33 @@ export default async function handler(req, res) {
         const fetchResult = await fetchVariantCosts([...variantIds], [...productIds]);
         const variantCosts = fetchResult.costs;
         const fetchStats = fetchResult.stats;
+        
+        // Carica costi DUO salvati manualmente dall'utente (per gli ordini dove Shopify ha perso il cost)
+        const duoUserCosts = {};
+        if (KV_ENABLED) {
+          const duoSkuVariantIds = [];
+          ordini.forEach(o => (o.line_items || []).forEach(item => {
+            if (item.variant_id && isDuoSku(item.sku)) duoSkuVariantIds.push(item.variant_id);
+          }));
+          const uniqueDuoVids = [...new Set(duoSkuVariantIds)];
+          if (uniqueDuoVids.length > 0) {
+            const duoKeys = uniqueDuoVids.map(v => `duo_user_cost_${v}`);
+            const duoResults = await kvMGet(duoKeys);
+            uniqueDuoVids.forEach(v => {
+              const key = `duo_user_cost_${v}`;
+              if (duoResults[key] !== undefined) {
+                const parsed = parseFloat(duoResults[key]);
+                if (!isNaN(parsed)) duoUserCosts[v] = parsed;
+              }
+            });
+          }
+        }
+        
         let lordo_iva_inclusa = 0, iva_totale = 0, costi_totali = 0, margine_netto = 0;
         const breakdown_marketplace = {};
         const ordini_con_errori = [];
         ordini.forEach(ordine => {
-          const { costo: costo_merce, errori } = calcolaCostoOrdine(ordine, variantCosts);
+          const { costo: costo_merce, errori } = calcolaCostoOrdine(ordine, variantCosts, duoUserCosts);
           const mp = riconosciMarketplace(ordine);
           if (errori.length > 0) {
             ordini_con_errori.push({ id: ordine.id, order_number: ordine.order_number, name: ordine.name, total_price: ordine.total_price, marketplace: mp.config.nome, prodotti_senza_costo: errori });
@@ -1082,7 +1438,11 @@ export default async function handler(req, res) {
               sku: item.sku || '',
               quantity: parseInt(item.quantity) || 0,
               prezzo_unit: parseFloat(item.price) || 0,
-              cost_unit: item.variant_id && variantCosts[item.variant_id] !== null && variantCosts[item.variant_id] !== undefined ? variantCosts[item.variant_id] : 0
+              cost_unit: (function() {
+                if (item.variant_id && variantCosts[item.variant_id] !== null && variantCosts[item.variant_id] !== undefined) return variantCosts[item.variant_id];
+                if (isDuoSku(item.sku) && item.variant_id && duoUserCosts[item.variant_id] !== undefined) return duoUserCosts[item.variant_id];
+                return 0;
+              })()
             }))
           });
         });
@@ -1124,17 +1484,46 @@ export default async function handler(req, res) {
         }));
         const fetchResult = await fetchVariantCosts([...variantIds], [...productIds]);
         const variantCosts = fetchResult.costs;
+        // Costi DUO manuali
+        const duoUserCosts = {};
+        if (KV_ENABLED) {
+          const duoSkuVariantIds = [];
+          processati.forEach(o => (o.line_items || []).forEach(item => {
+            if (item.variant_id && isDuoSku(item.sku)) duoSkuVariantIds.push(item.variant_id);
+          }));
+          const uniqueDuoVids = [...new Set(duoSkuVariantIds)];
+          if (uniqueDuoVids.length > 0) {
+            const duoKeys = uniqueDuoVids.map(v => `duo_user_cost_${v}`);
+            const duoResults = await kvMGet(duoKeys);
+            uniqueDuoVids.forEach(v => {
+              const key = `duo_user_cost_${v}`;
+              if (duoResults[key] !== undefined) {
+                const parsed = parseFloat(duoResults[key]);
+                if (!isNaN(parsed)) duoUserCosts[v] = parsed;
+              }
+            });
+          }
+        }
         const debug = processati.map(o => {
-          const { costo, errori } = calcolaCostoOrdine(o, variantCosts);
+          const { costo, errori } = calcolaCostoOrdine(o, variantCosts, duoUserCosts);
           return {
             order_number: o.order_number, name: o.name, created_at: o.created_at,
             total_price: o.total_price, country: o.shipping_address?.country_code || o.billing_address?.country_code,
             marketplace: riconosciMarketplace(o).config.nome, costo_merce_reale: costo.toFixed(2),
-            line_items: (o.line_items || []).map(item => ({ title: item.title, sku: item.sku, variant_id: item.variant_id, quantity: item.quantity, price: item.price, cost_per_unit: item.variant_id && variantCosts[item.variant_id] !== null && variantCosts[item.variant_id] !== undefined ? variantCosts[item.variant_id] : 'MANCANTE' })),
+            line_items: (o.line_items || []).map(item => {
+              let cost_per_unit = 'MANCANTE';
+              let cost_source = null;
+              if (item.variant_id && variantCosts[item.variant_id] !== null && variantCosts[item.variant_id] !== undefined) {
+                cost_per_unit = variantCosts[item.variant_id]; cost_source = 'shopify';
+              } else if (isDuoSku(item.sku) && item.variant_id && duoUserCosts[item.variant_id] !== undefined) {
+                cost_per_unit = duoUserCosts[item.variant_id]; cost_source = 'duo_manual';
+              }
+              return { title: item.title, sku: item.sku, variant_id: item.variant_id, quantity: item.quantity, price: item.price, cost_per_unit, cost_source };
+            }),
             errori
           };
         });
-        return res.json({ success: true, periodo, fetch_stats: fetchResult.stats, ordini: debug });
+        return res.json({ success: true, periodo, fetch_stats: fetchResult.stats, kv_enabled: KV_ENABLED, duo_costs_loaded: Object.keys(duoUserCosts).length, ordini: debug });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
@@ -1164,6 +1553,125 @@ export default async function handler(req, res) {
     }
 
     // DIAGNOSTIC: traccia chiamate Shopify per singolo variant_id
+    // ============ SIMULATORE DUO ============
+    // Lista tutti i prodotti DUO attivi (SKU che inizia con DUO-) con info utili per simulazione
+    if (req.method === 'GET' && path === '/api/duo-products') {
+      try {
+        const token = await getShopifyAccessToken();
+        const products = [];
+        let url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?limit=250&status=active&fields=id,title,image,variants`;
+        let pageCount = 0;
+        const maxPages = 30;
+        while (url && pageCount < maxPages) {
+          const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
+          if (!response.ok) break;
+          const data = await response.json();
+          (data.products || []).forEach(p => {
+            (p.variants || []).forEach(v => {
+              if (isDuoSku(v.sku)) {
+                products.push({
+                  product_id: p.id,
+                  variant_id: v.id,
+                  title: p.title,
+                  image: p.image?.src || null,
+                  variant_title: v.title,
+                  sku: v.sku,
+                  prezzo_listino: parseFloat(v.price) || 0,
+                  compare_at_price: parseFloat(v.compare_at_price) || 0,
+                  inventory_quantity: v.inventory_quantity || 0
+                });
+              }
+            });
+          });
+          const linkHeader = response.headers.get('link') || response.headers.get('Link');
+          url = null;
+          if (linkHeader) { const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/); if (nextMatch) url = nextMatch[1]; }
+          pageCount++;
+        }
+        
+        // Leggi costi salvati (se utente ha fatto import CSV o ha dati in KV)
+        const userCosts = {};
+        if (KV_ENABLED && products.length > 0) {
+          const keys = products.map(p => `duo_user_cost_${p.variant_id}`);
+          const results = await kvMGet(keys);
+          products.forEach(p => {
+            const key = `duo_user_cost_${p.variant_id}`;
+            if (results[key] !== undefined) {
+              const parsed = parseFloat(results[key]);
+              if (!isNaN(parsed)) userCosts[p.variant_id] = parsed;
+            }
+          });
+        }
+        
+        // Applica costo noto e ordina: prima quelli con costo, poi senza
+        const enriched = products.map(p => ({ ...p, costo_fornitore: userCosts[p.variant_id] !== undefined ? userCosts[p.variant_id] : null }));
+        enriched.sort((a, b) => {
+          if ((a.costo_fornitore !== null) !== (b.costo_fornitore !== null)) return a.costo_fornitore !== null ? -1 : 1;
+          return a.title.localeCompare(b.title);
+        });
+        
+        return res.json({ success: true, totale: enriched.length, kv_enabled: KV_ENABLED, prodotti: enriched });
+      } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
+    }
+
+    // Import costi DUO da CSV (payload JSON: {costs: {variant_id: cost}})
+    if (req.method === 'POST' && path === '/api/duo-costs-import') {
+      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV storage non configurato. Abilita Vercel KV.' });
+      try {
+        let body = '';
+        await new Promise((resolve, reject) => {
+          req.on('data', chunk => body += chunk);
+          req.on('end', resolve);
+          req.on('error', reject);
+        });
+        const data = JSON.parse(body);
+        const costs = data.costs || {};
+        const pairs = {};
+        let count = 0;
+        Object.entries(costs).forEach(([vid, cost]) => {
+          const parsed = parseFloat(cost);
+          if (vid && !isNaN(parsed) && parsed >= 0) {
+            pairs[`duo_user_cost_${vid}`] = String(parsed);
+            count++;
+          }
+        });
+        if (count === 0) return res.json({ success: false, error: 'Nessun costo valido nel CSV' });
+        await kvMSet(pairs);
+        return res.json({ success: true, salvati: count });
+      } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
+    }
+
+    // Save singolo costo DUO (per editing inline dal browser)
+    if (req.method === 'POST' && path === '/api/duo-cost-set') {
+      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV storage non configurato' });
+      try {
+        let body = '';
+        await new Promise((resolve, reject) => {
+          req.on('data', chunk => body += chunk);
+          req.on('end', resolve);
+          req.on('error', reject);
+        });
+        const data = JSON.parse(body);
+        const vid = data.variant_id;
+        const cost = parseFloat(data.cost);
+        if (!vid || isNaN(cost) || cost < 0) return res.json({ success: false, error: 'Dati invalidi' });
+        await kvSet(`duo_user_cost_${vid}`, String(cost));
+        return res.json({ success: true });
+      } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
+    }
+
+    // Health check KV
+    if (req.method === 'GET' && path === '/api/kv-status') {
+      if (!KV_ENABLED) return res.json({ kv_enabled: false, message: 'KV non configurato. Vai su Vercel → Storage → Create KV Database.' });
+      try {
+        const testKey = '__kv_test__';
+        const testVal = String(Date.now());
+        await kvSet(testKey, testVal);
+        const read = await kvGet(testKey);
+        return res.json({ kv_enabled: true, write_ok: true, read_ok: read === testVal, read_value: read });
+      } catch (error) { return res.json({ kv_enabled: true, error: error.message }); }
+    }
+
     if (req.method === 'GET' && path === '/api/debug-single-cost') {
       try {
         const variantId = query.get('variant_id') || '47254190325972';
