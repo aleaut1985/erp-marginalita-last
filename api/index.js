@@ -1,8 +1,177 @@
-// ERP Marginalità v5.4 - Winkelstraat detection via email/shipping/tag/copernicus
+// ERP Marginalità v5.6 - Magic Link authentication via Resend
+
+import crypto from 'crypto';
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'autore-luxit.myshopify.com';
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
 const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || '';
+
+// ============ AUTH CONFIG (MAGIC LINK) ============
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const MAIL_FROM = process.env.MAIL_FROM || 'T. Luxy ERP <onboarding@resend.dev>';
+const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+const AUTH_SECRET = process.env.AUTH_SECRET || (RESEND_API_KEY + '_tluxy_erp_secret_salt_2026');
+const DASHBOARD_URL = process.env.DASHBOARD_URL || 'https://erp-marginalita-last.vercel.app';
+const AUTH_COOKIE_NAME = 'tluxy_erp_session';
+const AUTH_SESSION_DAYS = 7;
+const MAGIC_LINK_MINUTES = 15;
+const MAGIC_LINK_RATE_LIMIT = 3; // max 3 magic link/ora per email
+const AUTH_ENABLED = !!(RESEND_API_KEY && ALLOWED_EMAILS.length > 0);
+
+function hmacSign(payload) {
+  return crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('hex');
+}
+
+function createSessionToken(email) {
+  const expiresAt = Date.now() + (AUTH_SESSION_DAYS * 24 * 60 * 60 * 1000);
+  // email base64 per evitare caratteri problematici nel cookie
+  const emailB64 = Buffer.from(email).toString('base64url');
+  const payload = `v1.${expiresAt}.${emailB64}`;
+  const sig = hmacSign(payload);
+  return `${payload}.${sig}`;
+}
+
+function verifySessionToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 4 || parts[0] !== 'v1') return null;
+  const expiresAt = parseInt(parts[1], 10);
+  if (isNaN(expiresAt) || expiresAt < Date.now()) return null;
+  const expectedSig = hmacSign(`v1.${parts[1]}.${parts[2]}`);
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(expectedSig), Buffer.from(parts[3]))) return null;
+    const email = Buffer.from(parts[2], 'base64url').toString('utf8');
+    return { email, expiresAt };
+  } catch (e) { return null; }
+}
+
+function parseCookies(cookieHeader) {
+  const cookies = {};
+  if (!cookieHeader) return cookies;
+  cookieHeader.split(';').forEach(part => {
+    const [k, ...v] = part.trim().split('=');
+    if (k) cookies[k] = v.join('=');
+  });
+  return cookies;
+}
+
+function getAuthenticatedUser(req) {
+  if (!AUTH_ENABLED) return { email: 'auth-disabled' };
+  const cookies = parseCookies(req.headers.cookie || '');
+  return verifySessionToken(cookies[AUTH_COOKIE_NAME]);
+}
+
+function setAuthCookie(res, email) {
+  const token = createSessionToken(email);
+  const maxAge = AUTH_SESSION_DAYS * 24 * 60 * 60;
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE_NAME}=${token}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`);
+}
+
+function clearAuthCookie(res) {
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+}
+
+// Genera token sicuro per magic link (32 byte random = ~43 char url-safe)
+function generateMagicLinkToken() {
+  return crypto.randomBytes(32).toString('base64url');
+}
+
+// Invia email via Resend API
+async function sendMagicLinkEmail(email, magicLink) {
+  if (!RESEND_API_KEY) throw new Error('RESEND_API_KEY mancante');
+  const html = `<!DOCTYPE html><html><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:560px; margin:40px auto; padding:40px 32px; background:#F5F1E8; border-radius:16px; color:#1A1A1A;">
+  <div style="background:#FFFFFF; padding:40px 36px; border-radius:14px; box-shadow:0 8px 24px rgba(0,0,0,0.06);">
+    <div style="font-size:1.35rem; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:6px;">T. <span style="color:#C9A961;">Luxy</span> · ERP</div>
+    <div style="font-size:0.72rem; color:#8E8E8E; text-transform:uppercase; letter-spacing:0.15em; font-weight:600; margin-bottom:32px;">Marginality Dashboard</div>
+    <h1 style="font-size:1.1rem; margin:0 0 18px 0;">🔐 Il tuo link di accesso</h1>
+    <p style="font-size:0.92rem; line-height:1.6; color:#444; margin-bottom:28px;">Clicca il bottone qui sotto per accedere alla dashboard. Il link è valido per <strong>${MAGIC_LINK_MINUTES} minuti</strong> e può essere usato una sola volta.</p>
+    <div style="text-align:center; margin:32px 0;">
+      <a href="${magicLink}" style="display:inline-block; background:#1A1A1A; color:#FFFFFF; text-decoration:none; padding:14px 32px; border-radius:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; font-size:0.88rem;">Entra nella Dashboard</a>
+    </div>
+    <p style="font-size:0.78rem; color:#8E8E8E; line-height:1.5; margin-top:32px; padding-top:20px; border-top:1px solid #F0EBDF;">Se non hai richiesto tu questo link, ignora semplicemente questa email — nessun accesso sarà concesso.<br><br>Link diretto (se il bottone non funziona):<br><span style="word-break:break-all; color:#666; font-size:0.72rem;">${magicLink}</span></p>
+  </div>
+  <div style="text-align:center; font-size:0.7rem; color:#8E8E8E; margin-top:20px; letter-spacing:0.04em;">T. Luxy ERP · Business Intelligence</div>
+  </body></html>`;
+  const text = `T. LUXY ERP - Accesso Dashboard\n\nClicca il link per accedere (valido ${MAGIC_LINK_MINUTES} minuti):\n${magicLink}\n\nSe non hai richiesto tu questo link, ignora questa email.`;
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: MAIL_FROM,
+      to: [email],
+      subject: 'Il tuo link di accesso T. Luxy ERP',
+      html,
+      text
+    })
+  });
+  if (!res.ok) {
+    const errorBody = await res.text();
+    throw new Error(`Resend API error ${res.status}: ${errorBody}`);
+  }
+  return await res.json();
+}
+
+// Pagine HTML di login/conferma/errore
+function loginHTMLPage(message, isError) {
+  const msgBlock = message ? `<div class="${isError ? 'error' : 'info'} show">${message}</div>` : '';
+  return `<!DOCTYPE html>
+<html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>T. Luxy ERP · Accesso</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #F5F1E8 0%, #ECE5D3 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; color: #1A1A1A; }
+  .card { background: #FFFFFF; padding: 48px 40px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04); max-width: 440px; width: 100%; border: 1px solid rgba(0,0,0,0.03); }
+  .logo { font-size: 1.5rem; font-weight: 800; letter-spacing: 0.08em; margin-bottom: 8px; text-transform: uppercase; }
+  .logo-accent { color: #C9A961; }
+  .subtitle { font-size: 0.75rem; color: #8E8E8E; text-transform: uppercase; letter-spacing: 0.15em; margin-bottom: 36px; font-weight: 600; }
+  h1 { font-size: 1.15rem; margin-bottom: 12px; font-weight: 700; color: #1A1A1A; }
+  p.intro { font-size: 0.88rem; color: #555; margin-bottom: 28px; line-height: 1.55; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: #555; margin-bottom: 8px; font-weight: 700; }
+  .field input { width: 100%; padding: 14px 16px; border: 1.5px solid #E5E0D3; border-radius: 10px; font-size: 1rem; font-family: inherit; background: #FAFAF7; transition: all 0.2s; }
+  .field input:focus { outline: none; border-color: #C9A961; background: #FFFFFF; box-shadow: 0 0 0 3px rgba(201,169,97,0.1); }
+  .btn { width: 100%; padding: 14px 20px; background: #1A1A1A; color: #FFFFFF; border: none; border-radius: 10px; font-size: 0.9rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; transition: all 0.2s; margin-top: 8px; font-family: inherit; }
+  .btn:hover { background: #333; transform: translateY(-1px); }
+  .btn:disabled { background: #BBB; cursor: not-allowed; transform: none; }
+  .error { background: #FCEEEE; color: #BF4747; padding: 12px 16px; border-radius: 8px; font-size: 0.85rem; margin-bottom: 20px; border-left: 3px solid #BF4747; display: none; }
+  .info { background: #E6F4EE; color: #006b4a; padding: 14px 18px; border-radius: 8px; font-size: 0.88rem; margin-bottom: 20px; border-left: 3px solid #008060; display: none; line-height: 1.5; }
+  .error.show, .info.show { display: block; }
+  .footer { margin-top: 28px; padding-top: 20px; border-top: 1px solid #F0EBDF; font-size: 0.72rem; color: #8E8E8E; text-align: center; letter-spacing: 0.04em; }
+</style></head>
+<body>
+  <div class="card">
+    <div class="logo">T. <span class="logo-accent">Luxy</span> · ERP</div>
+    <div class="subtitle">Marginality Dashboard</div>
+    <h1>🔐 Accesso riservato</h1>
+    <p class="intro">Inserisci la tua email autorizzata. Riceverai un link sicuro per entrare. Valido ${MAGIC_LINK_MINUTES} minuti.</p>
+    ${msgBlock}
+    <form id="loginForm" action="/api/request-magic-link" method="POST">
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" autocomplete="email" autofocus required placeholder="nome@azienda.com">
+      </div>
+      <button type="submit" class="btn" id="submitBtn">Invia magic link</button>
+    </form>
+    <div class="footer">Business Intelligence · Autenticazione protetta</div>
+  </div>
+<script>
+document.getElementById('loginForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const email = document.getElementById('email').value.trim();
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true; btn.textContent = 'Invio in corso...';
+  try {
+    const res = await fetch('/api/request-magic-link', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email}) });
+    const data = await res.json();
+    // Sempre successo percepito (anti-enumeration): mostriamo lo stesso messaggio
+    window.location.href = '/login?sent=1';
+  } catch(e) {
+    btn.disabled = false; btn.textContent = 'Invia magic link';
+    alert('Errore di rete, riprova');
+  }
+});
+</script>
+</body></html>`;
+}
 
 // ============ KV ENV DETECTION ============
 // Vercel può creare env vars con nomi diversi a seconda della versione integrazione:
@@ -910,11 +1079,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.4</p>
+        <p>Business Intelligence Dashboard · v5.6</p>
       </div>
     </div>
     <div class="header-right">
       <div class="status-pill"><div class="status-dot"></div>Sistema Live</div>
+      <button id="logoutBtn" style="background:transparent; border:1px solid rgba(0,0,0,0.15); padding:8px 14px; border-radius:50px; cursor:pointer; font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--gray-700); margin-left:12px; font-family:var(--font-main); transition:all 0.2s;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='transparent'">🚪 Esci</button>
     </div>
   </div>
   <div class="tabs-wrap">
@@ -1477,6 +1647,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('duo-reload').addEventListener('click', loadDuoProducts);
   document.getElementById('duo-csv-file').addEventListener('change', e => { if (e.target.files[0]) handleCsvImport(e.target.files[0]); });
   document.getElementById('duo-search').addEventListener('input', filterDuoProducts);
+  // Logout handler
+  const logoutBtn = document.getElementById('logoutBtn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      if (!confirm('Vuoi uscire dalla dashboard?')) return;
+      try { await fetch('/api/logout', { method: 'POST' }); } catch(_) {}
+      window.location.href = '/login';
+    });
+  }
   setTimeout(() => { calcola(); confronta(); const todayBtn = document.querySelector('[data-analytics-periods] .period-btn[data-period="today"]'); setPeriod('today', todayBtn); }, 300);
 });
 </script>
@@ -1494,13 +1673,145 @@ export default async function handler(req, res) {
   const query = new URLSearchParams(req.url.split('?')[1] || '');
 
   try {
+    // ============ AUTH ENDPOINTS (MAGIC LINK) ============
+    // Pagina login: GET /login (pubblica, sempre accessibile)
+    if (req.method === 'GET' && path === '/login') {
+      res.setHeader('Content-Type', 'text/html');
+      const sent = query.get('sent');
+      const err = query.get('err');
+      const expired = query.get('expired');
+      let msg = null, isErr = false;
+      if (sent === '1') msg = '✉️ Se l\\'email è autorizzata, riceverai il magic link a breve. Controlla la posta (anche spam).';
+      else if (err === 'invalid') { msg = 'Link non valido o già usato. Richiedine uno nuovo.'; isErr = true; }
+      else if (err === 'rate') { msg = 'Troppi tentativi. Riprova tra un\\'ora.'; isErr = true; }
+      else if (err === 'config') { msg = 'Sistema auth non configurato. Contatta l\\'amministratore.'; isErr = true; }
+      else if (expired === '1') { msg = 'Sessione scaduta, rifai login.'; isErr = true; }
+      return res.status(200).send(loginHTMLPage(msg, isErr));
+    }
+    
+    // Request magic link: POST /api/request-magic-link { email }
+    if (req.method === 'POST' && path === '/api/request-magic-link') {
+      if (!AUTH_ENABLED) return res.status(503).json({ success: false, error: 'Auth non configurato (RESEND_API_KEY o ALLOWED_EMAILS mancanti)' });
+      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV non configurato — necessario per magic link' });
+      try {
+        let body = '';
+        await new Promise((resolve, reject) => { req.on('data', c => body += c); req.on('end', resolve); req.on('error', reject); });
+        const data = JSON.parse(body || '{}');
+        const email = (data.email || '').trim().toLowerCase();
+        // Validazione base email
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          return res.status(200).json({ success: true }); // no info leak
+        }
+        // Check whitelist (silente per evitare enumeration)
+        if (!ALLOWED_EMAILS.includes(email)) {
+          // Ritorna comunque success: true per non dare info su quali email sono autorizzate
+          return res.status(200).json({ success: true });
+        }
+        // Rate limiting via KV
+        const rateLimitKey = `auth_rate_${email}`;
+        const currentCount = await kvGet(rateLimitKey);
+        if (currentCount && parseInt(currentCount, 10) >= MAGIC_LINK_RATE_LIMIT) {
+          return res.status(200).json({ success: true }); // no leak
+        }
+        // Genera token magic link
+        const token = generateMagicLinkToken();
+        const tokenKey = `magic_token_${token}`;
+        const expiresAt = Date.now() + (MAGIC_LINK_MINUTES * 60 * 1000);
+        // Salva in KV con payload email + expiresAt
+        await kvSet(tokenKey, JSON.stringify({ email, expiresAt }));
+        // Imposta TTL via EXPIRE (Upstash supporta via URL path)
+        try {
+          await fetch(`${KV_REST_API_URL}/expire/${encodeURIComponent(tokenKey)}/${MAGIC_LINK_MINUTES * 60}`, { headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` } });
+        } catch (_) {}
+        // Rate limit counter increment (TTL 1h)
+        try {
+          const newCount = currentCount ? parseInt(currentCount, 10) + 1 : 1;
+          await kvSet(rateLimitKey, String(newCount));
+          await fetch(`${KV_REST_API_URL}/expire/${encodeURIComponent(rateLimitKey)}/3600`, { headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` } });
+        } catch (_) {}
+        // Costruisci magic link e invia email
+        const magicLink = `${DASHBOARD_URL}/api/verify-magic-link?token=${token}`;
+        try {
+          await sendMagicLinkEmail(email, magicLink);
+        } catch (sendErr) {
+          console.error('Send email error:', sendErr.message);
+          // Non leakare info sull'errore all'utente
+        }
+        return res.status(200).json({ success: true });
+      } catch (error) {
+        console.error('Magic link request error:', error.message);
+        return res.status(200).json({ success: true }); // no leak
+      }
+    }
+    
+    // Verify magic link: GET /api/verify-magic-link?token=XXX (click dal link email)
+    if (req.method === 'GET' && path === '/api/verify-magic-link') {
+      if (!AUTH_ENABLED) return res.redirect(302, '/login?err=config');
+      const token = query.get('token');
+      if (!token) return res.redirect(302, '/login?err=invalid');
+      try {
+        const tokenKey = `magic_token_${token}`;
+        const raw = await kvGet(tokenKey);
+        if (!raw) {
+          res.writeHead(302, { Location: '/login?err=invalid' });
+          return res.end();
+        }
+        let payload;
+        try { payload = JSON.parse(raw); } catch (e) { 
+          res.writeHead(302, { Location: '/login?err=invalid' });
+          return res.end();
+        }
+        if (!payload.email || !payload.expiresAt || payload.expiresAt < Date.now()) {
+          res.writeHead(302, { Location: '/login?err=invalid' });
+          return res.end();
+        }
+        // Cancella token (single-use)
+        try { await fetch(`${KV_REST_API_URL}/del/${encodeURIComponent(tokenKey)}`, { headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` } }); } catch (_) {}
+        // Verifica che email sia ancora autorizzata (la whitelist può essere cambiata)
+        if (!ALLOWED_EMAILS.includes(payload.email)) {
+          res.writeHead(302, { Location: '/login?err=invalid' });
+          return res.end();
+        }
+        // Setta cookie sessione e redirect alla dashboard
+        setAuthCookie(res, payload.email);
+        res.writeHead(302, { Location: '/' });
+        return res.end();
+      } catch (error) {
+        console.error('Verify magic link error:', error.message);
+        res.writeHead(302, { Location: '/login?err=invalid' });
+        return res.end();
+      }
+    }
+    
+    // Logout: cancella cookie e redirect login
+    if (req.method === 'POST' && path === '/api/logout') {
+      clearAuthCookie(res);
+      return res.status(200).json({ success: true });
+    }
+    if (req.method === 'GET' && path === '/logout') {
+      clearAuthCookie(res);
+      res.writeHead(302, { Location: '/login' });
+      return res.end();
+    }
+
+    // ============ AUTH GATE ============
+    // Tutti gli altri endpoint richiedono autenticazione (se abilitata)
+    const authUser = getAuthenticatedUser(req);
+    if (AUTH_ENABLED && !authUser) {
+      if (req.method === 'GET' && (path === '/' || path === '/dashboard')) {
+        res.writeHead(302, { Location: '/login?expired=1' });
+        return res.end();
+      }
+      return res.status(401).json({ success: false, error: 'Non autorizzato. Effettua il login.', auth_required: true });
+    }
+
     if (req.method === 'GET' && (path === '/' || path === '/dashboard')) {
       res.setHeader('Content-Type', 'text/html');
       return res.status(200).send(DASHBOARD_HTML);
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.4', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, funzionalita: ['Winkelstraat detection (email/shipping/tag/copernicus)', 'Conversione valuta automatica (shop_money)', 'Fix regex parseCSV', 'KV multi-format detection', 'KV storage costi persistenti', 'Simulatore DUO con CSV import', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Products/{id}.json strategy', 'Fuso Roma reale', 'Poizon + Secret Sales', 'Filtro JD'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/api', '/api/analytics', '/api/bestsellers', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-winkelstraat', '/api/debug-costs', '/api/debug-single-cost'] });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.6', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['Magic link auth (Resend)', 'Winkelstraat detection', 'Conversione valuta automatica', 'KV storage costi', 'Simulatore DUO', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Fuso Roma reale', 'Poizon + Secret Sales'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/login', '/logout', '/api', '/api/request-magic-link', '/api/verify-magic-link', '/api/logout', '/api/auth-status', '/api/analytics', '/api/bestsellers', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-winkelstraat', '/api/debug-costs', '/api/debug-single-cost'] });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -1873,6 +2184,21 @@ export default async function handler(req, res) {
           ordini_tluxy_site_campione: fallbackDefaultOrders.slice(0, 20) // per capire se qualcuno è sfuggito
         });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
+    }
+
+    // Auth diagnostic
+    if (req.method === 'GET' && path === '/api/auth-status') {
+      return res.json({
+        auth_enabled: AUTH_ENABLED,
+        auth_type: 'magic_link_resend',
+        resend_configured: !!RESEND_API_KEY,
+        mail_from: MAIL_FROM,
+        allowed_emails_count: ALLOWED_EMAILS.length,
+        session_days: AUTH_SESSION_DAYS,
+        magic_link_minutes: MAGIC_LINK_MINUTES,
+        authenticated: !!authUser,
+        user_email: authUser?.email || null
+      });
     }
 
     if (req.method === 'GET' && path === '/api/kv-status') {
