@@ -1241,7 +1241,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.8</p>
+        <p>Business Intelligence Dashboard · v5.8.3</p>
       </div>
     </div>
     <div class="header-right">
@@ -2217,7 +2217,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.8', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['Previsioni Incassi (scadenziari MP)', 'Balardi wallet prepagato', 'Gestione resi/refund (full + partial)', 'Magic link auth (Resend)', 'Winkelstraat detection', 'Conversione valuta automatica', 'KV storage costi', 'Simulatore DUO', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Fuso Roma reale', 'Poizon + Secret Sales'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/login', '/logout', '/api', '/api/request-magic-link', '/api/verify-magic-link', '/api/logout', '/api/auth-status', '/api/analytics', '/api/bestsellers', '/api/forecast', '/api/balardi-ricarica', '/api/balardi-ricarica-delete', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-winkelstraat', '/api/debug-costs', '/api/debug-single-cost'] });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.8.3', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['Cache KV 24h (forecast + discovery)', 'Previsioni Incassi (scadenziari MP)', 'Balardi wallet prepagato', 'Gestione resi/refund (full + partial)', 'Magic link auth (Resend)', 'Winkelstraat detection', 'Conversione valuta automatica', 'KV storage costi', 'Simulatore DUO', 'Breakdown MP espandibile', 'Brandsgateway via tag', 'Fuso Roma reale', 'Poizon + Secret Sales'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length, endpoints: ['/', '/login', '/logout', '/api', '/api/request-magic-link', '/api/verify-magic-link', '/api/logout', '/api/auth-status', '/api/analytics', '/api/bestsellers', '/api/forecast', '/api/balardi-ricarica', '/api/balardi-ricarica-delete', '/api/inventory-discovery', '/api/duo-products', '/api/duo-costs-import', '/api/duo-cost-set', '/api/kv-status', '/api/test-shopify', '/api/marketplaces', '/api/debug-orders', '/api/debug-jd', '/api/debug-winkelstraat', '/api/debug-costs', '/api/debug-single-cost'] });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
