@@ -1,4 +1,4 @@
-// ERP Marginalità v5.8.1 - Aggiunto /api/inventory-discovery (pre v5.9)
+// ERP Marginalità v5.8.3 - Cache KV 24h su forecast + inventory-discovery (con ?refresh=1)
 
 import * as crypto from 'node:crypto';
 
@@ -225,6 +225,26 @@ async function kvSet(key, value) {
   if (!KV_ENABLED) return false;
   try {
     const res = await fetch(`${KV_REST_API_URL}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}`, {
+      headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` }
+    });
+    return res.ok;
+  } catch (e) { return false; }
+}
+// kvSetEx: set con TTL (seconds)
+async function kvSetEx(key, ttlSec, value) {
+  if (!KV_ENABLED) return false;
+  try {
+    // Upstash Redis REST: SET key value EX ttl → /set/{key}/{value}?EX={ttl}
+    const url = `${KV_REST_API_URL}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}?EX=${ttlSec}`;
+    const res = await fetch(url, { headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` } });
+    return res.ok;
+  } catch (e) { return false; }
+}
+// kvDel: elimina chiave
+async function kvDel(key) {
+  if (!KV_ENABLED) return false;
+  try {
+    const res = await fetch(`${KV_REST_API_URL}/del/${encodeURIComponent(key)}`, {
       headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` }
     });
     return res.ok;
@@ -1380,9 +1400,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="section-header">
         <div>
           <div class="section-title">Previsioni Incassi</div>
-          <div class="section-subtitle">Quando arriveranno i bonifici dai marketplace (regole ufficiali) · basato su ordini ultimi 120gg</div>
+          <div class="section-subtitle">Scadenziario bonifici MP · cache aggiornata 1 volta al giorno</div>
         </div>
-        <button class="apply-btn" id="forecast-reload" style="background:var(--black);">🔄 Ricalcola</button>
+        <div style="display:flex; gap:8px;">
+          <button class="apply-btn" id="forecast-reload" style="background:var(--gray-700);" title="Ricarica dalla cache (veloce)">Mostra</button>
+          <button class="apply-btn" id="forecast-refresh" style="background:var(--black);" title="Rifà tutti i calcoli (lento)">🔄 Aggiorna ora</button>
+        </div>
       </div>
       <div id="forecast-content">
         <div class="bs-empty">Clicca "Ricalcola" per generare le previsioni.</div>
@@ -1822,11 +1845,12 @@ function fmtMonthIT(monthKey) {
   return d.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
 }
 
-async function loadForecast() {
+async function loadForecast(forceRefresh) {
   const cont = document.getElementById('forecast-content');
-  cont.innerHTML = '<div class="bs-empty">Calcolo previsioni in corso (legge ultimi 120gg di ordini)...</div>';
+  cont.innerHTML = '<div class="bs-empty">' + (forceRefresh ? '🔄 Ricalcolo in corso (legge 120gg ordini da Shopify, ~10-30 sec)...' : 'Caricamento previsioni...') + '</div>';
   try {
-    const data = await fetchNoCache('/api/forecast');
+    const url = forceRefresh ? '/api/forecast?refresh=1' : '/api/forecast';
+    const data = await fetchNoCache(url);
     if (!data.success) { cont.innerHTML = '<div class="bs-empty" style="color:var(--red);">Errore: ' + (data.error || 'sconosciuto') + '</div>'; return; }
     forecastData = data;
     renderForecast(data);
@@ -1838,6 +1862,20 @@ function renderForecast(data) {
   const kpi = data.kpi;
   const bg = data.balardi_wallet;
   const todayStr = new Date().toISOString().split('T')[0];
+  
+  // Banner cache status
+  let cacheInfoHtml = '';
+  if (data.from_cache) {
+    const age = data.cache_age_hours || 0;
+    const ageLabel = age < 1 ? Math.round(age * 60) + ' min fa' : age.toFixed(1) + ' ore fa';
+    cacheInfoHtml = '<div style="background:#E8F0F5; border-left:3px solid #4A7FBC; border-radius:6px; padding:8px 14px; margin-bottom:16px; font-size:0.78rem; color:#1A4A78; display:flex; justify-content:space-between; align-items:center;">' +
+      '<span>⚡ Dati dalla cache · ultimo aggiornamento ' + ageLabel + ' · scade tra ' + (data.cache_expires_in_hours || 0).toFixed(1) + ' ore</span>' +
+    '</div>';
+  } else if (data.cached_to_kv) {
+    cacheInfoHtml = '<div style="background:#E6F4EE; border-left:3px solid var(--green-primary); border-radius:6px; padding:8px 14px; margin-bottom:16px; font-size:0.78rem; color:var(--green-dark);">' +
+      '✅ Dati appena calcolati e salvati in cache (valida 24h)' +
+    '</div>';
+  }
   
   // KPI cards: solo mese corrente, mese prossimo, totale 2 mesi
   const totale2mesi = (kpi.incasso_mese_corrente.importo || 0) + (kpi.incasso_mese_prossimo.importo || 0);
@@ -1959,7 +1997,7 @@ function renderForecast(data) {
     (ricaricheHtml ? '<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:0.78rem; color:var(--gray-700); font-weight:600;">Ultime ricariche (' + (bg.ricariche || []).length + ')</summary><div style="margin-top:6px;">' + ricaricheHtml + '</div></details>' : '') +
   '</div>';
   
-  cont.innerHTML = kpiHtml + cardsHtml + balardiHtml;
+  cont.innerHTML = cacheInfoHtml + kpiHtml + cardsHtml + balardiHtml;
   
   // Handler ricarica Balardi
   const ricBtn = document.getElementById('balardi-ricarica-btn');
@@ -2008,7 +2046,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // DUO listeners
   document.getElementById('duo-reload').addEventListener('click', loadDuoProducts);
   const fcBtn = document.getElementById('forecast-reload');
-  if (fcBtn) fcBtn.addEventListener('click', loadForecast);
+  if (fcBtn) fcBtn.addEventListener('click', () => loadForecast(false));
+  const fcRefresh = document.getElementById('forecast-refresh');
+  if (fcRefresh) fcRefresh.addEventListener('click', () => {
+    if (confirm('Ricalcolare tutte le previsioni? Richiede 10-30 secondi.')) loadForecast(true);
+  });
   document.getElementById('duo-csv-file').addEventListener('change', e => { if (e.target.files[0]) handleCsvImport(e.target.files[0]); });
   document.getElementById('duo-search').addEventListener('input', filterDuoProducts);
   // Logout handler
@@ -2599,8 +2641,50 @@ export default async function handler(req, res) {
     // Debug Winkelstraat: mostra ordini riconosciuti come WINKELSTRAAT e il motivo
     // ============ FORECAST INCASSI ============
     // Calcola pagamenti previsti per il mese corrente + mese prossimo (default)
+    // Cache KV 24h come /api/inventory-discovery. ?refresh=1 per forzare ricalcolo
     if (req.method === 'GET' && path === '/api/forecast') {
       try {
+        const forceRefresh = query.get('refresh') === '1';
+        const FORECAST_CACHE_KEY = 'forecast_cache';
+        const FORECAST_META_KEY = 'forecast_cache_meta';
+        const FORECAST_TTL_HOURS = 24;
+        
+        // 1) Prova cache KV (se non force refresh)
+        if (!forceRefresh && KV_ENABLED) {
+          try {
+            const meta = await kvGet(FORECAST_META_KEY);
+            if (meta) {
+              const metaObj = JSON.parse(meta);
+              const ageMs = Date.now() - (metaObj.generated_at || 0);
+              const ageHours = ageMs / (1000 * 60 * 60);
+              if (ageHours < FORECAST_TTL_HOURS) {
+                const cached = await kvGet(FORECAST_CACHE_KEY);
+                if (cached) {
+                  const cachedObj = JSON.parse(cached);
+                  // RICALCOLA SOLO il Balardi wallet (rapido, legge solo le ricariche da KV)
+                  // per averlo sempre aggiornato anche se si aggiunge una ricarica oggi
+                  try {
+                    const rawRic = await kvGet('balardi_wallet_ricariche');
+                    if (rawRic) {
+                      const ricariche = JSON.parse(rawRic);
+                      const totRicaricato = (ricariche || []).reduce((s, r) => s + parseFloat(r.importo || 0), 0);
+                      cachedObj.balardi_wallet = cachedObj.balardi_wallet || { consumo_periodo: { importo_eur: 0 } };
+                      cachedObj.balardi_wallet.credito_ricaricato = totRicaricato;
+                      cachedObj.balardi_wallet.credito_residuo = totRicaricato - (cachedObj.balardi_wallet.credito_consumato || 0);
+                      cachedObj.balardi_wallet.ricariche = ricariche;
+                    }
+                  } catch(e) { /* ignore */ }
+                  cachedObj.from_cache = true;
+                  cachedObj.cache_age_hours = Math.round(ageHours * 10) / 10;
+                  cachedObj.cache_generated_at = new Date(metaObj.generated_at).toISOString();
+                  cachedObj.cache_expires_in_hours = Math.round((FORECAST_TTL_HOURS - ageHours) * 10) / 10;
+                  return res.json(cachedObj);
+                }
+              }
+            }
+          } catch (e) { /* ignore cache errors, fetch fresh */ }
+        }
+        
         // Periodo di LOOKUP ordini: ultimi 120 giorni (per coprire pagamenti futuri dei MP mensili)
         const daysBack = parseInt(query.get('days_back') || '120', 10);
         const monthsAhead = parseInt(query.get('months_ahead') || '2', 10);
@@ -2775,7 +2859,7 @@ export default async function handler(req, res) {
           return a.prossimo_bonifico.data.localeCompare(b.prossimo_bonifico.data);
         });
         
-        return res.json({
+        const forecastResult = {
           success: true,
           periodo_analisi: { from: fmtDateISO(dateFrom), to: fmtDateISO(dateTo), days_back: daysBack },
           ordini_analizzati: ordini.length,
@@ -2791,8 +2875,21 @@ export default async function handler(req, res) {
           breakdown_marketplace: breakdownMP,
           timeline_mensile: Object.values(paymentsByMonth).sort((a, b) => a.mese.localeCompare(b.mese)),
           balardi_wallet: balardiWallet,
+          from_cache: false,
           ultima_sincronizzazione: new Date().toISOString()
-        });
+        };
+        
+        // Salva in cache KV (24h)
+        if (KV_ENABLED) {
+          try {
+            await kvSet(FORECAST_CACHE_KEY, JSON.stringify(forecastResult));
+            await kvSet(FORECAST_META_KEY, JSON.stringify({ generated_at: Date.now(), ordini_count: ordini.length }));
+            forecastResult.cached_to_kv = true;
+            forecastResult.cache_valid_for_hours = FORECAST_TTL_HOURS;
+          } catch (e) { forecastResult.cache_error = e.message; }
+        }
+        
+        return res.json(forecastResult);
       } catch (error) { return res.status(500).json({ success: false, error: error.message, stack: error.stack }); }
     }
     
@@ -2834,76 +2931,162 @@ export default async function handler(req, res) {
 
     // ============ INVENTORY DISCOVERY (temporaneo per v5.9) ============
     // Analizza i prodotti Shopify per capire come sono classificati product_type + tags
+    // INVENTORY DISCOVERY: analizza TUTTO il catalogo con paginazione cursor + cache 24h
     if (req.method === 'GET' && path === '/api/inventory-discovery') {
       try {
+        const forceRefresh = query.get('refresh') === '1';
+        const cacheKey = 'inventory_discovery_cache_v1';
+        const CACHE_TTL_SEC = 24 * 60 * 60; // 24 ore
+        
+        // Prova cache prima (se KV disponibile e non forced)
+        if (!forceRefresh && KV_ENABLED) {
+          try {
+            const cached = await kvGet(cacheKey);
+            if (cached) {
+              const data = JSON.parse(cached);
+              const ageMin = Math.floor((Date.now() - new Date(data.generated_at).getTime()) / 60000);
+              data.dalla_cache = true;
+              data.cache_age_minutes = ageMin;
+              data.cache_age_human = ageMin < 60 ? `${ageMin} minuti fa` : `${Math.floor(ageMin / 60)} ore fa`;
+              return res.json(data);
+            }
+          } catch (e) { /* procedi col fetch */ }
+        }
+        
+        // Fetch completo con paginazione cursor-based
         const token = await getShopifyAccessToken();
-        // Fetch primi 250 prodotti attivi
-        const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?status=active&limit=250`;
-        const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
-        if (!response.ok) throw new Error(`Shopify ${response.status}`);
-        const data = await response.json();
-        const products = data.products || [];
+        const fields = 'id,title,handle,product_type,vendor,tags,status,published_at,variants';
+        let allProducts = [];
+        let pageInfo = null;
+        let pagesDone = 0;
+        const MAX_PAGES = 60; // safety: 60 × 250 = 15.000 prodotti
         
-        // Conta product_type
+        while (pagesDone < MAX_PAGES) {
+          let url;
+          if (pageInfo) {
+            url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?limit=250&page_info=${encodeURIComponent(pageInfo)}`;
+          } else {
+            url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?status=active&limit=250&fields=${fields}`;
+          }
+          const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' } });
+          if (!r.ok) {
+            const t = await r.text();
+            return res.status(500).json({ success: false, error: `Shopify page ${pagesDone + 1} ${r.status}: ${t.substring(0, 200)}`, pages_done: pagesDone, partial_products: allProducts.length });
+          }
+          const data = await r.json();
+          const batch = data.products || [];
+          allProducts = allProducts.concat(batch);
+          pagesDone++;
+          
+          // Parse Link header per cursor paginazione
+          const linkHeader = r.headers.get('Link') || r.headers.get('link');
+          pageInfo = null;
+          if (linkHeader) {
+            const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+            if (nextMatch) {
+              try {
+                const nextUrl = new URL(nextMatch[1]);
+                pageInfo = nextUrl.searchParams.get('page_info');
+              } catch (e) { pageInfo = null; }
+            }
+          }
+          
+          if (!pageInfo || batch.length < 250) break;
+        }
+        
+        // Analizza l'intero catalogo
         const productTypes = {};
-        const tagsCount = {};
         const vendors = {};
-        let totalVariants = 0, totalInventory = 0;
+        const tagsAll = {};
+        let prodottiAttivi = 0;
+        let prodottiConStock = 0;
+        let prodottiZeroStock = 0;
+        let totalePezzi = 0;
+        let totaleVarianti = 0;
+        let duoProdotti = 0;
+        let duoPezzi = 0;
+        const sampleProducts = [];
         
-        products.forEach(p => {
-          const pt = (p.product_type || '').trim();
-          productTypes[pt || '(vuoto)'] = (productTypes[pt || '(vuoto)'] || 0) + 1;
-          vendors[p.vendor || '(vuoto)'] = (vendors[p.vendor || '(vuoto)'] || 0) + 1;
-          const tags = (p.tags || '').split(',').map(t => t.trim()).filter(Boolean);
-          tags.forEach(t => { tagsCount[t] = (tagsCount[t] || 0) + 1; });
-          (p.variants || []).forEach(v => {
-            totalVariants++;
-            totalInventory += parseInt(v.inventory_quantity) || 0;
+        allProducts.forEach(p => {
+          if (p.status !== 'active') return;
+          prodottiAttivi++;
+          const pt = (p.product_type || '(vuoto)').trim();
+          productTypes[pt] = (productTypes[pt] || 0) + 1;
+          const v = (p.vendor || '(vuoto)').trim();
+          vendors[v] = (vendors[v] || 0) + 1;
+          (p.tags || '').split(',').map(t => t.trim()).filter(t => t).forEach(tag => {
+            tagsAll[tag] = (tagsAll[tag] || 0) + 1;
           });
+          const variants = p.variants || [];
+          const qty = variants.reduce((s, v) => s + Math.max(0, parseInt(v.inventory_quantity) || 0), 0);
+          totalePezzi += qty;
+          totaleVarianti += variants.length;
+          if (qty > 0) prodottiConStock++; else prodottiZeroStock++;
+          
+          // Detect DUO: tag TLX_PRODUCT:DUO oppure SKU pattern
+          const tagsLower = (p.tags || '').toLowerCase();
+          const hasDuoTag = tagsLower.includes('tlx_product:duo') || /(^|,)\s*duo(\s*,|$)/.test(tagsLower);
+          const firstSku = variants[0] ? (variants[0].sku || '') : '';
+          const isDuo = hasDuoTag || (firstSku && isDuoSku(firstSku));
+          if (isDuo) { duoProdotti++; duoPezzi += qty; }
+          
+          if (sampleProducts.length < 10) {
+            sampleProducts.push({
+              id: p.id, title: (p.title || '').substring(0, 60), handle: p.handle,
+              product_type: p.product_type, vendor: p.vendor, tags: p.tags,
+              stock: qty, varianti: variants.length,
+              prima_variante_sku: firstSku, is_duo: isDuo
+            });
+          }
         });
         
-        // Ordina per frequenza
-        const sortedTypes = Object.entries(productTypes).sort((a, b) => b[1] - a[1]).slice(0, 25);
-        const sortedTags = Object.entries(tagsCount).sort((a, b) => b[1] - a[1]).slice(0, 40);
-        const sortedVendors = Object.entries(vendors).sort((a, b) => b[1] - a[1]).slice(0, 15);
+        const sortByCount = obj => Object.entries(obj).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ valore: k, count: v }));
         
-        // 3 prodotti campione: uno con tag DUO, uno senza, uno random
-        const campionDUO = products.find(p => (p.tags || '').toLowerCase().includes('duo'));
-        const campionNoDUO = products.find(p => !((p.tags || '').toLowerCase().includes('duo')));
-        const campionRandom = products[Math.floor(products.length / 2)];
-        const estraiCampione = (p) => p ? {
-          id: p.id,
-          title: p.title,
-          product_type: p.product_type,
-          vendor: p.vendor,
-          tags: p.tags,
-          handle: p.handle,
-          status: p.status,
-          published_at: p.published_at,
-          varianti_count: (p.variants || []).length,
-          inventario_totale: (p.variants || []).reduce((s, v) => s + (parseInt(v.inventory_quantity) || 0), 0),
-          sample_variant: (p.variants || [])[0] ? { sku: p.variants[0].sku, price: p.variants[0].price, inventory_quantity: p.variants[0].inventory_quantity } : null
-        } : null;
-        
-        return res.json({
+        const result = {
           success: true,
-          note: 'Endpoint temporaneo per scoperta struttura dati prodotti (v5.9 discovery)',
-          products_analizzati: products.length,
-          nota_paginazione: products.length === 250 ? 'ATTENZIONE: limite 250. Probabilmente hai più prodotti totali.' : 'Tutti i prodotti attivi analizzati',
-          stats_globali: {
-            totale_varianti: totalVariants,
-            totale_inventario_pezzi: totalInventory
-          },
-          product_types_top25: sortedTypes.map(([k, v]) => ({ type: k, count: v })),
-          tags_top40: sortedTags.map(([k, v]) => ({ tag: k, count: v })),
-          vendors_top15: sortedVendors.map(([k, v]) => ({ vendor: k, count: v })),
-          campione_con_tag_duo: estraiCampione(campionDUO),
-          campione_senza_tag_duo: estraiCampione(campionNoDUO),
-          campione_random: estraiCampione(campionRandom)
-        });
-      } catch (error) {
-        return res.status(500).json({ success: false, error: error.message });
-      }
+          generated_at: new Date().toISOString(),
+          dalla_cache: false,
+          cache_age_minutes: 0,
+          cache_age_human: 'appena generato',
+          ttl_hours: 24,
+          pagine_scaricate: pagesDone,
+          prodotti_totali_scaricati: allProducts.length,
+          prodotti_attivi: prodottiAttivi,
+          prodotti_con_stock: prodottiConStock,
+          prodotti_zero_stock: prodottiZeroStock,
+          totale_varianti: totaleVarianti,
+          totale_pezzi: totalePezzi,
+          duo_prodotti: duoProdotti,
+          duo_pezzi: duoPezzi,
+          own_prodotti: prodottiAttivi - duoProdotti,
+          own_pezzi: totalePezzi - duoPezzi,
+          product_types_distinti: Object.keys(productTypes).length,
+          product_types: sortByCount(productTypes),
+          vendors_distinti: Object.keys(vendors).length,
+          vendors: sortByCount(vendors).slice(0, 50),
+          tags_distinti: Object.keys(tagsAll).length,
+          tags_top_80: sortByCount(tagsAll).slice(0, 80),
+          sample_prodotti: sampleProducts
+        };
+        
+        // Salva in cache 24h
+        if (KV_ENABLED) {
+          try { 
+            await kvSetEx(cacheKey, CACHE_TTL_SEC, JSON.stringify(result)); 
+          } catch (e) { /* cache best-effort, continua */ }
+        }
+        
+        return res.json(result);
+      } catch (e) { return res.status(500).json({ success: false, error: e.message, stack: e.stack }); }
+    }
+    
+    // Reset cache inventory discovery (per forzare refresh)
+    if (req.method === 'POST' && path === '/api/inventory-discovery-reset') {
+      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV non configurato' });
+      try {
+        await kvDel('inventory_discovery_cache_v1');
+        return res.json({ success: true, message: 'Cache resettata. Prossima chiamata farà fetch fresco.' });
+      } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
     }
 
     if (req.method === 'GET' && path === '/api/debug-winkelstraat') {
@@ -3038,81 +3221,6 @@ export default async function handler(req, res) {
         const data = await response.json();
         return res.json({ success: true, shop_name: data.shop.name, message: 'Shopify connesso' });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
-    }
-
-    // DISCOVERY: analizza il catalogo per capire la struttura (product_type, tags, vendor)
-    if (req.method === 'GET' && path === '/api/inventory-discovery') {
-      try {
-        const token = await getShopifyAccessToken();
-        const sample = parseInt(query.get('sample') || '250', 10);
-        // Fetch fino a `sample` prodotti attivi
-        const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?status=active&limit=${Math.min(sample, 250)}&fields=id,title,handle,product_type,vendor,tags,status,variants`;
-        const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' } });
-        if (!r.ok) { const t = await r.text(); return res.status(500).json({ success: false, error: `Shopify ${r.status}: ${t.substring(0, 200)}` }); }
-        const data = await r.json();
-        const prodotti = data.products || [];
-        
-        // Conta product_type
-        const productTypes = {};
-        const vendors = {};
-        const tagsAll = {};
-        let prodottiAttivi = 0;
-        let prodottiConStock = 0;
-        let prodottiZeroStock = 0;
-        let totalePezzi = 0;
-        let totaleVarianti = 0;
-        const sampleProducts = [];
-        
-        prodotti.forEach(p => {
-          if (p.status !== 'active') return;
-          prodottiAttivi++;
-          const pt = (p.product_type || '(vuoto)').trim();
-          productTypes[pt] = (productTypes[pt] || 0) + 1;
-          const v = (p.vendor || '(vuoto)').trim();
-          vendors[v] = (vendors[v] || 0) + 1;
-          (p.tags || '').split(',').map(t => t.trim()).filter(t => t).forEach(tag => {
-            tagsAll[tag] = (tagsAll[tag] || 0) + 1;
-          });
-          // Stock
-          const qty = (p.variants || []).reduce((s, v) => s + Math.max(0, parseInt(v.inventory_quantity) || 0), 0);
-          totalePezzi += qty;
-          totaleVarianti += (p.variants || []).length;
-          if (qty > 0) prodottiConStock++;
-          else prodottiZeroStock++;
-          
-          // Sample con dettagli (primi 5)
-          if (sampleProducts.length < 5) {
-            sampleProducts.push({
-              id: p.id, title: p.title, handle: p.handle,
-              product_type: p.product_type, vendor: p.vendor,
-              tags: p.tags, stock: qty,
-              varianti_count: (p.variants || []).length,
-              prima_variante_sku: (p.variants && p.variants[0]) ? p.variants[0].sku : null
-            });
-          }
-        });
-        
-        // Ordina per frequenza
-        const sortByCount = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ valore: k, count: v }));
-        
-        return res.json({
-          success: true,
-          campione_analizzato: prodotti.length,
-          prodotti_attivi: prodottiAttivi,
-          prodotti_con_stock: prodottiConStock,
-          prodotti_zero_stock: prodottiZeroStock,
-          totale_varianti: totaleVarianti,
-          totale_pezzi_nel_campione: totalePezzi,
-          product_types_distinti: Object.keys(productTypes).length,
-          product_types: sortByCount(productTypes),
-          vendors_distinti: Object.keys(vendors).length,
-          vendors: sortByCount(vendors).slice(0, 30),
-          tags_distinti: Object.keys(tagsAll).length,
-          tags_top_50: sortByCount(tagsAll).slice(0, 50),
-          sample_prodotti: sampleProducts,
-          nota: prodotti.length < 250 ? 'Campione completo (catalogo < 250 prodotti).' : `Campione di ${prodotti.length}. Per catalogo completo chiama /api/inventory-full quando sarà disponibile.`
-        });
-      } catch (e) { return res.status(500).json({ success: false, error: e.message, stack: e.stack }); }
     }
 
     if (req.method === 'GET' && path === '/api/marketplaces') {
