@@ -1,4 +1,4 @@
-// ERP Marginalità v5.9.2 - DUO senza foto + cost Shopify batch + on-demand
+// ERP Marginalità v5.9.3 - Split costi in KPI (Merce + Fees/sped.)
 
 import * as crypto from 'node:crypto';
 
@@ -1241,7 +1241,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.9.2</p>
+        <p>Business Intelligence Dashboard · v5.9.3</p>
       </div>
     </div>
     <div class="header-right">
@@ -1279,7 +1279,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="kpi-grid">
         <div class="kpi primary"><div class="kpi-label">Lordo IVA inclusa</div><div class="kpi-value" id="lordo">—</div><div class="kpi-sub" id="ordini-count">— ordini</div></div>
         <div class="kpi"><div class="kpi-label">IVA Scorporata</div><div class="kpi-value" id="iva">—</div><div class="kpi-sub">Da versare</div></div>
-        <div class="kpi"><div class="kpi-label">Costi Totali</div><div class="kpi-value" id="costi">—</div><div class="kpi-sub">Merce + Fees + IVA</div></div>
+        <div class="kpi"><div class="kpi-label">Costi Totali</div><div class="kpi-value" id="costi">—</div><div class="kpi-split" id="costi-split" style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.08); font-size:0.78rem; line-height:1.5;"><div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-700);">Merce</span><span id="costi-merce" style="font-weight:600; font-variant-numeric:tabular-nums;">—</span></div><div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-700);">Fees + sped.</span><span id="costi-fees" style="font-weight:600; font-variant-numeric:tabular-nums;">—</span></div></div></div>
         <div class="kpi green"><div class="kpi-label">Margine Netto</div><div class="kpi-value" id="netto">—</div><div class="kpi-sub">Profitto reale</div></div>
         <div class="kpi gold"><div class="kpi-label">Margine %</div><div class="kpi-value" id="margine">—</div><div class="kpi-sub">Su lordo</div></div>
       </div>
@@ -1568,6 +1568,11 @@ async function fetchAnalytics(url) {
       document.getElementById('lordo').textContent = '€' + Math.round(data.lordo_iva_inclusa).toLocaleString('it-IT');
       document.getElementById('iva').textContent = '€' + Math.round(data.iva_totale).toLocaleString('it-IT');
       document.getElementById('costi').textContent = '€' + Math.round(data.costi_totali).toLocaleString('it-IT');
+      // Split Merce / Fees+sped.
+      const merce = data.costi_merce_totali || 0;
+      const fees = data.costi_fees_totali || 0;
+      document.getElementById('costi-merce').textContent = '€' + Math.round(merce).toLocaleString('it-IT');
+      document.getElementById('costi-fees').textContent = '€' + Math.round(fees).toLocaleString('it-IT');
       document.getElementById('netto').textContent = '€' + Math.round(data.margine_netto).toLocaleString('it-IT');
       document.getElementById('margine').textContent = data.margine_percentuale.toFixed(1) + '%';
       const countLabel = data.ordini_con_errori_count > 0 ? data.ordini_totali + ' validi (' + data.ordini_con_errori_count + ' esclusi)' : data.ordini_totali + ' ordini';
@@ -2384,7 +2389,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.9.2', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['Simulatore DUO on-demand (no foto, cost Shopify)', 'Snapshot Inventario (cat × gender, filtro DUO, fix word-boundary)', 'Cache KV 24h (forecast + discovery + inventory)', 'Previsioni Incassi (scadenziari MP)', 'Balardi wallet prepagato', 'Gestione resi/refund', 'Winkelstraat detection', 'Conversione valuta automatica', 'Breakdown MP espandibile'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.9.3', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['Simulatore DUO on-demand (no foto, cost Shopify)', 'Snapshot Inventario (cat × gender, filtro DUO, fix word-boundary)', 'Cache KV 24h (forecast + discovery + inventory)', 'Previsioni Incassi (scadenziari MP)', 'Balardi wallet prepagato', 'Gestione resi/refund', 'Winkelstraat detection', 'Conversione valuta automatica', 'Breakdown MP espandibile'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -2425,6 +2430,8 @@ export default async function handler(req, res) {
         }
         
         let lordo_iva_inclusa = 0, iva_totale = 0, costi_totali = 0, margine_netto = 0;
+        // Split costi per KPI "merce" vs "fees + spedizione + packaging"
+        let costi_merce_totali = 0, costi_fees_totali = 0;
         // Aggregati refund (separati per analisi)
         let resi_totale_eur = 0, resi_count = 0, resi_full_count = 0, resi_partial_count = 0;
         let resi_articoli_qty = 0;
@@ -2504,6 +2511,10 @@ export default async function handler(req, res) {
           lordo_iva_inclusa += ris.prezzo_lordo_iva_inclusa;
           iva_totale += ris.iva_scorporata;
           costi_totali += ris.costi_totali;
+          // Split: merce da una parte; fees + spedizione + packaging dall'altra
+          // (costo_fees = fees_shopify + fees_marketplace + spedizione — packaging è incluso in fees_marketplace)
+          costi_merce_totali += costo_merce_effettivo;
+          costi_fees_totali += (ris.fees_shopify || 0) + (ris.fees_marketplace || 0) + (spedizione || 0);
           margine_netto += ris.margine_netto;
           
           if (currencyInfo.isForeign) {
@@ -2576,6 +2587,8 @@ export default async function handler(req, res) {
           lordo_iva_inclusa,
           iva_totale,
           costi_totali,
+          costi_merce_totali,
+          costi_fees_totali,
           margine_netto,
           margine_percentuale,
           // Sezione resi
