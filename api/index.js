@@ -1,4 +1,4 @@
-// ERP Marginalità v5.9.3 - Split costi in KPI (Merce + Fees/sped.)
+// ERP Marginalità v5.9.4 - Mark Foy Department Store + split costi KPI
 
 import * as crypto from 'node:crypto';
 
@@ -515,7 +515,8 @@ const MARKETPLACE_CONFIGS = {
   'JAMMY_DUDE': { nome: 'Jammy Dude', sconto_percentuale: 0, fee_principale: 19, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: '10gg data ordine', payment_policy: { type: 'fixed_days', days_offset: 10 } },
   'POIZON': { nome: 'Poizon', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Immediato', payment_policy: { type: 'immediate' } },
   'BRANDSGATEWAY': { nome: 'Brandsgateway', sconto_percentuale: 13, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 0, pagamento: '45gg data ordine', payment_policy: { type: 'fixed_days', days_offset: 45 } },
-  'TLUXY_SITE': { nome: 'T. Luxy (proprio)', sconto_percentuale: 10, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1, pagamento: 'Immediato (Shopify +2gg)', payment_policy: { type: 'fixed_days', days_offset: 2 } }
+  'TLUXY_SITE': { nome: 'T. Luxy (proprio)', sconto_percentuale: 10, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1, pagamento: 'Immediato (Shopify +2gg)', payment_policy: { type: 'fixed_days', days_offset: 2 } },
+  'MARK_FOYS': { nome: 'Mark Foy', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Prepagato immediato', payment_policy: { type: 'immediate' } }
 };
 
 // Normalizza source_name per matching più robusto: lowercase + spazi→trattini
@@ -586,6 +587,7 @@ function riconosciMarketplace(ordine) {
   const rawSource = (ordine.source_name || '').trim();
   const sourceName = normalizeSourceName(rawSource);
   const tags = (ordine.tags || '').toLowerCase();
+  const email = (ordine.email || ordine.customer?.email || '').toLowerCase();
   
   // PRIORITÀ 1: tag specifici che hanno precedenza sul source_name
   // Brandsgateway è un dropship fornitore, arriva con source=web ma va classificato come BRANDSGATEWAY
@@ -599,11 +601,20 @@ function riconosciMarketplace(ordine) {
     return { key: 'WINKELSTRAAT', config: MARKETPLACE_CONFIGS.WINKELSTRAAT };
   }
   
+  // PRIORITÀ 3: Mark Foy's Department Store (condivide source 1615469 con The Bradery)
+  // Detection via tag "mark foy" oppure email non-bradery con source 1615469
+  if (tags.includes('mark foy') || tags.includes("mark foy's")) {
+    return { key: 'MARK_FOYS', config: MARKETPLACE_CONFIGS.MARK_FOYS };
+  }
+  // Caso sub: source 1615469 MA email non è di thebradery → Mark Foy's
+  if (rawSource === '1615469' && email && !email.includes('thebradery')) {
+    return { key: 'MARK_FOYS', config: MARKETPLACE_CONFIGS.MARK_FOYS };
+  }
+  
   // Match diretto normalizzato su source_name
   if (SOURCE_NAME_MAP[sourceName]) return { key: SOURCE_NAME_MAP[sourceName], config: MARKETPLACE_CONFIGS[SOURCE_NAME_MAP[sourceName]] };
   
   // Poizon detection: source numerico + email customer "poizon"
-  const email = (ordine.email || ordine.customer?.email || '').toLowerCase();
   const isNumericSource = /^\d+$/.test(rawSource);
   if (isNumericSource && email.includes('poizon')) {
     return { key: 'POIZON', config: MARKETPLACE_CONFIGS.POIZON };
@@ -1241,7 +1252,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.9.3</p>
+        <p>Business Intelligence Dashboard · v5.9.4</p>
       </div>
     </div>
     <div class="header-right">
@@ -1438,7 +1449,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 </div>
 <script>
 const MARKETPLACES = ${JSON.stringify(MARKETPLACE_CONFIGS)};
-const MP_COLORS = { TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC' };
+const MP_COLORS = { TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC', MARK_FOYS:'#2E5F8F' };
 
 function setActiveButton(selector, btn) { document.querySelectorAll(selector).forEach(b => b.classList.remove('active')); if (btn) btn.classList.add('active'); }
 async function fetchNoCache(url) { const sep = url.includes('?') ? '&' : '?'; const res = await fetch(url + sep + '_=' + Date.now(), { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } }); return res.json(); }
@@ -2389,7 +2400,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.9.3', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['Simulatore DUO on-demand (no foto, cost Shopify)', 'Snapshot Inventario (cat × gender, filtro DUO, fix word-boundary)', 'Cache KV 24h (forecast + discovery + inventory)', 'Previsioni Incassi (scadenziari MP)', 'Balardi wallet prepagato', 'Gestione resi/refund', 'Winkelstraat detection', 'Conversione valuta automatica', 'Breakdown MP espandibile'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.9.4', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['Mark Foy Department Store (detection multi-criterio)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand (no foto, cost Shopify)', 'Snapshot Inventario (cat × gender, filtro DUO, fix word-boundary)', 'Cache KV 24h (forecast + discovery + inventory)', 'Previsioni Incassi (scadenziari MP)', 'Balardi wallet prepagato', 'Gestione resi/refund', 'Winkelstraat detection', 'Conversione valuta automatica', 'Breakdown MP espandibile'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -3598,6 +3609,129 @@ export default async function handler(req, res) {
           read_value: read
         });
       } catch (error) { return res.json({ kv_enabled: true, kv_source: KV_SOURCE, error: error.message }); }
+    }
+
+    // Diagnostica: verifica perché un ordine specifico potrebbe mancare dall'analytics
+    // Usa: /api/debug-order?name=13027   oppure   /api/debug-order?id=5783212343468
+    if (req.method === 'GET' && path === '/api/debug-order') {
+      try {
+        const orderName = query.get('name');
+        const orderId = query.get('id');
+        if (!orderName && !orderId) return res.status(400).json({ success: false, error: 'Passa ?name=13027 oppure ?id=5783212343468' });
+        const token = await getShopifyAccessToken();
+        const diag = { checks: {}, warnings: [], orderFound: null };
+        
+        // Step 1: cerca l'ordine su Shopify (by name o by id)
+        let ordine = null;
+        if (orderId) {
+          const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/orders/${orderId}.json`;
+          const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
+          diag.checks.fetch_by_id = { url, status: r.status };
+          if (r.ok) { const d = await r.json(); ordine = d.order; }
+        } else {
+          // Cerca by name (serve scorrere gli ordini recenti)
+          const cleaned = String(orderName).replace('#', '').trim();
+          const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/orders.json?status=any&name=%23${cleaned}&limit=10`;
+          const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
+          diag.checks.fetch_by_name = { url, status: r.status };
+          if (r.ok) {
+            const d = await r.json();
+            ordine = (d.orders || []).find(o => String(o.order_number) === cleaned || o.name === '#' + cleaned || o.name === cleaned);
+            if (!ordine && (d.orders || []).length > 0) ordine = d.orders[0];
+          }
+        }
+        
+        if (!ordine) {
+          diag.checks.exists_on_shopify = false;
+          diag.warnings.push('Ordine NON trovato su Shopify. Controlla il numero esatto.');
+          return res.json({ success: true, diagnostica: diag });
+        }
+        
+        diag.checks.exists_on_shopify = true;
+        diag.orderFound = {
+          id: ordine.id,
+          order_number: ordine.order_number,
+          name: ordine.name,
+          created_at: ordine.created_at,
+          updated_at: ordine.updated_at,
+          financial_status: ordine.financial_status,
+          fulfillment_status: ordine.fulfillment_status,
+          cancelled_at: ordine.cancelled_at,
+          total_price: ordine.total_price,
+          currency: ordine.currency,
+          source_name: ordine.source_name,
+          tags: ordine.tags,
+          customer_email: ordine.customer?.email,
+          shipping_country: ordine.shipping_address?.country_code,
+          line_items_count: (ordine.line_items || []).length,
+          refunds_count: (ordine.refunds || []).length
+        };
+        
+        // Step 2: verifica status (cancellato?)
+        if (ordine.cancelled_at) diag.warnings.push('Ordine CANCELLATO il ' + ordine.cancelled_at);
+        
+        // Step 3: verifica periodo "month" (che probabilmente è quello selezionato in dashboard)
+        const now = new Date();
+        const romeOffset = new Date().toLocaleString('en-US', { timeZone: 'Europe/Rome' });
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+        const createdAt = new Date(ordine.created_at);
+        const inMeseCorrente = createdAt >= monthStart;
+        diag.checks.created_at = ordine.created_at;
+        diag.checks.mese_corrente_start = monthStart.toISOString();
+        diag.checks.dentro_mese_corrente = inMeseCorrente;
+        if (!inMeseCorrente) diag.warnings.push('Ordine NON dentro il mese corrente (periodo=month). Created ' + ordine.created_at);
+        
+        // Step 4: verifica marketplace
+        const mp = riconosciMarketplace(ordine);
+        diag.checks.marketplace_riconosciuto = { key: mp.key, nome: mp.config.nome };
+        if (mp.key === 'TLUXY_SITE' && ordine.source_name && !['web', 'pos', 'shopify_draft_order'].includes(ordine.source_name)) {
+          diag.warnings.push('⚠️ Marketplace defaultato a TLUXY_SITE ma source_name è "' + ordine.source_name + '". Controllare mapping.');
+        }
+        
+        // Step 5: verifica refund (totale?)
+        const refundInfo = getOrderRefundInfo(ordine);
+        diag.checks.refund_info = refundInfo;
+        if (refundInfo.isFullRefund) diag.warnings.push('Ordine con REFUND TOTALE → escluso dai conteggi analytics.');
+        
+        // Step 6: verifica costi merce (errori?)
+        const variantIds = [...new Set((ordine.line_items || []).map(li => li.variant_id).filter(Boolean))];
+        const productIds = [...new Set((ordine.line_items || []).map(li => li.product_id).filter(Boolean))];
+        const { costs: variantCosts } = await fetchVariantCosts(variantIds, productIds);
+        const duoUserCosts = {};
+        if (KV_ENABLED) {
+          const duoVids = (ordine.line_items || []).filter(li => isDuoSku(li.sku)).map(li => li.variant_id).filter(Boolean);
+          if (duoVids.length) {
+            const keys = duoVids.map(v => `duo_user_cost_${v}`);
+            const results = await kvMGet(keys);
+            duoVids.forEach(v => {
+              const key = `duo_user_cost_${v}`;
+              if (results[key] !== undefined) {
+                const parsed = parseFloat(results[key]);
+                if (!isNaN(parsed)) duoUserCosts[v] = parsed;
+              }
+            });
+          }
+        }
+        const { costo, errori } = calcolaCostoOrdine(ordine, variantCosts, duoUserCosts);
+        diag.checks.costo_totale_calcolato = costo;
+        diag.checks.errori_costi = errori;
+        if (errori.length > 0) diag.warnings.push('⚠️ Errori costi: ' + errori.length + ' varianti senza costo → ordine va in "Ordini con errori"');
+        
+        // Step 7: verifica che fetchShopifyOrders lo includerebbe (periodo=month)
+        const ordiniPeriodo = await getShopifyOrders('month');
+        const trovatoNelPeriodo = (ordiniPeriodo || []).some(o => String(o.id) === String(ordine.id));
+        diag.checks.trovato_in_getShopifyOrders_month = trovatoNelPeriodo;
+        diag.checks.totale_ordini_fetchati_mese = (ordiniPeriodo || []).length;
+        if (!trovatoNelPeriodo) diag.warnings.push('❌ CRITICO: getShopifyOrders(month) NON include questo ordine. Controllare filtri created_at_min/max.');
+        
+        // Riepilogo finale
+        diag.verdict = errori.length > 0 ? 'ESCLUSO per costi mancanti (visibile in "Ordini con errori")'
+          : (refundInfo.isFullRefund ? 'ESCLUSO per refund totale'
+          : (!trovatoNelPeriodo ? 'NON FETCHATO nel periodo selezionato'
+          : (ordine.cancelled_at ? 'CANCELLATO' : 'DOVREBBE ESSERE INCLUSO nei conteggi')));
+        
+        return res.json({ success: true, diagnostica: diag });
+      } catch (error) { return res.status(500).json({ success: false, error: error.message, stack: error.stack }); }
     }
 
     if (req.method === 'GET' && path === '/api/debug-single-cost') {
