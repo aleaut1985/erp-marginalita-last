@@ -1,4 +1,4 @@
-// ERP Marginalità v5.9.4 - Mark Foy Department Store + split costi KPI
+// ERP Marginalità v5.9.5 - + GIGLIO.COM marketplace (commission 30% provvisoria, regole TBD)
 
 import * as crypto from 'node:crypto';
 
@@ -516,7 +516,8 @@ const MARKETPLACE_CONFIGS = {
   'POIZON': { nome: 'Poizon', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Immediato', payment_policy: { type: 'immediate' } },
   'BRANDSGATEWAY': { nome: 'Brandsgateway', sconto_percentuale: 13, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 0, pagamento: '45gg data ordine', payment_policy: { type: 'fixed_days', days_offset: 45 } },
   'TLUXY_SITE': { nome: 'T. Luxy (proprio)', sconto_percentuale: 10, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1, pagamento: 'Immediato (Shopify +2gg)', payment_policy: { type: 'fixed_days', days_offset: 2 } },
-  'MARK_FOYS': { nome: 'Mark Foy', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Prepagato immediato', payment_policy: { type: 'immediate' } }
+  'MARK_FOYS': { nome: 'Mark Foy', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Prepagato immediato', payment_policy: { type: 'immediate' } },
+  'GIGLIO': { nome: 'GIGLIO.COM', sconto_percentuale: 0, fee_principale: 30, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'TBD (prepagato per ora)', payment_policy: { type: 'immediate' } }
 };
 
 // Normalizza source_name per matching più robusto: lowercase + spazi→trattini
@@ -609,6 +610,23 @@ function riconosciMarketplace(ordine) {
   // Caso sub: source 1615469 MA email non è di thebradery → Mark Foy's
   if (rawSource === '1615469' && email && !email.includes('thebradery')) {
     return { key: 'MARK_FOYS', config: MARKETPLACE_CONFIGS.MARK_FOYS };
+  }
+  
+  // PRIORITÀ 4: Giglio.com - detection via shipping/billing company name
+  // Customer ha sempre ragione sociale "Giglio.com S.p.a." 
+  const shipCompany = (ordine.shipping_address?.company || '').toLowerCase();
+  const billCompany = (ordine.billing_address?.company || '').toLowerCase();
+  const custFirstName = (ordine.customer?.first_name || '').toLowerCase();
+  const custLastName = (ordine.customer?.last_name || '').toLowerCase();
+  const custDefaultCompany = (ordine.customer?.default_address?.company || '').toLowerCase();
+  if (
+    shipCompany.includes('giglio') ||
+    billCompany.includes('giglio') ||
+    custDefaultCompany.includes('giglio') ||
+    custFirstName.includes('giglio') ||
+    custLastName.includes('giglio')
+  ) {
+    return { key: 'GIGLIO', config: MARKETPLACE_CONFIGS.GIGLIO };
   }
   
   // Match diretto normalizzato su source_name
@@ -1252,7 +1270,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.9.4</p>
+        <p>Business Intelligence Dashboard · v5.9.5</p>
       </div>
     </div>
     <div class="header-right">
@@ -1449,7 +1467,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 </div>
 <script>
 const MARKETPLACES = ${JSON.stringify(MARKETPLACE_CONFIGS)};
-const MP_COLORS = { TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC', MARK_FOYS:'#2E5F8F' };
+const MP_COLORS = { TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC', MARK_FOYS:'#2E5F8F', GIGLIO:'#7B4F8A' };
 
 function setActiveButton(selector, btn) { document.querySelectorAll(selector).forEach(b => b.classList.remove('active')); if (btn) btn.classList.add('active'); }
 async function fetchNoCache(url) { const sep = url.includes('?') ? '&' : '?'; const res = await fetch(url + sep + '_=' + Date.now(), { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } }); return res.json(); }
@@ -2400,7 +2418,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.9.4', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['Mark Foy Department Store (detection multi-criterio)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand (no foto, cost Shopify)', 'Snapshot Inventario (cat × gender, filtro DUO, fix word-boundary)', 'Cache KV 24h (forecast + discovery + inventory)', 'Previsioni Incassi (scadenziari MP)', 'Balardi wallet prepagato', 'Gestione resi/refund', 'Winkelstraat detection', 'Conversione valuta automatica', 'Breakdown MP espandibile'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.9.5', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['GIGLIO.COM marketplace (regole TBD)', 'Mark Foy Department Store (detection multi-criterio)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand (no foto, cost Shopify)', 'Snapshot Inventario (cat × gender, filtro DUO)', 'Cache KV 24h (forecast + discovery + inventory)', 'Previsioni Incassi (scadenziari MP)', 'Balardi wallet prepagato', 'Gestione resi/refund', 'Winkelstraat detection', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
