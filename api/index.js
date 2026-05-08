@@ -1,4 +1,4 @@
-// ERP Marginalità v5.9.5 - + GIGLIO.COM marketplace (commission 30% provvisoria, regole TBD)
+// ERP Marginalità v5.10 - Calcolatore Excel batch + Chat AI assistant
 
 import * as crypto from 'node:crypto';
 
@@ -1270,7 +1270,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.9.5</p>
+        <p>Business Intelligence Dashboard · v5.10</p>
       </div>
     </div>
     <div class="header-right">
@@ -1288,6 +1288,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <button class="tab" data-tab="duo">Simulatore DUO</button>
       <button class="tab" data-tab="forecast">💰 Previsioni Incassi</button>
       <button class="tab" data-tab="inventory">📦 Inventario</button>
+      <button class="tab" data-tab="chat">💬 Assistente AI</button>
     </div>
   </div>
   <div id="analytics-tab" class="tab-content active">
@@ -1389,6 +1390,42 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="result-card" id="r-redd-card"><div class="result-label">Esito</div><div class="result-value" id="r-redd">-</div></div>
       </div>
     </div>
+    
+    <!-- ============ EXCEL BATCH CALCULATOR (v5.10) ============ -->
+    <div class="section" style="margin-top:24px;">
+      <div class="section-header">
+        <div>
+          <div class="section-title">📊 Calcolo batch da Excel</div>
+          <div class="section-subtitle">Carica un file Excel/CSV con SKU + Costo + Listino · calcolo margine su tutti i 16 marketplace</div>
+        </div>
+      </div>
+      <div class="info-box">
+        <strong>Colonne richieste</strong>: <code>SKU</code>, <code>Costo</code>, <code>Listino</code>. <strong>Opzionali</strong>: <code>Titolo</code>, <code>Stock</code>, <code>IVA</code>. Nomi case-insensitive.
+      </div>
+      <div class="filter-bar" style="gap:12px;">
+        <label class="apply-btn" style="background:var(--green-primary); cursor:pointer; padding:10px 18px;">
+          <i style="display:inline-block; transform:scale(1.2); margin-right:4px;">📤</i> Carica Excel/CSV
+          <input type="file" id="batch-file" accept=".xlsx,.xls,.csv" style="display:none;">
+        </label>
+        <button id="batch-template-btn" class="apply-btn" style="background:var(--gray-700); padding:10px 18px;">
+          <i style="display:inline-block; transform:scale(1.2); margin-right:4px;">📥</i> Scarica template
+        </button>
+        <div style="margin-left:auto; display:flex; gap:10px; align-items:center;">
+          <label style="font-size:0.72rem; color:var(--gray-700); font-weight:700; text-transform:uppercase; letter-spacing:0.06em;">IVA default</label>
+          <select id="batch-iva-default" style="padding:8px 12px; border:1.5px solid var(--gray-200); border-radius:8px; font-size:0.85rem; font-family:inherit;">
+            <option value="22" selected>🇮🇹 Italia 22%</option>
+            <option value="20">🇫🇷🇬🇧🇦🇹 20%</option>
+            <option value="19">🇩🇪 Germania 19%</option>
+            <option value="21">🇪🇸🇳🇱🇧🇪 21%</option>
+            <option value="23">🇵🇱🇮🇪🇵🇹 23%</option>
+            <option value="25">🇸🇪🇩🇰 25%</option>
+            <option value="0">🌍 Extra-UE 0%</option>
+          </select>
+        </div>
+      </div>
+      <div id="batch-status" style="font-size:0.85rem; color:var(--gray-700); margin:10px 0;"></div>
+      <div id="batch-content"></div>
+    </div>
   </div>
   <div id="marketplaces-tab" class="tab-content">
     <div class="section">
@@ -1461,6 +1498,36 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
       <div id="inventory-content">
         <div class="bs-empty">Clicca "Mostra" o "Aggiorna ora" per caricare lo snapshot.</div>
+      </div>
+    </div>
+  </div>
+  <div id="chat-tab" class="tab-content">
+    <div class="section">
+      <div class="section-header">
+        <div>
+          <div class="section-title">💬 Assistente AI</div>
+          <div class="section-subtitle">Chiedi qualsiasi cosa sui tuoi dati: KPI, ordini, marketplace, suggerimenti</div>
+        </div>
+        <button id="chat-clear" class="apply-btn" style="background:var(--gray-700); padding:6px 12px; font-size:0.78rem;">🗑️ Pulisci</button>
+      </div>
+      <div id="chat-status-bar" class="warn-box" style="margin-bottom:12px;">Verifica configurazione...</div>
+      <div id="chat-messages" style="background:var(--cream); border:1px solid var(--gray-200); border-radius:12px; padding:18px; min-height:380px; max-height:600px; overflow-y:auto; margin-bottom:14px;">
+        <div style="text-align:center; color:var(--gray-500); padding:40px 20px;">
+          <div style="font-size:2.5rem; margin-bottom:14px;">💬</div>
+          <div style="font-size:0.95rem; margin-bottom:18px;">Ciao Alessio, sono il tuo assistente. Posso aiutarti con:</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; max-width:520px; margin:0 auto;">
+            <button class="chat-suggest" style="padding:10px 14px; background:var(--white); border:1px solid var(--gray-200); border-radius:8px; font-size:0.82rem; cursor:pointer; text-align:left; font-family:inherit;">📊 Quanto ho fatturato questo mese?</button>
+            <button class="chat-suggest" style="padding:10px 14px; background:var(--white); border:1px solid var(--gray-200); border-radius:8px; font-size:0.82rem; cursor:pointer; text-align:left; font-family:inherit;">🏆 Qual è il MP più redditizio?</button>
+            <button class="chat-suggest" style="padding:10px 14px; background:var(--white); border:1px solid var(--gray-200); border-radius:8px; font-size:0.82rem; cursor:pointer; text-align:left; font-family:inherit;">⚠️ Quanti ordini hanno costi mancanti?</button>
+            <button class="chat-suggest" style="padding:10px 14px; background:var(--white); border:1px solid var(--gray-200); border-radius:8px; font-size:0.82rem; cursor:pointer; text-align:left; font-family:inherit;">↩️ Mostrami i resi recenti</button>
+            <button class="chat-suggest" style="padding:10px 14px; background:var(--white); border:1px solid var(--gray-200); border-radius:8px; font-size:0.82rem; cursor:pointer; text-align:left; font-family:inherit;">💰 Quanto incasserò il prossimo mese?</button>
+            <button class="chat-suggest" style="padding:10px 14px; background:var(--white); border:1px solid var(--gray-200); border-radius:8px; font-size:0.82rem; cursor:pointer; text-align:left; font-family:inherit;">📦 Stato inventario per categoria?</button>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="chat-input" placeholder="Scrivi una domanda..." style="flex:1; padding:14px 18px; border:1.5px solid var(--gray-200); border-radius:50px; font-size:0.95rem; font-family:inherit;">
+        <button id="chat-send" class="apply-btn" style="background:var(--black); padding:0 24px; font-size:0.85rem; white-space:nowrap;">Invia →</button>
       </div>
     </div>
   </div>
@@ -2202,6 +2269,434 @@ function renderInventory() {
   cont.innerHTML = cacheHtml + orfaniHtml + tableHtml;
 }
 
+// ============ EXCEL BATCH CALCULATOR (v5.10) ============
+// Caricamento dinamico SheetJS (CDN) per leggere/scrivere XLSX
+let SHEETJS_LOADED = false;
+async function loadSheetJS() {
+  if (SHEETJS_LOADED || (typeof XLSX !== 'undefined')) { SHEETJS_LOADED = true; return true; }
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    script.onload = () => { SHEETJS_LOADED = true; resolve(true); };
+    script.onerror = () => reject(new Error('Caricamento SheetJS fallito'));
+    document.head.appendChild(script);
+  });
+}
+
+let batchProducts = []; // {sku, titolo, stock, costo, listino, iva, calcoli: [{mp, margine, ...}]}
+let batchExpanded = null; // sku attualmente espanso
+
+function batchNormalizeHeader(h) {
+  return String(h || '').trim().toLowerCase().replace(/[\s_\-]+/g, '');
+}
+function batchFindCol(headers, candidates) {
+  for (const c of candidates) {
+    const idx = headers.findIndex(h => batchNormalizeHeader(h) === batchNormalizeHeader(c));
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+async function handleBatchFile(file) {
+  const status = document.getElementById('batch-status');
+  status.textContent = '⏳ Caricamento libreria Excel...';
+  status.style.color = 'var(--gray-700)';
+  try {
+    await loadSheetJS();
+    status.textContent = '📄 Lettura file...';
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    if (!ws) { status.textContent = '❌ Nessun foglio trovato nel file'; status.style.color = 'var(--red)'; return; }
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    if (rows.length < 2) { status.textContent = '❌ Il file ha solo l\\'intestazione, manca dati'; status.style.color = 'var(--red)'; return; }
+    
+    const headers = rows[0];
+    const skuIdx = batchFindCol(headers, ['sku', 'codice', 'codiceprodotto']);
+    const costoIdx = batchFindCol(headers, ['costo', 'cost', 'costofornitore', 'costoacquisto', 'costopzunit']);
+    const listinoIdx = batchFindCol(headers, ['listino', 'prezzo', 'price', 'prezzolistino', 'rrp', 'retail']);
+    const titoloIdx = batchFindCol(headers, ['titolo', 'title', 'nome', 'description', 'descrizione', 'product']);
+    const stockIdx = batchFindCol(headers, ['stock', 'inventario', 'quantity', 'qty', 'disponibilita', 'pezzi']);
+    const ivaIdx = batchFindCol(headers, ['iva', 'vat', 'tax']);
+    
+    if (skuIdx < 0) { status.textContent = '❌ Colonna SKU non trovata'; status.style.color = 'var(--red)'; return; }
+    if (costoIdx < 0) { status.textContent = '❌ Colonna Costo non trovata'; status.style.color = 'var(--red)'; return; }
+    if (listinoIdx < 0) { status.textContent = '❌ Colonna Listino non trovata'; status.style.color = 'var(--red)'; return; }
+    
+    const ivaDefault = parseFloat(document.getElementById('batch-iva-default').value) || 22;
+    const products = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.every(c => c === '' || c === null || c === undefined)) continue;
+      const sku = String(row[skuIdx] || '').trim();
+      if (!sku) continue;
+      const costo = parseFloat(row[costoIdx]);
+      const listino = parseFloat(row[listinoIdx]);
+      if (isNaN(costo) || isNaN(listino) || costo < 0 || listino <= 0) continue;
+      const titolo = titoloIdx >= 0 ? String(row[titoloIdx] || '').trim() : '';
+      const stock = stockIdx >= 0 ? (parseInt(row[stockIdx]) || 0) : null;
+      let iva = ivaDefault;
+      if (ivaIdx >= 0) {
+        const ivaCol = parseFloat(row[ivaIdx]);
+        if (!isNaN(ivaCol) && ivaCol >= 0 && ivaCol <= 30) iva = ivaCol;
+      }
+      products.push({ sku, titolo, stock, costo, listino, iva });
+    }
+    
+    if (products.length === 0) {
+      status.textContent = '❌ Nessuna riga valida (controlla che SKU/Costo/Listino siano compilati)';
+      status.style.color = 'var(--red)';
+      return;
+    }
+    
+    // Calcola margini per ogni prodotto su tutti i MP
+    products.forEach(p => {
+      p.calcoli = Object.entries(MARKETPLACES).map(([key, mp]) => {
+        const r = batchCalcMargine(p.listino, p.costo, key, p.iva);
+        return { mp_key: key, mp_nome: mp.nome, ...r };
+      }).sort((a, b) => b.margine - a.margine);
+    });
+    
+    batchProducts = products;
+    status.textContent = '✅ Caricati ' + products.length + ' prodotti';
+    status.style.color = 'var(--green-dark)';
+    renderBatch();
+  } catch (e) {
+    status.textContent = '❌ Errore: ' + e.message;
+    status.style.color = 'var(--red)';
+    console.error(e);
+  }
+}
+
+function batchCalcMargine(listino, costo, mpKey, iva) {
+  const mp = MARKETPLACES[mpKey];
+  if (!mp) return null;
+  const nettoIva = listino / (1 + iva / 100);
+  const dopoSconto = nettoIva * (1 - mp.sconto_percentuale / 100);
+  const feeShop = mpKey === 'TLUXY_SITE' ? dopoSconto * 0.0015 : 0;
+  const feeP = dopoSconto * (mp.fee_principale / 100);
+  const feeS = dopoSconto * ((mp.fee_secondaria || 0) / 100);
+  const feeA = dopoSconto * ((mp.fee_accessoria || 0) / 100);
+  const feesMp = feeP + feeS + feeA + (mp.fee_fissa_trasporto || 0) + (mp.fee_fissa_packaging || 0);
+  const margine = dopoSconto - feeShop - feesMp - costo;
+  const marginePerc = listino > 0 ? (margine / listino * 100) : 0;
+  // Break-even, prezzo per 20%, prezzo per 30% (formula: stesso meccanismo di prezzoMinimoPerMargine)
+  function prezzoMin(targetPerc) {
+    const totalPercFee = (mp.fee_principale + (mp.fee_secondaria || 0) + (mp.fee_accessoria || 0) + (mpKey === 'TLUXY_SITE' ? 0.15 : 0)) / 100;
+    const scontoP = mp.sconto_percentuale / 100;
+    const feeFissa = (mp.fee_fissa_trasporto || 0) + (mp.fee_fissa_packaging || 0);
+    const coef = (1 - scontoP) * (1 - totalPercFee) / (1 + iva / 100) - targetPerc / 100;
+    if (coef <= 0) return null;
+    return (costo + feeFissa) / coef;
+  }
+  return {
+    margine, marginePerc, dopoSconto, feesMp, feeShop,
+    breakEven: prezzoMin(0),
+    prezzo20: prezzoMin(20),
+    prezzo30: prezzoMin(30)
+  };
+}
+
+function renderBatch() {
+  const cont = document.getElementById('batch-content');
+  if (!batchProducts.length) { cont.innerHTML = ''; return; }
+  
+  // Riepilogo: quanti prodotti redditizi, quale MP è il migliore in media
+  const sopra20 = batchProducts.filter(p => p.calcoli[0].marginePerc >= 20).length;
+  const sopra10 = batchProducts.filter(p => p.calcoli[0].marginePerc >= 10).length;
+  const sotto = batchProducts.length - sopra10;
+  
+  // Migliore MP in media (top scelto più spesso)
+  const topCounts = {};
+  batchProducts.forEach(p => {
+    const top = p.calcoli[0].mp_nome;
+    topCounts[top] = (topCounts[top] || 0) + 1;
+  });
+  const mpVincente = Object.entries(topCounts).sort((a, b) => b[1] - a[1])[0];
+  
+  const summary = '<div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:20px;">' +
+    '<div style="background:var(--green-light); border-left:3px solid var(--green-primary); padding:14px; border-radius:8px;">' +
+      '<div style="font-size:0.7rem; color:var(--green-dark); text-transform:uppercase; letter-spacing:0.08em; font-weight:700;">Margine ≥ 20%</div>' +
+      '<div style="font-size:1.4rem; font-weight:800; margin-top:4px;">' + sopra20 + '</div>' +
+      '<div style="font-size:0.75rem; color:var(--green-dark);">su ' + batchProducts.length + ' prodotti</div>' +
+    '</div>' +
+    '<div style="background:var(--gold-light); border-left:3px solid var(--gold); padding:14px; border-radius:8px;">' +
+      '<div style="font-size:0.7rem; color:#8B6914; text-transform:uppercase; letter-spacing:0.08em; font-weight:700;">Margine 10-20%</div>' +
+      '<div style="font-size:1.4rem; font-weight:800; margin-top:4px;">' + (sopra10 - sopra20) + '</div>' +
+      '<div style="font-size:0.75rem; color:#8B6914;">accettabile</div>' +
+    '</div>' +
+    '<div style="background:var(--red-light); border-left:3px solid var(--red); padding:14px; border-radius:8px;">' +
+      '<div style="font-size:0.7rem; color:var(--red); text-transform:uppercase; letter-spacing:0.08em; font-weight:700;">Sotto 10%</div>' +
+      '<div style="font-size:1.4rem; font-weight:800; margin-top:4px;">' + sotto + '</div>' +
+      '<div style="font-size:0.75rem; color:var(--red);">da rivedere</div>' +
+    '</div>' +
+    '<div style="background:var(--gray-100); border-left:3px solid var(--gray-700); padding:14px; border-radius:8px;">' +
+      '<div style="font-size:0.7rem; color:var(--gray-700); text-transform:uppercase; letter-spacing:0.08em; font-weight:700;">MP più spesso #1</div>' +
+      '<div style="font-size:1.05rem; font-weight:800; margin-top:4px;">' + (mpVincente ? mpVincente[0] : '—') + '</div>' +
+      '<div style="font-size:0.75rem; color:var(--gray-700);">' + (mpVincente ? mpVincente[1] + ' volte top' : '') + '</div>' +
+    '</div>' +
+  '</div>';
+  
+  // Bottone Esporta
+  const exportBtn = '<div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">' +
+    '<button id="batch-export-btn" class="apply-btn" style="background:var(--green-primary); padding:10px 18px;">📥 Esporta Excel completo (16 MP × tutti i prodotti)</button>' +
+    '<button id="batch-clear-btn" class="apply-btn" style="background:var(--gray-700); padding:10px 18px;">🗑️ Pulisci</button>' +
+  '</div>';
+  
+  // Tabella compatta
+  const tableHtml = '<div class="table-wrap" style="margin-top:8px;">' +
+    '<table class="breakdown-table" style="font-size:0.85rem;">' +
+      '<thead><tr>' +
+        '<th>SKU</th>' +
+        '<th>Titolo</th>' +
+        (batchProducts.some(p => p.stock !== null) ? '<th class="num">Stock</th>' : '') +
+        '<th class="num">Costo</th>' +
+        '<th class="num">Listino</th>' +
+        '<th class="num">IVA</th>' +
+        '<th>Top 3 MP</th>' +
+        '<th></th>' +
+      '</tr></thead>' +
+      '<tbody>' +
+      batchProducts.map((p, idx) => {
+        const top3 = p.calcoli.slice(0, 3);
+        const top3Html = top3.map(c => {
+          const cls = c.margine >= 0 ? 'margin-pos' : 'margin-neg';
+          const segno = c.margine >= 0 ? '+' : '';
+          return '<span style="display:inline-block; background:var(--gray-100); padding:2px 8px; border-radius:6px; font-size:0.75rem; margin:1px 2px;"><strong>' + c.mp_nome + '</strong> · <span class="' + cls + '">' + segno + '€' + c.margine.toFixed(0) + '</span> <span style="color:var(--gray-700);">(' + c.marginePerc.toFixed(1) + '%)</span></span>';
+        }).join(' ');
+        const isExpanded = batchExpanded === p.sku;
+        const mainRow = '<tr style="cursor:pointer;" data-batch-sku="' + p.sku + '">' +
+          '<td><strong style="font-family:monospace; font-size:0.8rem;">' + p.sku + '</strong></td>' +
+          '<td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + (p.titolo || '—') + '</td>' +
+          (batchProducts.some(pp => pp.stock !== null) ? '<td class="num">' + (p.stock !== null ? p.stock : '—') + '</td>' : '') +
+          '<td class="num">€' + p.costo.toFixed(2) + '</td>' +
+          '<td class="num">€' + p.listino.toFixed(2) + '</td>' +
+          '<td class="num">' + p.iva + '%</td>' +
+          '<td>' + top3Html + '</td>' +
+          '<td class="num"><span style="color:var(--gray-500); font-size:0.75rem;">' + (isExpanded ? '▼' : '▶') + '</span></td>' +
+        '</tr>';
+        let detailRow = '';
+        if (isExpanded) {
+          const detTable = '<tr><td colspan="' + (batchProducts.some(pp => pp.stock !== null) ? '8' : '7') + '" style="padding:0; background:var(--cream);">' +
+            '<div style="padding:14px;"><table class="detail-table" style="font-size:0.78rem;">' +
+              '<thead><tr><th>Marketplace</th><th class="num">Prezzo netto MP</th><th class="num">Fees MP</th><th class="num">Margine €</th><th class="num">Margine %</th><th class="num">Break-even</th><th class="num">Per 20%</th><th class="num">Per 30%</th></tr></thead>' +
+              '<tbody>' +
+              p.calcoli.map((c, ci) => {
+                const cls = c.margine >= 0 ? 'margin-pos' : 'margin-neg';
+                const isTop = ci < 3;
+                const bg = isTop ? 'background:rgba(0,128,96,0.06);' : '';
+                const segno = c.margine >= 0 ? '+' : '';
+                const medal = isTop ? ' 🏆' : '';
+                return '<tr style="' + bg + '">' +
+                  '<td><strong>' + c.mp_nome + medal + '</strong></td>' +
+                  '<td class="num">€' + c.dopoSconto.toFixed(2) + '</td>' +
+                  '<td class="num">€' + c.feesMp.toFixed(2) + '</td>' +
+                  '<td class="num ' + cls + '">' + segno + '€' + c.margine.toFixed(2) + '</td>' +
+                  '<td class="num ' + cls + '">' + c.marginePerc.toFixed(1) + '%</td>' +
+                  '<td class="num" style="color:var(--gray-700);">' + (c.breakEven ? '€' + c.breakEven.toFixed(0) : '—') + '</td>' +
+                  '<td class="num" style="color:var(--gray-700);">' + (c.prezzo20 ? '€' + c.prezzo20.toFixed(0) : '—') + '</td>' +
+                  '<td class="num" style="color:var(--gray-700);">' + (c.prezzo30 ? '€' + c.prezzo30.toFixed(0) : '—') + '</td>' +
+                '</tr>';
+              }).join('') +
+              '</tbody></table></div></td></tr>';
+          detailRow = detTable;
+        }
+        return mainRow + detailRow;
+      }).join('') +
+      '</tbody></table></div>';
+  
+  cont.innerHTML = summary + exportBtn + tableHtml;
+  
+  // Click handlers
+  cont.querySelectorAll('tr[data-batch-sku]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const sku = tr.dataset.batchSku;
+      batchExpanded = batchExpanded === sku ? null : sku;
+      renderBatch();
+    });
+  });
+  document.getElementById('batch-export-btn').addEventListener('click', exportBatchExcel);
+  document.getElementById('batch-clear-btn').addEventListener('click', () => {
+    if (!confirm('Pulire tutti i prodotti caricati?')) return;
+    batchProducts = []; batchExpanded = null;
+    document.getElementById('batch-status').textContent = '';
+    document.getElementById('batch-file').value = '';
+    renderBatch();
+  });
+}
+
+function exportBatchExcel() {
+  if (!batchProducts.length) return;
+  loadSheetJS().then(() => {
+    const wb = XLSX.utils.book_new();
+    
+    // Foglio 1: riepilogo per prodotto (top MP per ognuno)
+    const summaryRows = [
+      ['SKU', 'Titolo', 'Stock', 'Costo', 'Listino', 'IVA %', 'Top MP', 'Margine €', 'Margine %', 'Break-even']
+    ];
+    batchProducts.forEach(p => {
+      const top = p.calcoli[0];
+      summaryRows.push([
+        p.sku, p.titolo || '', p.stock !== null ? p.stock : '',
+        p.costo, p.listino, p.iva,
+        top.mp_nome, parseFloat(top.margine.toFixed(2)), parseFloat(top.marginePerc.toFixed(2)),
+        top.breakEven ? parseFloat(top.breakEven.toFixed(2)) : ''
+      ]);
+    });
+    const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+    XLSX.utils.book_append_sheet(wb, wsSummary, 'Riepilogo');
+    
+    // Foglio 2: Dettaglio (riga per ogni MP × prodotto, vista lunga)
+    const detRows = [
+      ['SKU', 'Titolo', 'Stock', 'Costo', 'Listino', 'IVA %', 'Marketplace', 'Prezzo netto MP', 'Fees MP', 'Margine €', 'Margine %', 'Break-even', 'Prezzo per 20%', 'Prezzo per 30%']
+    ];
+    batchProducts.forEach(p => {
+      p.calcoli.forEach(c => {
+        detRows.push([
+          p.sku, p.titolo || '', p.stock !== null ? p.stock : '',
+          p.costo, p.listino, p.iva,
+          c.mp_nome,
+          parseFloat(c.dopoSconto.toFixed(2)),
+          parseFloat(c.feesMp.toFixed(2)),
+          parseFloat(c.margine.toFixed(2)),
+          parseFloat(c.marginePerc.toFixed(2)),
+          c.breakEven ? parseFloat(c.breakEven.toFixed(2)) : '',
+          c.prezzo20 ? parseFloat(c.prezzo20.toFixed(2)) : '',
+          c.prezzo30 ? parseFloat(c.prezzo30.toFixed(2)) : ''
+        ]);
+      });
+    });
+    const wsDet = XLSX.utils.aoa_to_sheet(detRows);
+    XLSX.utils.book_append_sheet(wb, wsDet, 'Dettaglio per MP');
+    
+    // Foglio 3: matrice pivot (SKU in righe × MP in colonne, valori = margine €)
+    const mpKeys = Object.keys(MARKETPLACES);
+    const pivotHeader = ['SKU', 'Titolo', 'Listino'].concat(mpKeys.map(k => MARKETPLACES[k].nome + ' €'));
+    const pivotRows = [pivotHeader];
+    batchProducts.forEach(p => {
+      const row = [p.sku, p.titolo || '', p.listino];
+      mpKeys.forEach(k => {
+        const c = p.calcoli.find(x => x.mp_key === k);
+        row.push(c ? parseFloat(c.margine.toFixed(2)) : '');
+      });
+      pivotRows.push(row);
+    });
+    const wsPivot = XLSX.utils.aoa_to_sheet(pivotRows);
+    XLSX.utils.book_append_sheet(wb, wsPivot, 'Matrice margini €');
+    
+    // Foglio 4: matrice pivot %
+    const pivotHeaderPerc = ['SKU', 'Titolo', 'Listino'].concat(mpKeys.map(k => MARKETPLACES[k].nome + ' %'));
+    const pivotRowsPerc = [pivotHeaderPerc];
+    batchProducts.forEach(p => {
+      const row = [p.sku, p.titolo || '', p.listino];
+      mpKeys.forEach(k => {
+        const c = p.calcoli.find(x => x.mp_key === k);
+        row.push(c ? parseFloat(c.marginePerc.toFixed(2)) : '');
+      });
+      pivotRowsPerc.push(row);
+    });
+    const wsPivotPerc = XLSX.utils.aoa_to_sheet(pivotRowsPerc);
+    XLSX.utils.book_append_sheet(wb, wsPivotPerc, 'Matrice margini %');
+    
+    const date = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `tluxy_calcolo_batch_${date}.xlsx`);
+  }).catch(e => alert('Errore export: ' + e.message));
+}
+
+function downloadBatchTemplate() {
+  loadSheetJS().then(() => {
+    const data = [
+      ['SKU', 'Titolo', 'Stock', 'Costo', 'Listino', 'IVA'],
+      ['ESEMPIO-001', 'Borsa esempio', 5, 200, 590, 22],
+      ['ESEMPIO-002', 'Sneakers esempio', 3, 150, 380, 22],
+      ['ESEMPIO-003', 'T-shirt esempio', 12, 35, 95, 22]
+    ];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    // Set column widths per leggibilità
+    ws['!cols'] = [{wch:18}, {wch:30}, {wch:8}, {wch:10}, {wch:10}, {wch:6}];
+    XLSX.utils.book_append_sheet(wb, ws, 'Prodotti');
+    XLSX.writeFile(wb, 'tluxy_template_calcolo_batch.xlsx');
+  }).catch(e => alert('Errore: ' + e.message));
+}
+
+// ============ CHAT AI ASSISTANT (v5.10) ============
+let chatHistory = []; // {role, content}
+let chatBusy = false;
+
+async function checkChatStatus() {
+  const bar = document.getElementById('chat-status-bar');
+  if (!bar) return;
+  try {
+    const data = await fetchNoCache('/api/chat-status');
+    if (data.enabled) {
+      bar.className = 'info-box';
+      bar.style.cssText = 'background:var(--green-light); border-left-color:var(--green-primary); color:var(--green-dark);';
+      bar.innerHTML = '✅ <strong>Assistente attivo</strong> · usa modello ' + (data.model || 'Claude') + ' · costo stimato per messaggio: ' + (data.cost_per_msg || '€0.01-0.05');
+    } else {
+      bar.className = 'warn-box';
+      bar.innerHTML = '⚠️ <strong>Assistente non configurato</strong>. Per attivarlo: Vercel → Settings → Environment Variables → aggiungi <code>ANTHROPIC_API_KEY</code> con la tua chiave da console.anthropic.com';
+    }
+  } catch(e) {
+    bar.innerHTML = '❌ Errore verifica stato: ' + e.message;
+  }
+}
+
+function chatRender() {
+  const container = document.getElementById('chat-messages');
+  if (!container) return;
+  if (chatHistory.length === 0) return; // mostra suggested
+  container.innerHTML = chatHistory.map(msg => {
+    const isUser = msg.role === 'user';
+    const align = isUser ? 'flex-end' : 'flex-start';
+    const bg = isUser ? 'var(--black)' : 'var(--white)';
+    const color = isUser ? 'var(--white)' : 'var(--black)';
+    const border = isUser ? 'none' : '1px solid var(--gray-200)';
+    const radius = isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px';
+    // Markdown molto basico: ** per bold, \n per <br>
+    let content = String(msg.content || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    content = content.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
+    content = content.replace(/\\n/g, '<br>');
+    return '<div style="display:flex; justify-content:' + align + '; margin-bottom:12px;">' +
+      '<div style="max-width:80%; padding:11px 16px; background:' + bg + '; color:' + color + '; border:' + border + '; border-radius:' + radius + '; font-size:0.92rem; line-height:1.5; white-space:pre-wrap; overflow-wrap:break-word;">' + content + '</div>' +
+    '</div>';
+  }).join('');
+  if (chatBusy) {
+    container.innerHTML += '<div style="display:flex; justify-content:flex-start; margin-bottom:12px;">' +
+      '<div style="padding:11px 16px; background:var(--white); border:1px solid var(--gray-200); border-radius:14px 14px 14px 4px; font-size:0.9rem; color:var(--gray-700);">' +
+      '<span style="display:inline-block; animation:pulse 1.4s infinite;">●</span><span style="display:inline-block; animation:pulse 1.4s infinite 0.2s; margin:0 4px;">●</span><span style="display:inline-block; animation:pulse 1.4s infinite 0.4s;">●</span></div></div>';
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+async function chatSend(message) {
+  if (!message || chatBusy) return;
+  chatHistory.push({ role: 'user', content: message });
+  chatBusy = true;
+  chatRender();
+  document.getElementById('chat-input').value = '';
+  
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: chatHistory })
+    });
+    const data = await res.json();
+    chatBusy = false;
+    if (data.success) {
+      chatHistory.push({ role: 'assistant', content: data.reply });
+    } else {
+      chatHistory.push({ role: 'assistant', content: '❌ Errore: ' + (data.error || 'sconosciuto') });
+    }
+    chatRender();
+  } catch(e) {
+    chatBusy = false;
+    chatHistory.push({ role: 'assistant', content: '❌ Errore di rete: ' + e.message });
+    chatRender();
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadMarketplaces();
   const today = new Date(); const monthAgo = new Date(); monthAgo.setMonth(monthAgo.getMonth() - 1);
@@ -2213,6 +2708,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btn.dataset.tab === 'duo') { checkKvStatus(); /* on-demand: niente auto-load, clicca Ricarica */ }
     if (btn.dataset.tab === 'forecast') { if (!forecastData) loadForecast(); }
     if (btn.dataset.tab === 'inventory') { if (!inventoryData) loadInventory(false); }
+    if (btn.dataset.tab === 'chat') { checkChatStatus(); }
   }));
   document.querySelectorAll('[data-analytics-periods] .period-btn').forEach(btn => btn.addEventListener('click', () => setPeriod(btn.dataset.period, btn)));
   document.querySelectorAll('[data-bs-periods] .period-btn').forEach(btn => btn.addEventListener('click', () => loadBestSellers(btn.dataset.period, btn)));
@@ -2220,6 +2716,26 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('bs-apply').addEventListener('click', applyBsCustomRange);
   ['c-prezzo', 'c-iva', 'c-costo', 'c-spedizione'].forEach(id => { const el = document.getElementById(id); if (el) { el.addEventListener('input', confronta); if (el.tagName === 'SELECT') el.addEventListener('change', confronta); } });
   document.getElementById('calcola-btn').addEventListener('click', calcola);
+  // Batch Excel listeners
+  const batchFile = document.getElementById('batch-file');
+  if (batchFile) batchFile.addEventListener('change', e => { if (e.target.files[0]) handleBatchFile(e.target.files[0]); });
+  const batchTplBtn = document.getElementById('batch-template-btn');
+  if (batchTplBtn) batchTplBtn.addEventListener('click', downloadBatchTemplate);
+  const batchIvaSel = document.getElementById('batch-iva-default');
+  if (batchIvaSel) batchIvaSel.addEventListener('change', () => {
+    // Ricalcola usando nuova IVA come default
+    if (batchProducts.length > 0) {
+      const newIva = parseFloat(batchIvaSel.value) || 22;
+      batchProducts.forEach(p => {
+        p.iva = newIva;
+        p.calcoli = Object.entries(MARKETPLACES).map(([key, mp]) => {
+          const r = batchCalcMargine(p.listino, p.costo, key, p.iva);
+          return { mp_key: key, mp_nome: mp.nome, ...r };
+        }).sort((a, b) => b.margine - a.margine);
+      });
+      renderBatch();
+    }
+  });
   // DUO listeners
   document.getElementById('duo-reload').addEventListener('click', loadDuoProducts);
   const fcBtn = document.getElementById('forecast-reload');
@@ -2254,6 +2770,35 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('duo-csv-file').addEventListener('change', e => { if (e.target.files[0]) handleCsvImport(e.target.files[0]); });
   document.getElementById('duo-search').addEventListener('input', filterDuoProducts);
+  // Chat AI listeners
+  const chatInput = document.getElementById('chat-input');
+  const chatSendBtn = document.getElementById('chat-send');
+  const chatClearBtn = document.getElementById('chat-clear');
+  if (chatSendBtn) chatSendBtn.addEventListener('click', () => {
+    const v = (chatInput.value || '').trim();
+    if (v) chatSend(v);
+  });
+  if (chatInput) chatInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const v = (chatInput.value || '').trim();
+      if (v) chatSend(v);
+    }
+  });
+  if (chatClearBtn) chatClearBtn.addEventListener('click', () => {
+    chatHistory = [];
+    chatBusy = false;
+    chatRender();
+    // Mostra schermata vuota con suggerimenti
+    document.getElementById('chat-messages').innerHTML = document.getElementById('chat-messages').innerHTML; // forza re-render iniziale
+    location.hash = '#chat-tab'; setTimeout(() => location.hash = '', 100); // reset visivo
+  });
+  // Bottoni suggested in chat
+  document.querySelectorAll('.chat-suggest').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const text = btn.textContent.replace(/^[^a-zA-Z0-9]+\s*/, '').trim();
+      chatSend(text);
+    });
+  });
   // Logout handler
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn) {
@@ -2418,7 +2963,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.9.5', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, user_email: authUser?.email || null, funzionalita: ['GIGLIO.COM marketplace (regole TBD)', 'Mark Foy Department Store (detection multi-criterio)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand (no foto, cost Shopify)', 'Snapshot Inventario (cat × gender, filtro DUO)', 'Cache KV 24h (forecast + discovery + inventory)', 'Previsioni Incassi (scadenziari MP)', 'Balardi wallet prepagato', 'Gestione resi/refund', 'Winkelstraat detection', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.10', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['💬 Chat AI assistant (Claude Haiku 4.5)', '📊 Calcolatore Excel batch (carica/scarica xlsx)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -3798,6 +4343,225 @@ export default async function handler(req, res) {
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
+    // ============ CHAT AI ASSISTANT (v5.10) ============
+    if (req.method === 'GET' && path === '/api/chat-status') {
+      const apiKey = process.env.ANTHROPIC_API_KEY || '';
+      return res.json({
+        enabled: !!apiKey,
+        configured: !!apiKey,
+        model: 'claude-haiku-4-5',
+        cost_per_msg: '€0.005-0.02 per messaggio',
+        configure_hint: apiKey ? null : 'Aggiungi env var ANTHROPIC_API_KEY su Vercel (chiave da console.anthropic.com)'
+      });
+    }
+    
+    if (req.method === 'POST' && path === '/api/chat') {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return res.status(503).json({ success: false, error: 'ANTHROPIC_API_KEY non configurato. Aggiungi su Vercel → Settings → Environment Variables.' });
+      try {
+        let body = '';
+        await new Promise((resolve, reject) => { req.on('data', c => body += c); req.on('end', resolve); req.on('error', reject); });
+        const data = JSON.parse(body || '{}');
+        const userMessages = data.messages || [];
+        if (userMessages.length === 0) return res.status(400).json({ success: false, error: 'Nessun messaggio' });
+        
+        // System prompt: dice a Claude che è l'assistente del tuo ERP
+        const systemPrompt = `Sei l'assistente AI di T. Luxy ERP, una dashboard di Business Intelligence per un negozio luxury off-price gestito da Alessio. Hai accesso a strumenti per leggere dati Shopify in tempo reale: ordini, marginalità, marketplace, inventario, previsioni incassi.
+
+Marketplace gestiti: Miinto, The Bradery, Italist, Secret Sales, Fashion Tamers, Intra Mirror, Balardi, Boutique Mall, Archivist, Winkelstraat, Jammy Dude, Poizon, Brandsgateway, T. Luxy sito proprio, Mark Foy, GIGLIO.COM.
+
+Regole:
+- Rispondi sempre in italiano
+- Quando ti chiedono dati specifici (fatturato, ordini, ecc.), usa i tool per leggere i dati REALI, non inventarli
+- Sii conciso: rispondi al punto, evita preamboli
+- Usa formatting markdown leggero (**bold** per evidenziare numeri chiave)
+- Se non puoi rispondere a una domanda, dillo onestamente
+- Per il contesto: oggi è ${new Date().toLocaleDateString('it-IT')}, fuso orario Europa/Roma`;
+        
+        // Tool definitions: gli endpoint del nostro ERP esposti come strumenti per Claude
+        const tools = [
+          {
+            name: 'get_analytics',
+            description: 'Ottieni analytics completi (fatturato, IVA, margine, breakdown per marketplace, errori) per un periodo. Utilizzalo per domande su KPI, fatturato, marginalità, MP migliori/peggiori.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                periodo: { type: 'string', enum: ['today', 'yesterday', 'week', 'month', 'quarter', 'year'], description: 'Periodo di analisi' }
+              },
+              required: ['periodo']
+            }
+          },
+          {
+            name: 'get_bestsellers',
+            description: 'Ottieni i top 20 prodotti più venduti per fatturato in un periodo.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                periodo: { type: 'string', enum: ['today', 'week', 'month', 'quarter', 'year'] }
+              },
+              required: ['periodo']
+            }
+          },
+          {
+            name: 'get_forecast',
+            description: 'Ottieni le previsioni di incasso (bonifici futuri da marketplace) per i prossimi 2 mesi, con scadenziario per MP.',
+            input_schema: { type: 'object', properties: {} }
+          },
+          {
+            name: 'get_inventory',
+            description: 'Ottieni snapshot dell\\'inventario corrente: prodotti per categoria (bag/shoes/accessori/clothing) × gender.',
+            input_schema: { type: 'object', properties: {} }
+          },
+          {
+            name: 'get_marketplaces_config',
+            description: 'Ottieni la configurazione dei marketplace (commissioni, sconti, modalità pagamento).',
+            input_schema: { type: 'object', properties: {} }
+          }
+        ];
+        
+        // Funzione che esegue un tool e restituisce il risultato
+        async function executeTool(toolName, toolInput) {
+          const baseUrl = `https://${req.headers.host || 'erp-marginalita-last.vercel.app'}`;
+          const cookie = req.headers.cookie || '';
+          const headers = cookie ? { 'Cookie': cookie } : {};
+          try {
+            let url;
+            switch (toolName) {
+              case 'get_analytics':
+                url = `${baseUrl}/api/analytics?periodo=${encodeURIComponent(toolInput.periodo)}`;
+                break;
+              case 'get_bestsellers':
+                url = `${baseUrl}/api/bestsellers?periodo=${encodeURIComponent(toolInput.periodo)}`;
+                break;
+              case 'get_forecast':
+                url = `${baseUrl}/api/forecast`;
+                break;
+              case 'get_inventory':
+                url = `${baseUrl}/api/inventory`;
+                break;
+              case 'get_marketplaces_config':
+                url = `${baseUrl}/api/marketplaces`;
+                break;
+              default:
+                return { error: 'Tool sconosciuto: ' + toolName };
+            }
+            const r = await fetch(url, { headers });
+            const d = await r.json();
+            // Comprime l'output per non saturare il context (rimuove campi inutili)
+            if (toolName === 'get_analytics' && d.success) {
+              return {
+                periodo: d.periodo,
+                ordini_totali: d.ordini_totali,
+                lordo_iva_inclusa: Math.round(d.lordo_iva_inclusa),
+                iva_totale: Math.round(d.iva_totale),
+                costi_merce: Math.round(d.costi_merce_totali || 0),
+                costi_fees: Math.round(d.costi_fees_totali || 0),
+                margine_netto: Math.round(d.margine_netto),
+                margine_percentuale: parseFloat(d.margine_percentuale.toFixed(2)),
+                errori_count: d.ordini_con_errori_count,
+                resi: d.resi ? { count: d.resi.totale_count, importo: Math.round(d.resi.importo_totale_eur) } : null,
+                breakdown_mp: Object.values(d.breakdown_marketplace || {}).map(mp => ({
+                  nome: mp.nome,
+                  ordini: mp.ordini,
+                  fatturato: Math.round(mp.fatturato),
+                  margine: Math.round(mp.margine),
+                  margine_perc: mp.fatturato > 0 ? parseFloat((mp.margine / mp.fatturato * 100).toFixed(2)) : 0
+                }))
+              };
+            }
+            if (toolName === 'get_bestsellers' && d.success) {
+              return { totale: d.totale_prodotti_unici, prodotti: (d.prodotti || []).slice(0, 10).map(p => ({ titolo: p.titolo, sku: p.sku, fatturato: Math.round(p.fatturato_lordo), pezzi: p.quantita_venduta, ricavo: Math.round(p.ricavo_stimato) })) };
+            }
+            if (toolName === 'get_forecast' && d.success) {
+              return {
+                kpi: d.kpi,
+                breakdown: (d.breakdown_marketplace || []).slice(0, 10).map(mp => ({
+                  nome: mp.nome,
+                  prossimo_bonifico: mp.prossimo_bonifico,
+                  importo_totale: Math.round(mp.importo_totale)
+                })),
+                balardi_residuo: d.balardi_wallet ? Math.round(d.balardi_wallet.credito_residuo * 100) / 100 : null
+              };
+            }
+            if (toolName === 'get_inventory' && d.success) {
+              return {
+                totale_prodotti: d.totale_prodotti_attivi_con_stock,
+                totale_pezzi: d.totale_pezzi,
+                duo: { prodotti: d.duo_prodotti, pezzi: d.duo_pezzi },
+                own: { prodotti: d.own_prodotti, pezzi: d.own_pezzi },
+                snapshot: d.snapshot.tutto,
+                non_classificati: d.non_classificati ? { prodotti: d.non_classificati.prodotti, pezzi: d.non_classificati.pezzi } : null
+              };
+            }
+            if (toolName === 'get_marketplaces_config') {
+              return { marketplace: Object.entries(d.marketplace_disponibili || {}).map(([k, mp]) => ({ key: k, nome: mp.nome, sconto: mp.sconto_percentuale, fee_principale: mp.fee_principale, fee_secondaria: mp.fee_secondaria || 0, sped: mp.fee_fissa_trasporto, pack: mp.fee_fissa_packaging, pagamento: mp.pagamento })) };
+            }
+            return d;
+          } catch(e) { return { error: e.message }; }
+        }
+        
+        // Chiama Claude API con loop tool calling (max 10 iterazioni)
+        const claudeMessages = userMessages.map(m => ({ role: m.role, content: m.content }));
+        let finalReply = '';
+        let iteration = 0;
+        const MAX_ITERATIONS = 8;
+        
+        while (iteration < MAX_ITERATIONS) {
+          iteration++;
+          const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify({
+              model: 'claude-haiku-4-5-20251001',
+              max_tokens: 2048,
+              system: systemPrompt,
+              tools,
+              messages: claudeMessages
+            })
+          });
+          
+          if (!claudeRes.ok) {
+            const errBody = await claudeRes.text();
+            return res.status(500).json({ success: false, error: `Claude API error ${claudeRes.status}: ${errBody.substring(0, 300)}` });
+          }
+          
+          const claudeData = await claudeRes.json();
+          
+          // Aggiunge la risposta dell'assistente all'history
+          claudeMessages.push({ role: 'assistant', content: claudeData.content });
+          
+          // Se è un tool_use, esegui e itera
+          const toolUses = (claudeData.content || []).filter(b => b.type === 'tool_use');
+          if (toolUses.length > 0 && claudeData.stop_reason === 'tool_use') {
+            const toolResults = [];
+            for (const toolUse of toolUses) {
+              const result = await executeTool(toolUse.name, toolUse.input);
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                content: JSON.stringify(result).substring(0, 8000) // limit context
+              });
+            }
+            claudeMessages.push({ role: 'user', content: toolResults });
+            continue;
+          }
+          
+          // Altrimenti raccogli risposta testuale finale
+          const textBlocks = (claudeData.content || []).filter(b => b.type === 'text');
+          finalReply = textBlocks.map(b => b.text).join('\n');
+          break;
+        }
+        
+        if (!finalReply) finalReply = '⚠️ Non sono riuscito a completare la richiesta dopo ' + MAX_ITERATIONS + ' iterazioni.';
+        
+        return res.json({ success: true, reply: finalReply, iterations: iteration });
+      } catch(e) { return res.status(500).json({ success: false, error: e.message, stack: e.stack }); }
+    }
+    
     if (req.method === 'GET' && path === '/api/marketplaces') {
       return res.json({ marketplace_disponibili: MARKETPLACE_CONFIGS, source_name_map: SOURCE_NAME_MAP, iva_per_paese: IVA_PER_PAESE });
     }
