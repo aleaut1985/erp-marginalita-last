@@ -2309,7 +2309,7 @@ async function handleBatchFile(file) {
     const ws = wb.Sheets[wb.SheetNames[0]];
     if (!ws) { status.textContent = '❌ Nessun foglio trovato nel file'; status.style.color = 'var(--red)'; return; }
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-    if (rows.length < 2) { status.textContent = '❌ Il file ha solo l\\'intestazione, manca dati'; status.style.color = 'var(--red)'; return; }
+    if (rows.length < 2) { status.textContent = "❌ Il file ha solo l'intestazione, manca dati"; status.style.color = 'var(--red)'; return; }
     
     const headers = rows[0];
     const skuIdx = batchFindCol(headers, ['sku', 'codice', 'codiceprodotto']);
@@ -2599,7 +2599,7 @@ function exportBatchExcel() {
     XLSX.utils.book_append_sheet(wb, wsPivotPerc, 'Matrice margini %');
     
     const date = new Date().toISOString().split('T')[0];
-    XLSX.writeFile(wb, `tluxy_calcolo_batch_${date}.xlsx`);
+    XLSX.writeFile(wb, 'tluxy_calcolo_batch_' + date + '.xlsx');
   }).catch(e => alert('Errore export: ' + e.message));
 }
 
@@ -4409,7 +4409,7 @@ Regole:
           },
           {
             name: 'get_inventory',
-            description: 'Ottieni snapshot dell\\'inventario corrente: prodotti per categoria (bag/shoes/accessori/clothing) × gender.',
+            description: "Ottieni snapshot dell'inventario corrente: prodotti per categoria (bag/shoes/accessori/clothing) × gender.",
             input_schema: { type: 'object', properties: {} }
           },
           {
