@@ -2653,7 +2653,7 @@ function chatRender() {
     const color = isUser ? 'var(--white)' : 'var(--black)';
     const border = isUser ? 'none' : '1px solid var(--gray-200)';
     const radius = isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px';
-    // Markdown molto basico: ** per bold, \n per <br>
+    // Markdown molto basico: doppio asterisco per bold, newline per a-capo
     let content = String(msg.content || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     content = content.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
     content = content.replace(/\\n/g, '<br>');
