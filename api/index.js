@@ -1,4 +1,4 @@
-// ERP Marginalità v5.12 - Calcolatore singolo: Retail + 2 sconti% con sync bidirezionale
+// ERP Marginalità v5.12.1 - Calcolatore singolo: Retail + 2 sconti% (versione semplificata anti-crash)
 
 import * as crypto from 'node:crypto';
 
@@ -438,7 +438,7 @@ function calcolaPagamentiPrevisti(dataOrdine, policy, nettoIncassato) {
       (policy.parts || []).forEach((part, idx) => {
         const target = new Date(orderDate.getFullYear(), orderDate.getMonth() + (part.month_offset || 1), part.payout_day || 10);
         const importoParte = nettoIncassato * (part.pct / 100);
-        risultato.push({ data: target, importo_eur: importoParte, nota: `${part.pct}% (mese+${part.month_offset})`, parte: idx + 1 });
+        risultato.push({ dati: target, importo_eur: importoParte, nota: `${part.pct}% (mese+${part.month_offset})`, parte: idx + 1 });
       });
       rottura;
     }
@@ -1084,7 +1084,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <title>T. Luxy ERP — Marginalità del pannello di controllo</title>
 <style>
   :radice {
-    --verde-primario: #008060; --verde-scuro: #004C3F; --verde-chiaro: #E8F4F0;
+    --green-primary: #008060; --green-dark: #004C3F; --green-light: #E8F4F0;
     --oro: #C9A961; --oro chiaro: #F4ECD8;
     --beige: #F4F1EB; --crema: #FAFAF7;
     --nero: #1A1A1A; --grigio-900: #2D2D2D; --grigio-700: #5C5C5C; --grigio-500: #8E8E8E;
@@ -1184,7 +1184,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .duo-title { font-weight: 700; font-size: 0.92rem; color: var(--black); margin-bottom: 4px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-transform: uppercase; letter-spacing: 0.02em; }
   .duo-meta { font-size: 0.7rem; color: var(--gray-500); margin-bottom: 8px; font-family: monospace; }
   .duo-listino { font-size: 0.82rem; color: var(--gray-700); margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px dotted var(--gray-200); }
-  .duo-input-row { display: flex; align-items: center; g ap: 10px; margin-bottom: 8px; }
+  .duo-input-row { display: flex; align-it ems: center; gap: 10px; margin-bottom: 8px; }
   .duo-input-row label { flex: 0 0 110px; font-size: 0.7rem; color: var(--gray-700); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
   .duo-input-row input, .duo-input-row select { flex: 1; padding: 7px 10px; border: 1px solid var(--gray-200); border-radius: 6px; font-size: 0.85rem; font-family: var(--font-main); background: var(--white); }
   .duo-input-row input:focus, .duo-input-row select:focus { outline: none; border-color: var(--green-primary); }
@@ -1270,7 +1270,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Marginalità ERP</h1>
-        <p>Dashboard di Business Intelligence · v5.12</p>
+        <p>Dashboard di Business Intelligence · v5.12.1</p>
       </div>
     </div>
     <div class="header-right">
@@ -1381,11 +1381,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
       
       <div class="form-grid">
-        <div class="form-group"><label>Prezzo IVA incluso (€) <span style="font-size:0.65rem; color:var(--green-dark); text-transform:none; letter-spacing:0; font-weight:500;" id="prezzo-auto-badge"></span></label><input type="number" id="prezzo" placeholder="es. 100" step="0.01"></div>
+        <div class="form-group"><label>Prezzo IVA incluso (€)</label><input type="number" id="prezzo" placeholder="es. 100" step="0.01"></div>
         <div class="form-group"><label>Paese / IVA</label><select id="iva-select">
           <option value="22">🇮🇹 Italia (22%)</option><option value="20">🇫🇷 Francia (20%)</option><option value="19">🇩🇪 Germania (19%)</option><option value="21">🇪🇸 Spagna (21%)</option><option value="21">🇳🇱 Olanda (21%)</option><option value="21">🇧🇪 Belgio (21%)</option><option value="20">🇦🇹 Austria (20%)</option><option value="23">🇮🇪 Irlanda (23%)</option><option value="23">🇵🇱 Polonia (23%)</option><option value="25">🇸🇪 Svezia (25%)</option><option value="25">🇩🇰 Danimarca (25%)</option><option value="20">🇬🇧 Regno Unito (20%)</option><option value="0">🇺🇸 USA / Extra-UE (0%)</option>
         </select></div>
-        <div class="form-group"><label>Costo Merce (€) <span style="font-size:0.65rem; color:var(--green-dark); text-transform:none; letter-spacing:0; font-weight:500;" id="costo-auto-badge"></span></label><input type="number" id="costo" placeholder="es. 45" step="0.01"></div>
+        <div class="form-group"><label>Costo Merce (€)</label><input type="number" id="costo" placeholder="es. 45" step="0.01"></div>
         <div class="form-group"><label>Spedizione (€)</label><input type="number" id="spedizione" value="5" step="0.01"></div>
         <div class="form-group"><label>Marketplace</label><select id="mp-select"></select></div>
       </div>
@@ -1754,94 +1754,48 @@ funzione di confronto() {
   const redditizi = risultati.filter(r => r.margine > 0).length; const inPerdita = risultati.filter(r => r.margine <= 0).length;
   document.getElementById('compare-summary').innerHTML = '<div class="summary-card best-mp"><div class="summary-label">Migliore</div><div class="summary-value">' + best.nome + '</div><div class="summary-detail">€' + best.margine.toFixed(2) + ' (' + best.margineP.toFixed(1) + '%)</div></div><div class="summary-card worst-mp"><div class="summary-label">Peggiore</div><div class="summary-value">' + worst.nome + '</div><div class="summary-detail">€' + worst.margine.toFixed(2) + ' (' + worst.margineP.toFixed(1) + '%)</div></div><div class="summary-card info"><div class="summary-label">Redditizi</div><div class="summary-value">' + redditizi + ' su ' + risultati.length + '</div><div class="summary-detail">' + inPerdita + ' in perdita</div></div>';
 }
-// ============ CALCOLATORE: RETAIL + SCONTI (v5.12) ============
-// Sincronizzazione bidirezionale: cambia retail/sconti → aggiorna prezzo/costo. Cambia prezzo/costo → aggiorna sconti.
-lascia che calcSyncing = false; // flag per prevenire il loop infinito
-
+// ============ CALCOLATORE: RETAIL + SCONTI (v5.12 step1 - logica minima) ============
 funzione calcUpdateFromRetail() {
-  se (calcSyncing) restituisci;
-  CalcSyncing = true;
-  const retail = parseFloat(document.getElementById('calc-retail').value);
-  const scontoV = parseFloat(document.getElementById('calc-sconto-vendita').value);
-  const scontoC = parseFloat(document.getElementById('calc-sconto-costo').value);
-  const prezzoEl = document.getElementById('prezzo');
-  const costoEl = document.getElementById('costo');
-  const prezzoBadge = document.getElementById('prezzo-auto-badge');
-  const costoBadge = document.getElementById('costo-auto-badge');
-  // Calcola Prezzo da retail + sconto vendita
-  if (!isNaN(vendita al dettaglio) && vendita al dettaglio > 0) {
-    if (!isNaN(scontoV) && scontoV >= 0 && scontoV <= 100) {
-      const nuovoPrezzo = retail* (1 - scontoV/100);
-      prezzoEl.value = nuovoPrezzo.toFixed(2);
-      prezzoBadge.textContent = '↻ auto da vendita';
-      prezzoEl.style.background = 'rgba(0,128,96,0.05)';
-    } altrimenti se (isNaN(scontoV)) {
-      // Solo vendita al dettaglio → prezzo = vendita al dettaglio pieno
-      prezzoEl.value = retail.toFixed(2);
-      prezzoBadge.textContent = '↻ = prezzo al dettaglio';
-      prezzoEl.style.background = 'rgba(0,128,96,0.05)';
+  Tentativo {
+    const retailEl = document.getElementById('calc-retail');
+    const scontoVEl = document.getElementById('calc-sconto-vendita');
+    const scontoCEl = document.getElementById('calc-sconto-costo');
+    const prezzoEl = document.getElementById('prezzo');
+    const costoEl = document.getElementById('costo');
+    const summary = document.getElementById('calc-retail-summary');
+    se (!retailEl || !valoreEl || !costoEl) restituisci;
+    const retail = parseFloat(retailEl.value);
+    const scontoV = parseFloat(scontoVEl.value);
+    const scontoC = parseFloat(scontoCEl.value);
+    if (!isNaN(vendita al dettaglio) && vendita al dettaglio > 0) {
+      // Prezzo da vendita al dettaglio + sconto vendita
+      if (!isNaN(scontoV) && scontoV >= 0 && scontoV <= 100) {
+        prezzoEl.value = (prezzoal dettaglio * (1 - scontoV / 100)).toFixed(2);
+      } altrimenti se (isNaN(scontoV)) {
+        prezzoEl.value = retail.toFixed(2);
+      }
+      // Costo da vendita al dettaglio + sconto costo
+      if (!isNaN(scontoC) && scontoC >= 0 && scontoC <= 100) {
+        costoEl.value = (prezzo al dettaglio * (1 - scontoC / 100)).toFixed(2);
+      }
+      // Riepilogo
+      const pV = parseFloat(prezzoEl.value);
+      const cV = parseFloat(costoEl.value);
+      let html = '<strong>Riepilogo</strong> · Prezzo consigliato al pubblico <strong>€' + retail.toFixed(2) + '</strong>';
+      se (!isNaN(pV) && pV > 0) {
+        const sV = ((prezzo al dettaglio - pV) / prezzo al dettaglio * 100);
+        html += ' · vendo a <strong>€' + pV.toFixed(2) + '</strong> (' + (sV >= 0 ? '-' : '+') + Math.abs(sV).toFixed(1) + '%)';
+      }
+      se (!isNaN(cV) && cV >= 0) {
+        const sC = ((prezzo al dettaglio - cV) / prezzo al dettaglio * 100);
+        html += ' · compro a <strong>€' + cV.toFixed(2) + '</strong> (' + (sC >= 0 ? '-' : '+') + Math.abs(sC).toFixed(1) + '%)';
+      }
+      summary.innerHTML = html;
+      summary.style.display = 'block';
+    } altro {
+      summary.style.display = 'none';
     }
-    // Calcola Costo da retail + sconto costo
-    if (!isNaN(scontoC) && scontoC >= 0 && scontoC <= 100) {
-      const nuovoCosto = retail* (1 - scontoC/100);
-      costoEl.value = nuovoCosto.toFixed(2);
-      costoBadge.textContent = '↻ auto da retail';
-      costoEl.style.background = 'rgba(0,128,96,0.05)';
-    }
-  }
-  aggiornaRiepilogoRetail();
-  // Ri-renderizza i risultati se già visibili
-  se (document.getElementById('results').style.display !== 'none') calcola();
-  calcSyncing = falso;
-}
-
-funzione calcUpdateFromPrezzoCosto() {
-  se (calcSyncing) restituisci;
-  CalcSyncing = true;
-  const retail = parseFloat(document.getElementById('calc-retail').value);
-  const prezzo = parseFloat(document.getElementById('prezzo').value);
-  const costo = parseFloat(document.getElementById('costo').value);
-  // Se ho il retail, ricalcolo gli sconti in base a prezzo/costo manuali
-  if (!isNaN(vendita al dettaglio) && vendita al dettaglio > 0) {
-    if (!isNaN(prezzo) && prezzo > 0) {
-      const newScontoV = ((prezzo al dettaglio - prezzo) / prezzo al dettaglio) * 100;
-      document.getElementById('calc-sconto-vendita').value = newScontoV.toFixed(1);
-    }
-    if (!isNaN(costo) && costo >= 0) {
-      const newScontoC = ((prezzo al dettaglio - costo) / prezzo al dettaglio) * 100;
-      document.getElementById('calc-sconto-costo').value = newScontoC.toFixed(1);
-    }
-  }
-  // Rimuovi badge auto perché l'utente ha modificato manualmente
-  document.getElementById('prezzo-auto-badge').textContent = '';
-  document.getElementById('costo-auto-badge').textContent = '';
-  document.getElementById('prezzo').style.background = '';
-  document.getElementById('costo').style.background = '';
-  aggiornaRiepilogoRetail();
-  se (document.getElementById('results').style.display !== 'none') calcola();
-  calcSyncing = falso;
-}
-
-funzione aggiornaRiepilogoRetail() {
-  const retail = parseFloat(document.getElementById('calc-retail').value);
-  const prezzo = parseFloat(document.getElementById('prezzo').value);
-  const costo = parseFloat(document.getElementById('costo').value);
-  const summary = document.getElementById('calc-retail-summary');
-  se (!riepilogo) restituisci;
-  if (isNaN(retail) || retail <= 0) { summary.style.display = 'none'; ritorno; }
-  const scontoV = !isNaN(prezzo) && prezzo > 0 ? ((retail - prezzo) / retail * 100) : null;
-  const scontoC = !isNaN(costo) && costo >= 0 ? ((vendita al dettaglio - costo) / vendita al dettaglio * 100) : null;
-  let html = '<strong>Riepilogo</strong> · Prezzo consigliato al pubblico <strong>€' + retail.toFixed(2) + '</strong>';
-  se (scontoV !== null) {
-    const segno = scontoV >= 0 ? '-': '+';
-    html += ' · vendo a <strong>€' + prezzo.toFixed(2) + '</strong> (' + segno + Math.abs(scontoV).toFixed(1) + '%)';
-  }
-  se (scontoC !== null) {
-    const segno = scontoC >= 0 ? '-': '+';
-    html += ' · compro a <strong>€' + costo.toFixed(2) + '</strong> (' + segno + Math.abs(scontoC).toFixed(1) + '%)';
-  }
-  summary.innerHTML = html;
-  summary.style.display = 'block';
+  } catch(e) { console.error('Errore in calcUpdateFromRetail:', e); }
 }
 
 funzione c_c() {
@@ -1936,7 +1890,7 @@ funzione asincrona loadDuoProducts() {
 
 funzione renderDuoProducts(prodotti) {
   const cont = document.getElementById('duo-content');
-  if (!products ||products.length === 0) { cont.inner HTML = '<div class="bs-empty">Nessun prodotto DUO trovato (SKU che inizia con "DUO-").</div>'; ritorno; }
+  if (!products ||products.length === 0) { cont.innerHTML = '<div class="bs-empty">Nessun prodotto DUO trovato (SKU che inizia con "DUO-").</div>'; ritorno; }
   const mpOptions = Object.entries(MARKETPLACES).map(([k, v]) => '<option value="' + k + '">' + v.nome + '</option>').join('');
   cont.innerHTML = '<div class="duo-grid">' + products.map(p => {
     // Segnaposto compatto con iniziale + sfondo colorato (no immagini)
@@ -2859,7 +2813,7 @@ funzione chatRender() {
     const radius = isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px';
     // Markdown molto basico: doppio asterisco per bold, newline per a-capo
     let content = String(msg.content || '').replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>');
-    contenuto = contenuto.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
+    contenuto = contenuto.sostituisci(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
     contenuto = contenuto.sostituisci(/\\n/g, '<br>');
     restituisci '<div style="display:flex; justify-content:' + align + '; margin-bottom:12px;">' +
       '<div style="max-width:80%; padding:11px 16px; background:' + bg + '; color:' + color + '; border:' + border + '; border-radius:' + radius + '; font-size:0.92rem; line-height:1.5; white-space:pre-wrap; overflow-wrap:break-word;">' + content + '</div>' +
@@ -2920,14 +2874,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('bs-apply').addEventListener('click', applyBsCustomRange);
   ['c-prezzo', 'c-iva', 'c-costo', 'c-spedizione'].forEach(id => { const el = document.getElementById(id); if (el) { el.addEventListener('input', confronta); if (el.tagName === 'SELECT') el.addEventListener('change', confronta); } });
   document.getElementById('calcola-btn').addEventListener('click', calcola);
-  // Calcolatore: Retail + Sconti ascoltatori (sync bidirezionale)
+  // Calcolatore: Retail + Sconti ascoltatori (solo monodirezionale, lato sicuro)
   ['calc-retail', 'calc-sconto-vendita', 'calc-sconto-costo'].forEach(id => {
     const el = document.getElementById(id);
     se (el) el.addEventListener('input', calcUpdateFromRetail);
-  });
-  ['prezzo', 'costo'].forEach(id => {
-    const el = document.getElementById(id);
-    se (el) el.addEventListener('input', calcUpdateFromPrezzoCosto);
   });
   // Listener di Batch Excel
   const batchFile = document.getElementById('batch-file');
@@ -3121,7 +3071,7 @@ export default async function handler(req, res) {
           res.writeHead(302, { Location: '/login?err=invalid' });
           restituisci res.end();
         }
-        consentire il carico utile;
+        lasciare il payload;
         try { payload = JSON.parse(raw); } catch (e) {
           res.writeHead(302, { Location: '/login?err=invalid' });
           restituisci res.end();
@@ -3176,7 +3126,7 @@ export default async function handler(req, res) {
     }
 
     se (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.12', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧮 Calcolatore con Retail + 2 sconti (sync bidirezionale)', '📊 Excel batch con Retail + Sconto% fornito', '💡 Sconto Max corretto per 20% margine', '💬 Chat AI Assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.12.1', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧮 Calcolatore con Retail + 2 sconti (monodirezionale)', '📊 Excel batch con Retail + Sconto% fornito', '💡 Sconto Max corretto per 20% margine', '💬 Chat AI Assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     se (req.method === 'GET' && path === '/api/analytics') {
@@ -3730,7 +3680,7 @@ export default async function handler(req, res) {
         ordini.forEach(ordine => {
           const mp = riconosciMarketplace(ordine);
           const policy = mp.config.payment_policy;
-          se (!policy) { ordiniSkipped++; return; }
+          if (!policy) { ordiniSkipped++; return; }
           
           const refundInfo = getOrderRefundInfo(ordine);
           if (refundInfo.isFullRefund) { ordiniSkipped++; return; } // nessuna previsione su resi totali
@@ -3747,7 +3697,7 @@ export default async function handler(req, res) {
             costoMerceEffettivo = costoMerce* (1 - rapporto);
           }
           
-          // Banda EUR
+          // Brigata EUR
           const spedizione = (ordine.shipping_lines || []).reduce((s, line) => s + toEurAmount(line.price_set, line.price, currencyInfo.originalCurrency), 0);
           
           // Calcola netto per il venditore (prezzo_netto - fee - sped - packaging, MA netto merce rimanente)
@@ -4305,7 +4255,7 @@ export default async function handler(req, res) {
         const ordini = attendono getShopifyOrders(periodo);
         const winkelstraatOrders = [];
         const fallbackDefaultOrders = []; // ordini che non hanno matchato e finiscono in TLUXY_SITE (candidati mancati?)
-        ordini. forEach(o => {
+        ordini.forEach(o => {
           const match = isWinkelstraatOrder(o);
           const mp = riconosciMarketplace(o);
           const email = (o.email || o.customer?.email || '').toLowerCase();
@@ -4371,7 +4321,7 @@ export default async function handler(req, res) {
         });
       }
       Tentativo {
-        const testKey = '__kv_test__';
+        const testKey = '_ _kv_test__';
         const testVal = String(Date.now());
         const writeOk = await kvSet(testKey, testVal);
         const read = await kvGet(testKey);
@@ -4745,7 +4695,7 @@ Requisiti:
           const claudeData = await claudeRes.json();
           
           // Aggiunge la risposta dell'assistente all'history
-          claudeMessages.push({ role: 'assistente', content: claudeData.content });
+          claudeMessages.push({ ruolo: 'assistente', contenuto: claudeData.content });
           
           // Se è un tool_use, esegui e itera
           const toolUses = (claudeData.content || []).filter(b => b.type === 'tool_use');
