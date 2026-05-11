@@ -1,4 +1,4 @@
-// ERP Marginalità v5.11 - Excel batch con Retail + Sconto% fornitore + Sconto Max 20%
+// ERP Marginalità v5.11.1 - Scorciatoia Retail+Sconti nel Calcolatore singolo (patch minimale conservativa)
 
 import * as crypto from 'node:crypto';
 
@@ -1270,7 +1270,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.11</p>
+        <p>Business Intelligence Dashboard · v5.11.1</p>
       </div>
     </div>
     <div class="header-right">
@@ -1368,6 +1368,16 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     <div class="section">
       <div class="section-header"><div><div class="section-title">Calcolatore</div><div class="section-subtitle">Simulatore marginalità singolo marketplace</div></div></div>
       <div class="info-box">Inserisci prezzo IVA inclusa e aliquota IVA del paese.</div>
+      <div style="background:var(--cream); border:1.5px solid var(--gold); border-radius:var(--radius-md); padding:18px 22px; margin-bottom:20px;">
+        <div style="font-size:0.85rem; font-weight:700; color:var(--gray-900); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:12px;">🧮 Scorciatoia Retail (opzionale)</div>
+        <div style="font-size:0.8rem; color:var(--gray-700); margin-bottom:14px;">Compila Retail + Sconti per calcolare automaticamente Prezzo IVA inclusa e Costo Merce. Lascia vuoto per inserire manualmente.</div>
+        <div class="form-grid" style="grid-template-columns:repeat(3, 1fr);">
+          <div class="form-group"><label>Retail RRP (€)</label><input type="number" id="calc-retail" placeholder="es. 500" step="0.01" min="0"></div>
+          <div class="form-group"><label>Sconto Vendita (%)</label><input type="number" id="calc-sconto-vendita" placeholder="es. 10" step="0.1" min="0" max="100"></div>
+          <div class="form-group"><label>Sconto Costo (%)</label><input type="number" id="calc-sconto-costo" placeholder="es. 50" step="0.1" min="0" max="100"></div>
+        </div>
+        <div id="calc-retail-summary" style="margin-top:12px; padding:10px 14px; background:var(--green-light); border-left:3px solid var(--green-primary); border-radius:6px; font-size:0.85rem; color:var(--green-dark); display:none;"></div>
+      </div>
       <div class="form-grid">
         <div class="form-group"><label>Prezzo IVA inclusa (€)</label><input type="number" id="prezzo" value="100" step="0.01"></div>
         <div class="form-group"><label>Paese / IVA</label><select id="iva-select">
@@ -2905,6 +2915,33 @@ document.addEventListener('DOMContentLoaded', () => {
       window.location.href = '/login';
     });
   }
+  // Scorciatoia Retail nel Calcolatore: monodirezionale (retail+sconti → prezzo+costo)
+  function calcUpdateFromRetail() {
+    try {
+      var retailEl = document.getElementById('calc-retail');
+      var scVendEl = document.getElementById('calc-sconto-vendita');
+      var scCostEl = document.getElementById('calc-sconto-costo');
+      var summary = document.getElementById('calc-retail-summary');
+      if (!retailEl || !scVendEl || !scCostEl || !summary) return;
+      var retail = parseFloat(retailEl.value);
+      if (isNaN(retail) || retail <= 0) { summary.style.display = 'none'; return; }
+      var scVend = parseFloat(scVendEl.value); if (isNaN(scVend)) scVend = 0;
+      var scCost = parseFloat(scCostEl.value); if (isNaN(scCost)) scCost = 0;
+      var prezzo = retail * (1 - scVend / 100);
+      var costo = retail * (1 - scCost / 100);
+      var prezzoEl = document.getElementById('prezzo');
+      var costoEl = document.getElementById('costo');
+      if (prezzoEl) prezzoEl.value = prezzo.toFixed(2);
+      if (costoEl) costoEl.value = costo.toFixed(2);
+      summary.style.display = 'block';
+      summary.innerHTML = 'Vendo a <strong>€' + prezzo.toFixed(2) + '</strong> (-' + scVend.toFixed(1) + '%) · compro a <strong>€' + costo.toFixed(2) + '</strong> (-' + scCost.toFixed(1) + '%)';
+      if (typeof calcola === 'function') calcola();
+    } catch(e) { console.error('calcUpdateFromRetail:', e); }
+  }
+  ['calc-retail', 'calc-sconto-vendita', 'calc-sconto-costo'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('input', calcUpdateFromRetail);
+  });
   setTimeout(() => { calcola(); confronta(); const todayBtn = document.querySelector('[data-analytics-periods] .period-btn[data-period="today"]'); setPeriod('today', todayBtn); }, 300);
 });
 </script>
@@ -3060,7 +3097,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.11', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.11.1', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
