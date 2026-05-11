@@ -1,4 +1,4 @@
-// ERP Marginalità v5.10 - Calcolatore Excel batch + Chat AI assistant
+// ERP Marginalità v5.11 - Excel batch con Retail + Sconto% fornitore + Sconto Max 20%
 
 import * as crypto from 'node:crypto';
 
@@ -1270,7 +1270,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.10</p>
+        <p>Business Intelligence Dashboard · v5.11</p>
       </div>
     </div>
     <div class="header-right">
@@ -1396,11 +1396,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="section-header">
         <div>
           <div class="section-title">📊 Calcolo batch da Excel</div>
-          <div class="section-subtitle">Carica un file Excel/CSV con SKU + Costo + Listino · calcolo margine su tutti i 16 marketplace</div>
+          <div class="section-subtitle">Carica un file Excel/CSV con prodotti · calcolo margine su tutti i 16 marketplace · supporta sconto% fornitore</div>
         </div>
       </div>
       <div class="info-box">
-        <strong>Colonne richieste</strong>: <code>SKU</code>, <code>Costo</code>, <code>Listino</code>. <strong>Opzionali</strong>: <code>Titolo</code>, <code>Stock</code>, <code>IVA</code>. Nomi case-insensitive.
+        <strong>Obbligatorie</strong>: <code>SKU</code>, <code>Retail</code> (o Listino), e <code>Costo</code> O <code>Sconto%</code>. <strong>Opzionali</strong>: <code>Titolo</code>, <code>Stock</code>, <code>Listino</code> (di vendita), <code>IVA</code>.<br>
+        <strong>Esempio</strong>: Retail €500 con Sconto% 50 → Costo €250 calcolato automaticamente. Puoi anche caricare direttamente Retail + Costo.
       </div>
       <div class="filter-bar" style="gap:12px;">
         <label class="apply-btn" style="background:var(--green-primary); cursor:pointer; padding:10px 18px;">
@@ -2313,15 +2314,21 @@ async function handleBatchFile(file) {
     
     const headers = rows[0];
     const skuIdx = batchFindCol(headers, ['sku', 'codice', 'codiceprodotto']);
+    // Retail RRP = prezzo di vendita pieno (può essere il listino se non c'è sconto vendita)
+    const retailIdx = batchFindCol(headers, ['retail', 'rrp', 'retailprice', 'prezzoretail', 'prezzopieno']);
+    // Sconto% fornitore (opzionale)
+    const scontoIdx = batchFindCol(headers, ['sconto', 'sconto%', 'scontofornitore', 'discountfornitore', 'discount%', 'scontoacquisto']);
+    // Costo (opzionale, calcolato da sconto se manca)
     const costoIdx = batchFindCol(headers, ['costo', 'cost', 'costofornitore', 'costoacquisto', 'costopzunit']);
-    const listinoIdx = batchFindCol(headers, ['listino', 'prezzo', 'price', 'prezzolistino', 'rrp', 'retail']);
+    // Listino di vendita (opzionale, default = retail)
+    const listinoIdx = batchFindCol(headers, ['listino', 'prezzovendita', 'prezzo', 'price', 'prezzolistino', 'sellprice']);
     const titoloIdx = batchFindCol(headers, ['titolo', 'title', 'nome', 'description', 'descrizione', 'product']);
     const stockIdx = batchFindCol(headers, ['stock', 'inventario', 'quantity', 'qty', 'disponibilita', 'pezzi']);
     const ivaIdx = batchFindCol(headers, ['iva', 'vat', 'tax']);
     
     if (skuIdx < 0) { status.textContent = '❌ Colonna SKU non trovata'; status.style.color = 'var(--red)'; return; }
-    if (costoIdx < 0) { status.textContent = '❌ Colonna Costo non trovata'; status.style.color = 'var(--red)'; return; }
-    if (listinoIdx < 0) { status.textContent = '❌ Colonna Listino non trovata'; status.style.color = 'var(--red)'; return; }
+    if (retailIdx < 0 && listinoIdx < 0) { status.textContent = '❌ Manca colonna Retail (o Listino)'; status.style.color = 'var(--red)'; return; }
+    if (costoIdx < 0 && scontoIdx < 0) { status.textContent = '❌ Manca colonna Costo (o Sconto% fornitore)'; status.style.color = 'var(--red)'; return; }
     
     const ivaDefault = parseFloat(document.getElementById('batch-iva-default').value) || 22;
     const products = [];
@@ -2330,9 +2337,23 @@ async function handleBatchFile(file) {
       if (!row || row.every(c => c === '' || c === null || c === undefined)) continue;
       const sku = String(row[skuIdx] || '').trim();
       if (!sku) continue;
-      const costo = parseFloat(row[costoIdx]);
-      const listino = parseFloat(row[listinoIdx]);
-      if (isNaN(costo) || isNaN(listino) || costo < 0 || listino <= 0) continue;
+      // Retail (se manca, usa listino)
+      let retail = retailIdx >= 0 ? parseFloat(row[retailIdx]) : NaN;
+      let listino = listinoIdx >= 0 ? parseFloat(row[listinoIdx]) : NaN;
+      // Fallback: se manca uno, usa l'altro
+      if (isNaN(retail) && !isNaN(listino)) retail = listino;
+      if (isNaN(listino) && !isNaN(retail)) listino = retail;
+      if (isNaN(retail) || retail <= 0) continue;
+      // Sconto% e costo
+      const scontoForn = scontoIdx >= 0 ? parseFloat(row[scontoIdx]) : NaN;
+      let costo = costoIdx >= 0 ? parseFloat(row[costoIdx]) : NaN;
+      // Se costo manca ma c'è sconto%, calcola da retail
+      if (isNaN(costo) && !isNaN(scontoForn) && scontoForn >= 0 && scontoForn <= 100) {
+        costo = retail * (1 - scontoForn / 100);
+      }
+      if (isNaN(costo) || costo < 0) continue;
+      // Sconto% effettivo (calcolato dal costo)
+      const scontoEffettivo = retail > 0 ? ((retail - costo) / retail * 100) : 0;
       const titolo = titoloIdx >= 0 ? String(row[titoloIdx] || '').trim() : '';
       const stock = stockIdx >= 0 ? (parseInt(row[stockIdx]) || 0) : null;
       let iva = ivaDefault;
@@ -2340,11 +2361,11 @@ async function handleBatchFile(file) {
         const ivaCol = parseFloat(row[ivaIdx]);
         if (!isNaN(ivaCol) && ivaCol >= 0 && ivaCol <= 30) iva = ivaCol;
       }
-      products.push({ sku, titolo, stock, costo, listino, iva });
+      products.push({ sku, titolo, stock, retail, scontoForn: scontoEffettivo, costo, listino, iva });
     }
     
     if (products.length === 0) {
-      status.textContent = '❌ Nessuna riga valida (controlla che SKU/Costo/Listino siano compilati)';
+      status.textContent = '❌ Nessuna riga valida (controlla SKU + Retail + Costo/Sconto%)';
       status.style.color = 'var(--red)';
       return;
     }
@@ -2352,7 +2373,7 @@ async function handleBatchFile(file) {
     // Calcola margini per ogni prodotto su tutti i MP
     products.forEach(p => {
       p.calcoli = Object.entries(MARKETPLACES).map(([key, mp]) => {
-        const r = batchCalcMargine(p.listino, p.costo, key, p.iva);
+        const r = batchCalcMargine(p.listino, p.costo, key, p.iva, p.retail);
         return { mp_key: key, mp_nome: mp.nome, ...r };
       }).sort((a, b) => b.margine - a.margine);
     });
@@ -2368,7 +2389,7 @@ async function handleBatchFile(file) {
   }
 }
 
-function batchCalcMargine(listino, costo, mpKey, iva) {
+function batchCalcMargine(listino, costo, mpKey, iva, retail) {
   const mp = MARKETPLACES[mpKey];
   if (!mp) return null;
   const nettoIva = listino / (1 + iva / 100);
@@ -2389,11 +2410,31 @@ function batchCalcMargine(listino, costo, mpKey, iva) {
     if (coef <= 0) return null;
     return (costo + feeFissa) / coef;
   }
+  // Margine se vendo a retail pieno
+  let margineRetail = null, margineRetailPerc = null;
+  if (retail && retail > 0 && retail !== listino) {
+    const r = batchCalcMargine(retail, costo, mpKey, iva, null);
+    margineRetail = r ? r.margine : null;
+    margineRetailPerc = r ? r.marginePerc : null;
+  }
+  // Sconto massimo accettabile dal retail per fare 20% margine
+  // Se per fare 20% serve prezzo X, allora sconto max = (retail - X) / retail * 100
+  let scontoMax20 = null;
+  if (retail && retail > 0) {
+    const p20 = prezzoMin(20);
+    if (p20 !== null && p20 > 0) {
+      scontoMax20 = ((retail - p20) / retail) * 100;
+      // Se negativo significa che NON puoi scontare (devi vendere SOPRA retail)
+      if (scontoMax20 < 0) scontoMax20 = null; // impossibile
+    }
+  }
   return {
     margine, marginePerc, dopoSconto, feesMp, feeShop,
     breakEven: prezzoMin(0),
     prezzo20: prezzoMin(20),
-    prezzo30: prezzoMin(30)
+    prezzo30: prezzoMin(30),
+    margineRetail, margineRetailPerc,
+    scontoMax20
   };
 }
 
@@ -2450,6 +2491,8 @@ function renderBatch() {
         '<th>SKU</th>' +
         '<th>Titolo</th>' +
         (batchProducts.some(p => p.stock !== null) ? '<th class="num">Stock</th>' : '') +
+        '<th class="num">Retail</th>' +
+        '<th class="num">Sc.%</th>' +
         '<th class="num">Costo</th>' +
         '<th class="num">Listino</th>' +
         '<th class="num">IVA</th>' +
@@ -2465,21 +2508,27 @@ function renderBatch() {
           return '<span style="display:inline-block; background:var(--gray-100); padding:2px 8px; border-radius:6px; font-size:0.75rem; margin:1px 2px;"><strong>' + c.mp_nome + '</strong> · <span class="' + cls + '">' + segno + '€' + c.margine.toFixed(0) + '</span> <span style="color:var(--gray-700);">(' + c.marginePerc.toFixed(1) + '%)</span></span>';
         }).join(' ');
         const isExpanded = batchExpanded === p.sku;
+        const sameRetailListino = Math.abs(p.retail - p.listino) < 0.5;
         const mainRow = '<tr style="cursor:pointer;" data-batch-sku="' + p.sku + '">' +
           '<td><strong style="font-family:monospace; font-size:0.8rem;">' + p.sku + '</strong></td>' +
           '<td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + (p.titolo || '—') + '</td>' +
           (batchProducts.some(pp => pp.stock !== null) ? '<td class="num">' + (p.stock !== null ? p.stock : '—') + '</td>' : '') +
+          '<td class="num">€' + p.retail.toFixed(2) + '</td>' +
+          '<td class="num" style="color:var(--green-dark); font-weight:600;">-' + p.scontoForn.toFixed(0) + '%</td>' +
           '<td class="num">€' + p.costo.toFixed(2) + '</td>' +
-          '<td class="num">€' + p.listino.toFixed(2) + '</td>' +
+          '<td class="num">' + (sameRetailListino ? '<span style="color:var(--gray-500);">=retail</span>' : '€' + p.listino.toFixed(2)) + '</td>' +
           '<td class="num">' + p.iva + '%</td>' +
           '<td>' + top3Html + '</td>' +
           '<td class="num"><span style="color:var(--gray-500); font-size:0.75rem;">' + (isExpanded ? '▼' : '▶') + '</span></td>' +
         '</tr>';
         let detailRow = '';
         if (isExpanded) {
-          const detTable = '<tr><td colspan="' + (batchProducts.some(pp => pp.stock !== null) ? '8' : '7') + '" style="padding:0; background:var(--cream);">' +
-            '<div style="padding:14px;"><table class="detail-table" style="font-size:0.78rem;">' +
-              '<thead><tr><th>Marketplace</th><th class="num">Prezzo netto MP</th><th class="num">Fees MP</th><th class="num">Margine €</th><th class="num">Margine %</th><th class="num">Break-even</th><th class="num">Per 20%</th><th class="num">Per 30%</th></tr></thead>' +
+          const colspan = batchProducts.some(pp => pp.stock !== null) ? '10' : '9';
+          const detTable = '<tr><td colspan="' + colspan + '" style="padding:0; background:var(--cream);">' +
+            '<div style="padding:14px;">' +
+            '<div style="margin-bottom:8px; font-size:0.78rem; color:var(--gray-700);"><strong>Retail di riferimento: €' + p.retail.toFixed(2) + '</strong> · sconto fornitore -' + p.scontoForn.toFixed(1) + '% (costo €' + p.costo.toFixed(2) + ')</div>' +
+            '<table class="detail-table" style="font-size:0.78rem;">' +
+              '<thead><tr><th>Marketplace</th><th class="num">Prezzo netto MP</th><th class="num">Fees MP</th><th class="num">Margine €</th><th class="num">Margine %</th><th class="num">Break-even</th><th class="num">Per 20%</th><th class="num">Per 30%</th><th class="num" title="Sconto massimo che puoi fare dal retail e ancora avere 20% margine">Sc.Max 20%</th></tr></thead>' +
               '<tbody>' +
               p.calcoli.map((c, ci) => {
                 const cls = c.margine >= 0 ? 'margin-pos' : 'margin-neg';
@@ -2487,6 +2536,12 @@ function renderBatch() {
                 const bg = isTop ? 'background:rgba(0,128,96,0.06);' : '';
                 const segno = c.margine >= 0 ? '+' : '';
                 const medal = isTop ? ' 🏆' : '';
+                // Sconto max formattato
+                let scMaxFmt = '—';
+                if (c.scontoMax20 !== null && c.scontoMax20 !== undefined) {
+                  if (c.scontoMax20 < 0) scMaxFmt = '<span style="color:var(--red);" title="Impossibile fare 20%: devi vendere sopra retail">impossibile</span>';
+                  else scMaxFmt = '<span style="color:var(--green-dark); font-weight:600;">-' + c.scontoMax20.toFixed(1) + '%</span>';
+                }
                 return '<tr style="' + bg + '">' +
                   '<td><strong>' + c.mp_nome + medal + '</strong></td>' +
                   '<td class="num">€' + c.dopoSconto.toFixed(2) + '</td>' +
@@ -2496,6 +2551,7 @@ function renderBatch() {
                   '<td class="num" style="color:var(--gray-700);">' + (c.breakEven ? '€' + c.breakEven.toFixed(0) : '—') + '</td>' +
                   '<td class="num" style="color:var(--gray-700);">' + (c.prezzo20 ? '€' + c.prezzo20.toFixed(0) : '—') + '</td>' +
                   '<td class="num" style="color:var(--gray-700);">' + (c.prezzo30 ? '€' + c.prezzo30.toFixed(0) : '—') + '</td>' +
+                  '<td class="num">' + scMaxFmt + '</td>' +
                 '</tr>';
               }).join('') +
               '</tbody></table></div></td></tr>';
@@ -2532,15 +2588,17 @@ function exportBatchExcel() {
     
     // Foglio 1: riepilogo per prodotto (top MP per ognuno)
     const summaryRows = [
-      ['SKU', 'Titolo', 'Stock', 'Costo', 'Listino', 'IVA %', 'Top MP', 'Margine €', 'Margine %', 'Break-even']
+      ['SKU', 'Titolo', 'Stock', 'Retail RRP', 'Sconto% fornitore', 'Costo', 'Listino vendita', 'IVA %', 'Top MP', 'Margine €', 'Margine %', 'Break-even', 'Sconto Max -20% margine']
     ];
     batchProducts.forEach(p => {
       const top = p.calcoli[0];
       summaryRows.push([
         p.sku, p.titolo || '', p.stock !== null ? p.stock : '',
+        p.retail, parseFloat(p.scontoForn.toFixed(2)),
         p.costo, p.listino, p.iva,
         top.mp_nome, parseFloat(top.margine.toFixed(2)), parseFloat(top.marginePerc.toFixed(2)),
-        top.breakEven ? parseFloat(top.breakEven.toFixed(2)) : ''
+        top.breakEven ? parseFloat(top.breakEven.toFixed(2)) : '',
+        top.scontoMax20 !== null && top.scontoMax20 !== undefined && top.scontoMax20 >= 0 ? parseFloat(top.scontoMax20.toFixed(2)) : 'N/D'
       ]);
     });
     const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
@@ -2548,12 +2606,13 @@ function exportBatchExcel() {
     
     // Foglio 2: Dettaglio (riga per ogni MP × prodotto, vista lunga)
     const detRows = [
-      ['SKU', 'Titolo', 'Stock', 'Costo', 'Listino', 'IVA %', 'Marketplace', 'Prezzo netto MP', 'Fees MP', 'Margine €', 'Margine %', 'Break-even', 'Prezzo per 20%', 'Prezzo per 30%']
+      ['SKU', 'Titolo', 'Stock', 'Retail RRP', 'Sconto% fornitore', 'Costo', 'Listino vendita', 'IVA %', 'Marketplace', 'Prezzo netto MP', 'Fees MP', 'Margine €', 'Margine %', 'Break-even', 'Prezzo per 20%', 'Prezzo per 30%', 'Sconto Max -20% margine']
     ];
     batchProducts.forEach(p => {
       p.calcoli.forEach(c => {
         detRows.push([
           p.sku, p.titolo || '', p.stock !== null ? p.stock : '',
+          p.retail, parseFloat(p.scontoForn.toFixed(2)),
           p.costo, p.listino, p.iva,
           c.mp_nome,
           parseFloat(c.dopoSconto.toFixed(2)),
@@ -2562,7 +2621,8 @@ function exportBatchExcel() {
           parseFloat(c.marginePerc.toFixed(2)),
           c.breakEven ? parseFloat(c.breakEven.toFixed(2)) : '',
           c.prezzo20 ? parseFloat(c.prezzo20.toFixed(2)) : '',
-          c.prezzo30 ? parseFloat(c.prezzo30.toFixed(2)) : ''
+          c.prezzo30 ? parseFloat(c.prezzo30.toFixed(2)) : '',
+          c.scontoMax20 !== null && c.scontoMax20 !== undefined && c.scontoMax20 >= 0 ? parseFloat(c.scontoMax20.toFixed(2)) : 'N/D'
         ]);
       });
     });
@@ -2606,16 +2666,53 @@ function exportBatchExcel() {
 function downloadBatchTemplate() {
   loadSheetJS().then(() => {
     const data = [
-      ['SKU', 'Titolo', 'Stock', 'Costo', 'Listino', 'IVA'],
-      ['ESEMPIO-001', 'Borsa esempio', 5, 200, 590, 22],
-      ['ESEMPIO-002', 'Sneakers esempio', 3, 150, 380, 22],
-      ['ESEMPIO-003', 'T-shirt esempio', 12, 35, 95, 22]
+      ['SKU', 'Titolo', 'Stock', 'Retail', 'Sconto%', 'Costo', 'Listino', 'IVA'],
+      ['ESEMPIO-001', 'Borsa esempio (sconto 50%)', 5, 590, 50, '', 590, 22],
+      ['ESEMPIO-002', 'Sneakers (costo diretto)', 3, 380, '', 152, 380, 22],
+      ['ESEMPIO-003', 'Borsa scontata in vendita', 2, 1200, 55, '', 1080, 22],
+      ['ESEMPIO-004', 'Solo retail e sconto', 1, 800, 60, '', '', 22]
     ];
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(data);
     // Set column widths per leggibilità
-    ws['!cols'] = [{wch:18}, {wch:30}, {wch:8}, {wch:10}, {wch:10}, {wch:6}];
+    ws['!cols'] = [{wch:18}, {wch:32}, {wch:8}, {wch:10}, {wch:10}, {wch:10}, {wch:12}, {wch:6}];
     XLSX.utils.book_append_sheet(wb, ws, 'Prodotti');
+    
+    // Aggiungo un foglio "Istruzioni" per chiarezza
+    const istr = [
+      ['ISTRUZIONI USO TEMPLATE'],
+      [''],
+      ['COLONNE OBBLIGATORIE:'],
+      ['• SKU - codice prodotto'],
+      ['• Retail (o Listino) - prezzo retail pieno RRP'],
+      ['• Costo OPPURE Sconto% - almeno una delle due'],
+      [''],
+      ['COLONNE OPZIONALI:'],
+      ['• Titolo - nome prodotto'],
+      ['• Stock - pezzi disponibili'],
+      ['• Listino - prezzo di vendita effettivo (default = Retail)'],
+      ['• IVA - aliquota IVA (default = 22%)'],
+      [''],
+      ['LOGICA CALCOLO COSTO:'],
+      ['• Se compili "Sconto%", il costo è calcolato: Retail × (1 - Sconto%/100)'],
+      ['• Se compili "Costo", uso quel valore direttamente'],
+      ['• Se compili entrambi, prevale "Costo"'],
+      [''],
+      ['ESEMPI:'],
+      ['• Retail 500€ + Sconto% 50 = Costo 250€'],
+      ['• Retail 380€ + Costo 152€ = Sconto effettivo 60%'],
+      [''],
+      ['NOMI COLONNE ACCETTATI (case-insensitive):'],
+      ['• SKU: sku, codice, codice prodotto'],
+      ['• Retail: retail, rrp, retail price, prezzo retail, prezzo pieno'],
+      ['• Sconto%: sconto, sconto%, sconto fornitore, discount%'],
+      ['• Costo: costo, cost, costo fornitore, costo acquisto'],
+      ['• Listino: listino, prezzo vendita, prezzo, price, sell price']
+    ];
+    const wsIstr = XLSX.utils.aoa_to_sheet(istr);
+    wsIstr['!cols'] = [{wch:70}];
+    XLSX.utils.book_append_sheet(wb, wsIstr, 'Istruzioni');
+    
     XLSX.writeFile(wb, 'tluxy_template_calcolo_batch.xlsx');
   }).catch(e => alert('Errore: ' + e.message));
 }
@@ -2729,7 +2826,7 @@ document.addEventListener('DOMContentLoaded', () => {
       batchProducts.forEach(p => {
         p.iva = newIva;
         p.calcoli = Object.entries(MARKETPLACES).map(([key, mp]) => {
-          const r = batchCalcMargine(p.listino, p.costo, key, p.iva);
+          const r = batchCalcMargine(p.listino, p.costo, key, p.iva, p.retail);
           return { mp_key: key, mp_nome: mp.nome, ...r };
         }).sort((a, b) => b.margine - a.margine);
       });
@@ -2963,7 +3060,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.10', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['💬 Chat AI assistant (Claude Haiku 4.5)', '📊 Calcolatore Excel batch (carica/scarica xlsx)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.11', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
