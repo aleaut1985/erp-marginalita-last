@@ -1,4 +1,4 @@
-// ERP Marginalità v5.11 - Excel batch con Retail + Sconto% fornitore + Sconto Max 20%
+// ERP Marginalità v5.12 - Calcolatore singolo: Retail + 2 sconti% con sync bidirezionale
 
 import * as crypto from 'node:crypto';
 
@@ -6,7 +6,7 @@ const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'autore-luxit.myshopify.com';
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
 const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || '';
 
-// ============ AUTH CONFIG (MAGIC LINK) ============
+// ============ CONFIGURAZIONE AUTORIZZAZIONE (LINK MAGICO) ============
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const MAIL_FROM = process.env.MAIL_FROM || 'T. Luxy ERP <onboarding@resend.dev>';
 const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
@@ -15,106 +15,106 @@ const DASHBOARD_URL = process.env.DASHBOARD_URL || 'https://erp-marginalita-last
 const AUTH_COOKIE_NAME = 'tluxy_erp_session';
 const AUTH_SESSION_DAYS = 7;
 const MAGIC_LINK_MINUTES = 15;
-const MAGIC_LINK_RATE_LIMIT = 3; // max 3 magic link/ora per email
+const MAGIC_LINK_RATE_LIMIT = 3; // massimo 3 magic link/ora per email
 const AUTH_ENABLED = !!(RESEND_API_KEY && ALLOWED_EMAILS.length > 0);
 
-function hmacSign(payload) {
+funzione hmacSign(payload) {
   return crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('hex');
 }
 
-function createSessionToken(email) {
+funzione createSessionToken(email) {
   const expiresAt = Date.now() + (AUTH_SESSION_DAYS * 24 * 60 * 60 * 1000);
   // email base64 per evitare caratteri problematici nel cookie
   const emailB64 = Buffer.from(email).toString('base64url');
   const payload = `v1.${expiresAt}.${emailB64}`;
   const sig = hmacSign(payload);
-  return `${payload}.${sig}`;
+  restituisci `${payload}.${sig}`;
 }
 
-function verifySessionToken(token) {
-  if (!token || typeof token !== 'string') return null;
+funzione verifySessionToken(token) {
+  se (!token || typeof token !== 'string') restituisci null;
   const parts = token.split('.');
-  if (parts.length !== 4 || parts[0] !== 'v1') return null;
+  se (parts.length !== 4 || parts[0] !== 'v1') restituisci null;
   const expiresAt = parseInt(parts[1], 10);
-  if (isNaN(expiresAt) || expiresAt < Date.now()) return null;
+  se (isNaN(expiresAt) || expiresAt < Date.now()) restituisce null;
   const expectedSig = hmacSign(`v1.${parts[1]}.${parts[2]}`);
-  try {
-    if (!crypto.timingSafeEqual(Buffer.from(expectedSig), Buffer.from(parts[3]))) return null;
+  Tentativo {
+    se (!crypto.timingSafeEqual(Buffer.from(expectedSig), Buffer.from(parts[3]))) restituisce null;
     const email = Buffer.from(parts[2], 'base64url').toString('utf8');
-    return { email, expiresAt };
+    restituisci { email, expiresAt };
   } catch (e) { return null; }
 }
 
-function parseCookies(cookieHeader) {
+funzione parseCookies(cookieHeader) {
   const cookies = {};
-  if (!cookieHeader) return cookies;
+  se (!cookieHeader) restituisci i cookie;
   cookieHeader.split(';').forEach(part => {
     const [k, ...v] = part.trim().split('=');
-    if (k) cookies[k] = v.join('=');
+    se (k) cookies[k] = v.join('=');
   });
-  return cookies;
+  restituire i cookie;
 }
 
-function getAuthenticatedUser(req) {
-  if (!AUTH_ENABLED) return { email: 'auth-disabled' };
+funzione getAuthenticatedUser(req) {
+  se (!AUTH_ENABLED) restituisci { email: 'autenticazione disabilitata' };
   const cookies = parseCookies(req.headers.cookie || '');
-  return verifySessionToken(cookies[AUTH_COOKIE_NAME]);
+  restituisci verifySessionToken(cookies[AUTH_COOKIE_NAME]);
 }
 
-function setAuthCookie(res, email) {
+funzione setAuthCookie(res, email) {
   const token = createSessionToken(email);
-  const maxAge = AUTH_SESSION_DAYS * 24 * 60 * 60;
+  const maxAge = GIORNI_SESSIONE_AUTORIZZAZIONE * 24 * 60 * 60;
   res.setHeader('Set-Cookie', `${AUTH_COOKIE_NAME}=${token}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`);
 }
 
-function clearAuthCookie(res) {
+funzione clearAuthCookie(res) {
   res.setHeader('Set-Cookie', `${AUTH_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
 }
 
-// Genera token sicuro per magic link (32 byte random = ~43 char url-safe)
-function generateMagicLinkToken() {
-  return crypto.randomBytes(32).toString('base64url');
+// Genera token sicuro per magic link (32 byte casuali = ~43 caratteri url-safe)
+funzione generateMagicLinkToken() {
+  restituisci crypto.randomBytes(32).toString('base64url');
 }
 
-// Invia email via Resend API
-async function sendMagicLinkEmail(email, magicLink) {
-  if (!RESEND_API_KEY) throw new Error('RESEND_API_KEY mancante');
+// Invia email tramite API di reinvio
+funzione asincrona sendMagicLinkEmail(email, magicLink) {
+  se (!RESEND_API_KEY) genera un nuovo errore ('RESEND_API_KEY mancante');
   const html = `<!DOCTYPE html><html><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:560px; margin:40px auto; padding:40px 32px; background:#F5F1E8; border-radius:16px; color:#1A1A1A;">
   <div style="background:#FFFFFF; padding:40px 36px; border-radius:14px; box-shadow:0 8px 24px rgba(0,0,0,0.06);">
     <div style="font-size:1.35rem; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:6px;">T. <span style="color:#C9A961;">Luxy</span> · ERP</div>
-    <div style="font-size:0.72rem; color:#8E8E8E; text-transform:uppercase; letter-spacing:0.15em; font-weight:600; margin-bottom:32px;">Marginality Dashboard</div>
+    <div style="font-size:0.72rem; color:#8E8E8E; text-transform:uppercase; letter-spacing:0.15em; font-weight:600; margin-bottom:32px;">Dashboard di marginalità</div>
     <h1 style="font-size:1.1rem; margin:0 0 18px 0;">🔐 Il tuo link di accesso</h1>
-    <p style="font-size:0.92rem; line-height:1.6; color:#444; margin-bottom:28px;">Clicca il bottone qui sotto per accedere alla dashboard. Il link è valido per <strong>${MAGIC_LINK_MINUTES} minuti</strong> e può essere usato una sola volta.</p>
+    <p style="font-size:0.92rem; line-height:1.6; color:#444; margin-bottom:28px;">Clicca il bottone qui sotto per accedere alla dashboard. Il collegamento è valido per <strong>${MAGIC_LINK_MINUTES} minuti</strong> e può essere utilizzato una sola volta.</p>
     <div style="text-align:center; margin:32px 0;">
       <a href="${magicLink}" style="display:inline-block; background:#1A1A1A; color:#FFFFFF; text-decoration:none; padding:14px 32px; border-radius:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; font-size:0.88rem;">Entra nella Dashboard</a>
     </div>
-    <p style="font-size:0.78rem; color:#8E8E8E; line-height:1.5; margin-top:32px; padding-top:20px; border-top:1px solid #F0EBDF;">Se non hai richiesto tu questo link, ignora semplicemente questa email — nessun accesso sarà concesso.<br><br>Link diretto (se il bottone non funziona):<br><span style="word-break:break-all; color:#666; font-size:0.72rem;">${magicLink}</span></p>
+    <p style="font-size:0.78rem; color:#8E8E8E; line-height:1.5; margin-top:32px; padding-top:20px; border-top:1px solid #F0EBDF;">Se non hai richiesto questo link, ignora semplicemente questa email — nessun accesso sarà concesso.<br><br>Link diretto (se il bottone non funziona):<br><span style="word-break:break-all; colore:#666; dimensione carattere:0,72rem;">${magicLink}</span></p>
   </div>
   <div style="text-align:center; font-size:0.7rem; color:#8E8E8E; margin-top:20px; letter-spacing:0.04em;">T. Luxy ERP · Business Intelligence</div>
   </body></html>`;
-  const text = `T. LUXY ERP - Accesso Dashboard\n\nClicca il link per accedere (valido ${MAGIC_LINK_MINUTES} minuti):\n${magicLink}\n\nSe non hai richiesto tu questo link, ignora questa email.`;
+  const testo = `T. LUXY ERP - Accesso Dashboard\n\nClicca il link per accedere (valido ${MAGIC_LINK_MINUTES} minuti):\n${magicLink}\n\nSe non hai richiesto tu questo link, ignora questa email.`;
   const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: MAIL_FROM,
-      to: [email],
-      subject: 'Il tuo link di accesso T. Luxy ERP',
+    metodo: 'POST',
+    intestazioni: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    corpo: JSON.stringify({
+      da: EMAIL_FROM,
+      a: [email],
+      oggetto: 'Il tuo link di accesso T. Luxy ERP',
       html,
-      text
+      testo
     })
   });
-  if (!res.ok) {
+  se (!res.ok) {
     const errorBody = await res.text();
-    throw new Error(`Resend API error ${res.status}: ${errorBody}`);
+    throw new Error(`Errore API di reinvio ${res.status}: ${errorBody}`);
   }
-  return await res.json();
+  restituisci await res.json();
 }
 
-// Pagine HTML di login/conferma/errore
-function loginHTMLPage(message, isError) {
-  const msgBlock = message ? `<div class="${isError ? 'error' : 'info'} show">${message}</div>` : '';
-  return `<!DOCTYPE html>
+// Pagina HTML di login/conferma/errore
+funzione loginHTMLPage(messaggio, isError) {
+  const msgBlock = messaggio ? `<div class="${isError ? 'errore' : 'info'} mostra">${messaggio}</div>` : '';
+  restituisci `<!DOCTYPE html>
 <html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>T. Luxy ERP · Accesso</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -129,7 +129,7 @@ function loginHTMLPage(message, isError) {
   .field label { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: #555; margin-bottom: 8px; font-weight: 700; }
   .field input { width: 100%; padding: 14px 16px; border: 1.5px solid #E5E0D3; border-radius: 10px; font-size: 1rem; font-family: inherit; background: #FAFAF7; transition: all 0.2s; }
   .field input:focus { outline: none; border-color: #C9A961; background: #FFFFFF; box-shadow: 0 0 0 3px rgba(201,169,97,0.1); }
-  .btn { width: 100%; padding: 14px 20px; background: #1A1A1A; color: #FFFFFF; border: none; border-radius: 10px; font-size: 0.9rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; transition: all 0.2s; margin-top: 8px; font-family: inherit; }
+  .btn { larghezza: 100%; spaziatura interna: 14px 20px; sfondo: #1A1A1A; colore: #FFFFFF; bordo: nessuno; raggio del bordo: 10px; dimensione del carattere: 0,9rem; peso del carattere: 700; trasformazione del testo: maiuscolo; spaziatura tra le lettere: 0,08em; cursore: puntatore; transizione: tutte 0,2s; margine superiore: 8px; famiglia di caratteri: ereditarietà; }
   .btn:hover { background: #333; transform: translateY(-1px); }
   .btn:disabled { background: #BBB; cursor: not-allowed; transform: none; }
   .error { background: #FCEEEE; color: #BF4747; padding: 12px 16px; border-radius: 8px; font-size: 0.85rem; margin-bottom: 20px; border-left: 3px solid #BF4747; display: none; }
@@ -137,11 +137,11 @@ function loginHTMLPage(message, isError) {
   .error.show, .info.show { display: block; }
   .footer { margin-top: 28px; padding-top: 20px; border-top: 1px solid #F0EBDF; font-size: 0.72rem; color: #8E8E8E; text-align: center; letter-spacing: 0.04em; }
 </style></head>
-<body>
+<corpo>
   <div class="card">
     <div class="logo">T. <span class="logo-accent">Luxy</span> · ERP</div>
-    <div class="subtitle">Marginality Dashboard</div>
-    <h1>🔐 Accesso riservato</h1>
+    <div class="subtitle">Dashboard della marginalità</div>
+    <h1>🔐Accesso riservato</h1>
     <p class="intro">Inserisci la tua email autorizzata. Riceverai un link sicuro per entrare. Valido ${MAGIC_LINK_MINUTES} minuti.</p>
     ${msgBlock}
     <form id="loginForm" action="/api/request-magic-link" method="POST">
@@ -149,7 +149,7 @@ function loginHTMLPage(message, isError) {
         <label for="email">Email</label>
         <input type="email" id="email" name="email" autocomplete="email" autofocus required placeholder="nome@azienda.com">
       </div>
-      <button type="submit" class="btn" id="submitBtn">Invia magic link</button>
+      <button type="submit" class="btn" id="submitBtn">Invia link magico</button>
     </form>
     <div class="footer">Business Intelligence · Autenticazione protetta</div>
   </div>
@@ -158,14 +158,14 @@ document.getElementById('loginForm').addEventListener('submit', async e => {
   e.preventDefault();
   const email = document.getElementById('email').value.trim();
   const btn = document.getElementById('submitBtn');
-  btn.disabled = true; btn.textContent = 'Invio in corso...';
-  try {
+  btn.disabled = vero; btn.textContent = 'Invio in corso...';
+  Tentativo {
     const res = await fetch('/api/request-magic-link', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email}) });
     const data = await res.json();
-    // Sempre successo percepito (anti-enumeration): mostriamo lo stesso messaggio
+    // Sempre successo percepito (anti-enumerazione): mostriamo lo stesso messaggio
     window.location.href = '/login?sent=1';
   } catch(e) {
-    btn.disabled = false; btn.textContent = 'Invia magic link';
+    btn.disabled = false; btn.textContent = 'Tramite link magico';
     alert('Errore di rete, riprova');
   }
 });
@@ -173,31 +173,31 @@ document.getElementById('loginForm').addEventListener('submit', async e => {
 </body></html>`;
 }
 
-// ============ KV ENV DETECTION ============
-// Vercel può creare env vars con nomi diversi a seconda della versione integrazione:
+// ============ RILEVAMENTO AMBIENTE KV ============
+// Vercel può creare env vars con nomi diversi alla seconda versione integrazione:
 // - KV_REST_API_URL + KV_REST_API_TOKEN (vecchio Vercel KV)
 // - UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN (Upstash diretto)
 // - KV_REDIS_URL (nuovo Upstash marketplace — formato rediss://default:TOKEN@HOST:PORT)
 // Questo codice prova tutti e 3 i formati automaticamente.
-function detectKvCredentials() {
-  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
-    return { url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN, source: 'kv_rest' };
+funzione detectKvCredentials() {
+  se (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+    restituisci { url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN, source: 'kv_rest' };
   }
-  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
-    return { url: process.env.UPSTASH_REDIS_REST_URL, token: process.env.UPSTASH_REDIS_REST_TOKEN, source: 'upstash_rest' };
+  se (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+    restituisci { url: process.env.UPSTASH_REDIS_REST_URL, token: process.env.UPSTASH_REDIS_REST_TOKEN, source: 'upstash_rest' };
   }
   const redisUrl = process.env.KV_REDIS_URL || process.env.REDIS_URL;
-  if (redisUrl) {
-    try {
-      const u = new URL(redisUrl);
+  se (redisUrl) {
+    Tentativo {
+      const u = nuovo URL(redisUrl);
       const token = u.password || u.username;
       const host = u.hostname;
-      if (host && token) {
-        return { url: `https://${host}`, token, source: 'parsed_from_redis_url' };
+      se (host && token) {
+        restituisci { url: `https://${host}`, token, source: 'parsed_from_redis_url' };
       }
     } catch (e) {}
   }
-  return null;
+  restituisci null;
 }
 const KV_CREDENTIALS = detectKvCredentials();
 const KV_REST_API_URL = KV_CREDENTIALS ? KV_CREDENTIALS.url : '';
@@ -205,337 +205,337 @@ const KV_REST_API_TOKEN = KV_CREDENTIALS ? KV_CREDENTIALS.token : '';
 const KV_SOURCE = KV_CREDENTIALS ? KV_CREDENTIALS.source : null;
 const KV_ENABLED = !!(KV_REST_API_URL && KV_REST_API_TOKEN);
 
-const SHOPIFY_FEE_PERCENT = 0.0015;
+const SHOPIFY_FEE_PERCENT = 0,0015;
 const SHOPIFY_FEE_FIXED = 0;
 
-// ============ KV STORAGE (Upstash Redis via Vercel KV) ============
+// ============ ARCHIVIAZIONE KV (Upstash Redis tramite Vercel KV) ============
 // Cache persistente dei costi: sopravvive all'archiviazione dei prodotti su Shopify.
-async function kvGet(key) {
-  if (!KV_ENABLED) return null;
-  try {
+funzione asincrona kvGet(chiave) {
+  se (!KV_ENABLED) restituisci null;
+  Tentativo {
     const res = await fetch(`${KV_REST_API_URL}/get/${encodeURIComponent(key)}`, {
-      headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` }
+      intestazioni: { 'Autorizzazione': `Portatore ${KV_REST_API_TOKEN}` }
     });
-    if (!res.ok) return null;
+    se (!res.ok) restituisci null;
     const data = await res.json();
-    return data.result; // string or null
+    restituisci i dati.risultato; // stringa o null
   } catch (e) { return null; }
 }
-async function kvSet(key, value) {
-  if (!KV_ENABLED) return false;
-  try {
+funzione asincrona kvSet(chiave, valore) {
+  se (!KV_ENABLED) restituisci falso;
+  Tentativo {
     const res = await fetch(`${KV_REST_API_URL}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}`, {
-      headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` }
+      intestazioni: { 'Autorizzazione': `Portatore ${KV_REST_API_TOKEN}` }
     });
-    return res.ok;
+    restituisci res.ok;
   } catch (e) { return false; }
 }
-// kvSetEx: set con TTL (seconds)
-async function kvSetEx(key, ttlSec, value) {
-  if (!KV_ENABLED) return false;
-  try {
-    // Upstash Redis REST: SET key value EX ttl → /set/{key}/{value}?EX={ttl}
+// kvSetEx: imposta con TTL (secondi)
+funzione asincrona kvSetEx(chiave, ttlSec, valore) {
+  se (!KV_ENABLED) restituisci falso;
+  Tentativo {
+    // Upstash Redis REST: SET chiave valore EX ttl → /set/{chiave}/{valore}?EX={ttl}
     const url = `${KV_REST_API_URL}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}?EX=${ttlSec}`;
     const res = await fetch(url, { headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` } });
-    return res.ok;
+    restituisci res.ok;
   } catch (e) { return false; }
 }
 // kvDel: elimina chiave
-async function kvDel(key) {
-  if (!KV_ENABLED) return false;
-  try {
+funzione asincrona kvDel(chiave) {
+  se (!KV_ENABLED) restituisci falso;
+  Tentativo {
     const res = await fetch(`${KV_REST_API_URL}/del/${encodeURIComponent(key)}`, {
-      headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` }
+      intestazioni: { 'Autorizzazione': `Portatore ${KV_REST_API_TOKEN}` }
     });
-    return res.ok;
+    restituisci res.ok;
   } catch (e) { return false; }
 }
-async function kvMGet(keys) {
-  if (!KV_ENABLED || keys.length === 0) return {};
-  try {
-    // MGET accetta array di keys
+funzione asincrona kvMGet(chiavi) {
+  se (!KV_ENABLED || keys.length === 0) restituisci {};
+  Tentativo {
+    // MGET accetta array di chiavi
     const url = `${KV_REST_API_URL}/mget/${keys.map(k => encodeURIComponent(k)).join('/')}`;
     const res = await fetch(url, { headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` } });
-    if (!res.ok) return {};
+    se (!res.ok) restituisci {};
     const data = await res.json();
-    const results = {};
+    const risultati = {};
     (data.result || []).forEach((val, idx) => { if (val !== null) results[keys[idx]] = val; });
-    return results;
+    risultati di ritorno;
   } catch (e) { return {}; }
 }
-async function kvMSet(pairs) {
-  if (!KV_ENABLED || Object.keys(pairs).length === 0) return false;
-  try {
+funzione asincrona kvMSet(pairs) {
+  se (!KV_ENABLED || Object.keys(pairs).length === 0) restituisci false;
+  Tentativo {
     // Facciamo più SET in parallelo (Upstash non ha MSET in REST)
-    const concurrency = 5;
-    const entries = Object.entries(pairs);
-    for (let i = 0; i < entries.length; i += concurrency) {
+    const concorrenza = 5;
+    const entries = Object.entries(coppie);
+    per (sia i = 0; i < entries.length; i += concurrency) {
       const batch = entries.slice(i, i + concurrency);
       await Promise.all(batch.map(([k, v]) => kvSet(k, v)));
     }
-    return true;
+    restituisci vero;
   } catch (e) { return false; }
 }
 
 // Riconosce prodotti DUO dallo SKU (DUO- all'inizio)
-function isDuoSku(sku) {
+funzione isDuoSku(sku) {
   return !!(sku && typeof sku === 'string' && /^DUO-/i.test(sku.trim()));
 }
 
-// ============ CURRENCY HELPERS ============
+// ============ AIUTI PER LA VALUTA ============
 // Tassi di cambio fallback (aggiornare periodicamente). Usati SOLO se Shopify non fornisce shop_money
-// (caso estremamente raro: ordini molto vecchi pre-multi-currency).
+// (caso estremamente raro: ordini molto vecchi pre-multi-valuta).
 const SHOP_CURRENCY = 'EUR';
 const FALLBACK_RATES_TO_EUR = {
-  EUR: 1.0,
-  USD: 0.92,
-  GBP: 1.17,
-  SEK: 0.087,
-  NOK: 0.086,
-  DKK: 0.134,
+  EUR: 1,0,
+  USD: 0,92,
+  GBP: 1,17,
+  SEK: 0,087,
+  NOK: 0,086,
+  DKK: 0,134,
   CHF: 1.05,
-  PLN: 0.23,
-  CZK: 0.041,
-  HUF: 0.0026,
-  JPY: 0.0061,
-  CAD: 0.67,
-  AUD: 0.61,
-  SGD: 0.68,
-  HKD: 0.118,
-  RON: 0.20
+  PLN: 0,23,
+  CZK: 0,041,
+  HUF: 0,0026,
+  JPY: 0,0061,
+  CAD: 0,67,
+  AUD: 0,61,
+  SGD: 0,68,
+  HKD: 0,118,
+  RON: 0,20
 };
 
-// Converte un prezzo in EUR. Prova nell'ordine:
-//   1) money_set.shop_money (già convertito da Shopify al cambio del giorno — il più accurato)
-//   2) calcolo manuale con tasso fallback
-//   3) prezzo originale se già in EUR
-function toEurAmount(moneySet, fallbackAmount, fallbackCurrency) {
+// Converti un prezzo in EUR. Prova nell'ordine:
+// 1) money_set.shop_money (già convertito da Shopify al cambio del giorno — il più accurato)
+// 2) calcolo manuale con tasso fallback
+// 3) prezzo originale se già in EUR
+funzione toEurAmount(moneySet, fallbackAmount, fallbackCurrency) {
   // moneySet = esempio ordine.total_price_set (o line_item.price_set)
-  if (moneySet && moneySet.shop_money && moneySet.shop_money.amount !== undefined) {
+  se (moneySet && moneySet.shop_money && moneySet.shop_money.amount !== undefined) {
     const amt = parseFloat(moneySet.shop_money.amount);
-    if (!isNaN(amt) && (moneySet.shop_money.currency_code === SHOP_CURRENCY || !moneySet.shop_money.currency_code)) {
-      return amt;
+    se (!isNaN(amt) && (moneySet.shop_money.currency_code === SHOP_CURRENCY || !moneySet.shop_money.currency_code)) {
+      importo di ritorno;
     }
   }
   // Fallback: conversione manuale
   const amt = parseFloat(fallbackAmount);
-  if (isNaN(amt)) return 0;
+  se (isNaN(amt)) restituisce 0;
   const cur = (fallbackCurrency || SHOP_CURRENCY).toUpperCase();
-  if (cur === SHOP_CURRENCY) return amt;
+  se (valuta === VALUTA_NEGOZIO) restituisci importo;
   const rate = FALLBACK_RATES_TO_EUR[cur];
-  if (rate) return amt * rate;
-  return amt; // ultima spiaggia: ritorna così com'è
+  se (tasso) restituisci importo * tasso;
+  importo del reso; // ultima spiaggia: ritorna così com'è
 }
 
-// Estrae info valuta di un ordine
-function getOrderCurrencyInfo(ordine) {
+// Estrai informazioni sulla valuta di un ordine
+funzione getOrderCurrencyInfo(ordine) {
   const originalCurrency = ordine.currency || SHOP_CURRENCY;
   const isForeign = originalCurrency !== SHOP_CURRENCY;
   const eurTotal = toEurAmount(ordine.total_price_set, ordine.total_price, originalCurrency);
   const originalTotal = parseFloat(ordine.total_price) || 0;
   const exchangeRate = isForeign && originalTotal > 0 ? eurTotal / originalTotal : 1;
-  return { originalCurrency, isForeign, eurTotal, originalTotal, exchangeRate };
+  restituisci { valuta originale, è estera, totale euro, totale originale, tasso di cambio };
 }
 
-// Estrae info refund di un ordine (Shopify espone array refunds nel JSON ordine)
+// Estrai informazioni sul rimborso di un ordine (Shopify espone array rimborsi nel JSON ordine)
 // Restituisce: importo totale rimborsato (in EUR), articoli rimborsati, status, ecc.
-function getOrderRefundInfo(ordine) {
-  const refunds = ordine.refunds || [];
-  if (refunds.length === 0) {
-    return { hasRefund: false, isFullRefund: false, isPartialRefund: false, totalRefundedEur: 0, refundedQuantity: 0, refundedLineItems: [], refundCount: 0 };
+funzione getOrderRefundInfo(ordine) {
+  const rimborsi = ordine.rimborsi || [];
+  se (rimborsi.lunghezza === 0) {
+    return { hasRefund: false, isFullRefund: false, isPartialRefund: false, totalRefundedEur: 0, rimborsatoQuantità: 0, rimborsatoLineItems: [], returnCount: 0 };
   }
   const ordCurrency = ordine.currency || SHOP_CURRENCY;
-  let totalRefundedEur = 0;
-  let refundedQuantity = 0;
+  lascia totalRefundedEur = 0;
+  lascia che la quantità rimborsata sia pari a 0;
   const refundedLineItems = [];
   
-  refunds.forEach(refund => {
-    // 1) Importo monetario rimborsato (transactions di tipo 'refund')
-    (refund.transactions || []).forEach(tx => {
-      if (tx.kind === 'refund' && (tx.status === 'success' || !tx.status)) {
+  rimborsi.perOgni(rimborso => ​​{
+    // 1) Importo monetario rimborsato (transazioni di tipo 'refund')
+    (rimborso.transazioni || []).perOgni(tx => {
+      se (tx.kind === 'refund' && (tx.status === 'success' || !tx.status)) {
         const amt = toEurAmount(tx.amount_set, tx.amount, tx.currency || ordCurrency);
-        totalRefundedEur += amt;
+        totaleRimborsatoEur += importo;
       }
     });
     
     // 2) Quali line_items sono stati rimborsati (per quantità)
-    (refund.refund_line_items || []).forEach(rli => {
+    (rimborso.rimborso_articoli_rimborso || []).perogni(rli => {
       const qty = parseInt(rli.quantity) || 0;
-      refundedQuantity += qty;
+      quantità rimborsata += quantità;
       // line_item_id punta al line_item originale dell'ordine
       const subtotalEur = toEurAmount(rli.subtotal_set, rli.subtotal, ordCurrency);
       const totalTaxEur = toEurAmount(rli.total_tax_set, rli.total_tax, ordCurrency);
       refundedLineItems.push({
         line_item_id: rli.line_item_id,
-        quantity: qty,
-        subtotal_eur: subtotalEur,
-        total_tax_eur: totalTaxEur
+        quantità: quantità,
+        subtotale_euro: subtotaleEur,
+        imposte_totali_euro: imposte_totali_euro
       });
     });
   });
   
-  // Determina se è full refund: confronto con prezzo totale dell'ordine
+  // Determina se è rimborso completo: confronto con prezzo totale dell'ordine
   const orderTotalEur = toEurAmount(ordine.total_price_set, ordine.total_price, ordCurrency);
   const totalQty = (ordine.line_items || []).reduce((s, li) => s + (parseInt(li.quantity) || 0), 0);
-  const isFullRefund = totalRefundedEur > 0 && Math.abs(totalRefundedEur - orderTotalEur) < 0.5; // tolleranza 50 cent
+  const isFullRefund = totalRefundedEur > 0 && Math.abs(totalRefundedEur - orderTotalEur) < 0,5; // tolleranza 50 cent
   const isPartialRefund = totalRefundedEur > 0 && !isFullRefund;
   
-  return {
+  ritorno {
     hasRefund: totalRefundedEur > 0,
-    isFullRefund,
-    isPartialRefund,
-    totalRefundedEur,
-    refundedQuantity,
-    totalQuantity: totalQty,
-    refundedLineItems,
-    refundCount: refunds.length
+    èRimborso completo,
+    èRimborsoParziale,
+    Rimborso totale in euro,
+    Quantità rimborsata,
+    quantità totale: quantità totale,
+    voci di riga rimborsate,
+    numero di rimborsi: rimborsi.lunghezza
   };
 }
 
-// ============ PAYMENT FORECAST ============
-// Dato un ordine + config MP, calcola quando arriverà il pagamento (o più pagamenti se split).
+// ============ PREVISIONE DI PAGAMENTO ============
+// Dato un ordine + config MP, calcola quando arriverà il pagamento (o più pagamenti se divisi).
 // Ritorna array di { data: Date, importo_eur: number, nota: string, parte: number }
 function calcolaPagamentiPrevisti(dataOrdine, policy, nettoIncassato) {
-  if (!policy || nettoIncassato <= 0) return [];
+  se (!policy || nettoIncassato <= 0) restituisci [];
   const orderDate = new Date(dataOrdine);
   if (isNaN(orderDate.getTime())) return [];
   
-  const result = [];
+  const risultato = [];
   
   switch (policy.type) {
-    case 'immediate': {
-      result.push({ data: orderDate, importo_eur: nettoIncassato, nota: 'Accredito immediato', parte: 1 });
-      break;
+    caso 'immediato': {
+      risultato.push({ data: orderDate, importo_eur: nettoIncassato, nota: 'Accredito immediato', parte: 1 });
+      rottura;
     }
-    case 'fixed_days': {
-      const d = new Date(orderDate);
+    caso 'giorni_fissi': {
+      const d = nuova data(dataordine);
       d.setDate(d.getDate() + (policy.days_offset || 0));
       result.push({ data: d, importo_eur: nettoIncassato, nota: `Ordine + ${policy.days_offset}gg`, parte: 1 });
-      break;
+      rottura;
     }
-    case 'weekly': {
+    caso 'settimanale': {
       // Stima: ordine + N giorni, poi arrotondato al lunedì successivo
-      const d = new Date(orderDate);
+      const d = nuova data(dataordine);
       d.setDate(d.getDate() + (policy.days_offset || 21));
       const dayOfWeek = d.getDay(); // 0 = domenica, 1 = lunedì
       const daysToMonday = dayOfWeek === 0 ? 1 : (dayOfWeek === 1 ? 0 : (8 - dayOfWeek));
       d.setDate(d.getDate() + daysToMonday);
       result.push({ data: d, importo_eur: nettoIncassato, nota: `Settimanale (~${policy.days_offset}gg)`, parte: 1 });
-      break;
+      rottura;
     }
-    case 'monthly_decade': {
-      // Ordini del mese M pagati il giorno X (es. 10) del mese M + month_offset
+    caso 'monthly_decade': {
+      // Ordini del mese M pagati il ​​giorno X (es. 10) del mese M + mese_offset
       const target = new Date(orderDate.getFullYear(), orderDate.getMonth() + (policy.month_offset || 2), policy.payout_day || 10);
-      result.push({ data: target, importo_eur: nettoIncassato, nota: `Prima decade mese+${policy.month_offset}`, parte: 1 });
-      break;
+      risultato.push({ data: target, importo_eur: nettoIncassato, nota: `Prima decade mese+${policy.month_offset}`, parte: 1 });
+      rottura;
     }
-    case 'monthly_mid': {
+    caso 'monthly_mid': {
       const target = new Date(orderDate.getFullYear(), orderDate.getMonth() + (policy.month_offset || 2), policy.payout_day || 15);
-      result.push({ data: target, importo_eur: nettoIncassato, nota: `Prima metà mese+${policy.month_offset}`, parte: 1 });
-      break;
+      risultato.push({ data: target, importo_eur: nettoIncassato, nota: `Prima metà mese+${policy.month_offset}`, parte: 1 });
+      rottura;
     }
-    case 'split': {
+    caso 'split': {
       (policy.parts || []).forEach((part, idx) => {
         const target = new Date(orderDate.getFullYear(), orderDate.getMonth() + (part.month_offset || 1), part.payout_day || 10);
         const importoParte = nettoIncassato * (part.pct / 100);
-        result.push({ data: target, importo_eur: importoParte, nota: `${part.pct}% (mese+${part.month_offset})`, parte: idx + 1 });
+        risultato.push({ data: target, importo_eur: importoParte, nota: `${part.pct}% (mese+${part.month_offset})`, parte: idx + 1 });
       });
-      break;
+      rottura;
     }
-    case 'prepaid_balance': {
+    caso 'prepaid_balance': {
       // Non genera pagamento futuro, scala dal wallet
       result.push({ data: orderDate, importo_eur: 0, nota: 'Wallet (scalato da credito)', parte: 1, is_wallet: true });
-      break;
+      rottura;
     }
-    default: {
+    predefinito: {
       // Fallback: usa data ordine + 30gg
-      const d = new Date(orderDate);
+      const d = nuova data(dataordine);
       d.setDate(d.getDate() + 30);
       result.push({ data: d, importo_eur: nettoIncassato, nota: 'Policy sconosciuta (+30gg)', parte: 1 });
     }
   }
   
-  return result;
+  restituisci il risultato;
 }
 
-// Helper: formatta data in YYYY-MM-DD
-function fmtDateISO(d) {
+// Funzione di supporto: formatta i dati nel formato YYYY-MM-DD
+funzione fmtDateISO(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
+  restituisci `${y}-${m}-${dd}`;
 }
 
-// Helper: chiave mese YYYY-MM
-function fmtMonthKey(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+// Helper: chiave mese AAAA-MM
+funzione fmtMonthKey(d) {
+  restituisci `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-let cachedToken = null;
-let tokenExpiry = null;
+lascia cachedToken = null;
+lascia che tokenExpiry = null;
 
-async function getShopifyAccessToken() {
-  if (cachedToken && tokenExpiry && Date.now() < tokenExpiry) return cachedToken;
-  if (!SHOPIFY_CLIENT_ID || !SHOPIFY_CLIENT_SECRET) throw new Error('Missing credentials');
+funzione asincrona getShopifyAccessToken() {
+  se (cachedToken && tokenExpiry && Date.now() < tokenExpiry) restituisci cachedToken;
+  se (!SHOPIFY_CLIENT_ID || !SHOPIFY_CLIENT_SECRET) genera un nuovo errore ('Credenziali mancanti');
   const body = new URLSearchParams();
   body.append('client_id', SHOPIFY_CLIENT_ID);
   body.append('client_secret', SHOPIFY_CLIENT_SECRET);
   body.append('grant_type', 'client_credentials');
   const response = await fetch(`https://${SHOPIFY_STORE}/admin/oauth/access_token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString()
+    metodo: 'POST',
+    intestazioni: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    corpo: corpo.toString()
   });
   if (!response.ok) { const errText = await response.text(); throw new Error(`HTTP ${response.status}: ${errText}`); }
   const data = await response.json();
   cachedToken = data.access_token;
   tokenExpiry = Date.now() + (23 * 60 * 60 * 1000);
-  return cachedToken;
+  restituisci il token memorizzato nella cache;
 }
 
-// Payment policies (da Excel TL_REGOLE_MARKET_PLACE + istruzioni utente):
-//   type: 'monthly_decade' → ordini del mese M pagati il giorno X del mese M+offset
-//   type: 'monthly_mid' → prima metà del mese (~giorno 15)
-//   type: 'split' → % al giorno X1, % al giorno X2 dopo data ordine
-//   type: 'fixed_days' → data_ordine + N giorni
-//   type: 'weekly' → payout settimanale (stima: data_ordine + N giorni)
-//   type: 'immediate' → data_ordine (accreditato ~subito)
-//   type: 'prepaid_balance' → sistema wallet (Balardi: inserisci ricariche, scali)
-const MARKETPLACE_CONFIGS = {
-  'SECRET_SALES': { nome: 'Secret Sales', sconto_percentuale: 0, fee_principale: 20, fee_secondaria: 0, fee_fissa_trasporto: 2, fee_fissa_packaging: 2, pagamento: 'Prima metà mese+2', payment_policy: { type: 'monthly_mid', month_offset: 2, payout_day: 15 } },
-  'FASHION_TAMERS': { nome: 'Fashion Tamers', sconto_percentuale: 0, fee_principale: 32, fee_secondaria: 0, fee_accessoria: 2, fee_fissa_trasporto: 15, fee_fissa_packaging: 6, pagamento: 'Prima metà mese+2', payment_policy: { type: 'monthly_mid', month_offset: 2, payout_day: 15 } },
-  'INTRA_MIRROR': { nome: 'Intra Mirror', sconto_percentuale: 15, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', month_offset: 2, payout_day: 10 } },
+// Politiche di pagamento (da Excel TL_REGOLE_MARKET_PLACE + istruzioni utente):
+// tipo: 'monthly_decade' → ordini del mese M pagati il ​​giorno X del mese M+offset
+// tipo: 'monthly_mid' → prima metà del mese (~giorno 15)
+// tipo: 'split' → % al giorno X1, % al giorno X2 dopo data ordine
+// tipo: 'fixed_days' → data_ordine + N giorni
+// tipo: 'settimanale' → pagamento settimanale (stima: data_ordine + N giorni)
+// tipo: 'immediato' → data_ordine (accreditato ~subito)
+// digita: 'saldo_prepagato' → sistema wallet (Balardi: inserisci ricariche, scali)
+const CONFIGURAZIONI_MARKETPLACE = {
+  'SECRET_SALES': { nome: 'Secret Sales', sconto_percentuale: 0, fee_principale: 20, fee_secondaria: 0, fee_fissa_trasporto: 2, fee_fissa_packaging: 2, pagamento: 'Prima metà mese+2', payment_policy: { type: 'monthly_mid', Month_offset: 2, payout_day: 15 } },
+  'FASHION_TAMERS': { nome: 'Fashion Tamers', sconto_percentuale: 0, fee_principale: 32, fee_secondaria: 0, fee_accessoria: 2, fee_fissa_trasporto: 15, fee_fissa_packaging: 6, pagamento: 'Prima metà mese+2', payment_policy: { type: 'monthly_mid', Month_offset: 2, giorno_pagamento: 15 } },
+  'INTRA_MIRROR': { nome: 'Intra Mirror', sconto_percentuale: 15, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', Month_offset: 2, payout_day: 10 } },
   'BALARDI': { nome: 'Balardi', sconto_percentuale: 35, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Prepagato (wallet)', payment_policy: { type: 'prepaid_balance' } },
-  'THE_BRADERY': { nome: 'The Bradery', sconto_percentuale: 5, fee_principale: 17, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 2, pagamento: 'Split 80/20 (mese+1 / mese+2)', payment_policy: { type: 'split', parts: [{ pct: 80, month_offset: 1, payout_day: 10 }, { pct: 20, month_offset: 2, payout_day: 10 }] } },
-  'BOUTIQUE_MALL': { nome: 'Boutique Mall', sconto_percentuale: 33.3, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 10, fee_fissa_packaging: 2, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', month_offset: 2, payout_day: 10 } },
-  'ARCHIVIST': { nome: 'Archivist', sconto_percentuale: 0, fee_principale: 22, fee_secondaria: 0, fee_fissa_trasporto: 10, fee_fissa_packaging: 2, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', month_offset: 2, payout_day: 10 } },
-  'MIINTO': { nome: 'Miinto', sconto_percentuale: 0, fee_principale: 17.75, fee_secondaria: 2.25, fee_fissa_trasporto: 12, fee_fissa_packaging: 1.5, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', month_offset: 2, payout_day: 10 } },
+  'THE_BRADERY': { nome: 'The Bradery', sconto_percentuale: 5, fee_principale: 17, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 2, pagamento: 'Split 80/20 (mese+1 / mese+2)', payment_policy: { type: 'split', parts: [{ pct: 80, offset_mese: 1, giorno_pagamento: 10 }, { pct: 20, offset_mese: 2, giorno_pagamento: 10 }] } },
+  'BOUTIQUE_MALL': { nome: 'Boutique Mall', sconto_percentuale: 33.3, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 10, fee_fissa_packaging: 2, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', Month_offset: 2, payout_day: 10}},
+  'ARCHIVISTA': { nome: 'Archivist', sconto_percentuale: 0, fee_principale: 22, fee_secondaria: 0, fee_fissa_trasporto: 10, fee_fissa_packaging: 2, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', Month_offset: 2, payout_day: 10 } },
+  'MIINTO': { nome: 'Miinto', sconto_percentuale: 0, fee_principale: 17.75, fee_secondaria: 2.25, fee_fissa_trasporto: 12, fee_fissa_packaging: 1.5, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', Month_offset: 2, giorno_pagamento: 10 } },
   'WINKELSTRAAT': { nome: 'Winkelstraat', sconto_percentuale: 0, fee_principale: 17, fee_secondaria: 0, fee_accessoria: 9, fee_fissa_trasporto: 15, fee_fissa_packaging: 0, pagamento: 'Settimanale (~21gg)', payment_policy: { type: 'weekly', days_offset: 21 } },
-  'ITALIST': { nome: 'Italist', sconto_percentuale: 20, fee_principale: 25.5, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 4, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', month_offset: 2, payout_day: 10 } },
+  'ITALIST': { nome: 'Italist', sconto_percentuale: 20, fee_principale: 25.5, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 4, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', Month_offset: 2, payout_day: 10 } },
   'JAMMY_DUDE': { nome: 'Jammy Dude', sconto_percentuale: 0, fee_principale: 19, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: '10gg data ordine', payment_policy: { type: 'fixed_days', days_offset: 10 } },
   'POIZON': { nome: 'Poizon', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Immediato', payment_policy: { type: 'immediate' } },
   'BRANDSGATEWAY': { nome: 'Brandsgateway', sconto_percentuale: 13, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 0, pagamento: '45gg data ordine', payment_policy: { type: 'fixed_days', days_offset: 45 } },
-  'TLUXY_SITE': { nome: 'T. Luxy (proprio)', sconto_percentuale: 10, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1, pagamento: 'Immediato (Shopify +2gg)', payment_policy: { type: 'fixed_days', days_offset: 2 } },
+  'TLUXY_SITO': { nome: 'T. Luxy (proprio)', sconto_percentuale: 10, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1, pagamento: 'Immediato (Shopify +2gg)', payment_policy: { type: 'fixed_days', days_offset: 2 } },
   'MARK_FOYS': { nome: 'Mark Foy', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Prepagato immediato', payment_policy: { type: 'immediate' } },
   'GIGLIO': { nome: 'GIGLIO.COM', sconto_percentuale: 0, fee_principale: 30, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'TBD (prepagato per ora)', payment_policy: { type: 'immediate' } }
 };
 
-// Normalizza source_name per matching più robusto: lowercase + spazi→trattini
-function normalizeSourceName(name) {
-  return (name || '').toLowerCase().trim().replace(/\s+/g, '-');
+// Normalizza source_name per corrispondenza più robusto: minuscolo + spazi→trattini
+funzione normalizeSourceName(name) {
+  return (nome || '').toLowerCase().trim().replace(/\s+/g, '-');
 }
 
 const SOURCE_NAME_MAP = {
   'web': 'TLUXY_SITE', 'pos': 'TLUXY_SITE', 'shopify_draft_order': 'TLUXY_SITE', 'shopify-draft-order': 'TLUXY_SITE',
   'miinto': 'MIINTO', 'miinto-app': 'MIINTO',
-  'secret-sales': 'SECRET_SALES', 'secretsales': 'SECRET_SALES',
+  'vendite segrete': 'SEGRETI_VENDITE', 'vendite segrete': 'SEGRETI_VENDITE',
   'fashion-tamers': 'FASHION_TAMERS', 'fashiontamers': 'FASHION_TAMERS',
   'intra-mirror': 'INTRA_MIRROR', 'intramirror': 'INTRA_MIRROR',
   'balardi': 'BALARDI',
   'the-bradery': 'THE_BRADERY', 'thebradery': 'THE_BRADERY', 'bradery': 'THE_BRADERY',
   'my-moon-store': 'THE_BRADERY', 'mymoonstore': 'THE_BRADERY', 'my-moon-store-syncio-order': 'THE_BRADERY', '1615469': 'THE_BRADERY',
   'boutique-mall': 'BOUTIQUE_MALL', 'boutiquemall': 'BOUTIQUE_MALL',
-  'archivist': 'ARCHIVIST', 'winkelstraat': 'WINKELSTRAAT',
+  'archivista': 'ARCHIVISTA', 'winkelstraat': 'WINKELSTRAAT',
   'italist': 'ITALIST', 'italist-app': 'ITALIST',
   'syncio-order': 'JAMMY_DUDE', 'jammydude21': 'JAMMY_DUDE', 'jammy-dude': 'JAMMY_DUDE', 'jammydude': 'JAMMY_DUDE',
   'poizon': 'POIZON', '217504907265': 'POIZON',
@@ -552,124 +552,124 @@ const IVA_PER_PAESE = {
   'BR': 0, 'MX': 0, 'TR': 0, 'RU': 0, 'IN': 0, 'KR': 0, 'SG': 0, 'HK': 0, 'ZA': 0
 };
 
-function getIvaPerPaese(countryCode) {
-  if (!countryCode) return 22;
-  return IVA_PER_PAESE[countryCode.toUpperCase()] ?? 0;
+funzione getIvaPerPaese(countryCode) {
+  se (!countryCode) restituisci 22;
+  restituisci IVA_PER_PAESE[countryCode.toUpperCase()] ?? 0;
 }
 
-function isWinkelstraatOrder(ordine) {
-  // Controllo multi-criterio in OR
+funzione èWinkelstraatOrdine(ordine) {
+  // Controllo multicriterio in OR
   const email = (ordine.email || ordine.customer?.email || '').toLowerCase();
-  if (email.includes('@winkelstraat.nl')) return 'email';
+  se (email.include('@winkelstraat.nl')) restituisce 'email';
   
   const tags = (ordine.tags || '').toLowerCase();
-  if (tags.includes('winkelstraat')) return 'tag';
+  if (tags.includes('winkelstraat')) restituisce 'tag';
   
-  // source_name può contenere "copernicus" per import automatici
+  // source_name può contenere "copernicus" per importazione automatica
   const sourceName = (ordine.source_name || '').toLowerCase();
-  if (sourceName.includes('copernicus') || sourceName.includes('winkelstraat')) return 'source_name';
+  se (sourceName.include('copernicus') || sourceName.include('winkelstraat')) restituisce 'source_name';
   
-  // Note ordine e note attributes
+  // Nota ordine e attributi nota
   const note = (ordine.note || '').toLowerCase();
-  if (note.includes('winkelstraat') || note.includes('copernicus')) return 'note';
+  se (note.include('winkelstraat') || note.include('copernicus')) restituisce 'note';
   
   const noteAttrs = (ordine.note_attributes || []).map(a => ((a.name || '') + ' ' + (a.value || '')).toLowerCase()).join(' ');
-  if (noteAttrs.includes('winkelstraat') || noteAttrs.includes('copernicus')) return 'note_attributes';
+  se (noteAttrs.include('winkelstraat') || noteAttrs.include('copernicus')) restituisci 'note_attributes';
   
-  // Shipping address: address1, address2, name, company
-  const ship = ordine.shipping_address || {};
+  // Indirizzo di spedizione: indirizzo1, indirizzo2, nome, azienda
+  const ship = ordine_shipping_address || {};
   const shipFields = [ship.address1, ship.address2, ship.name, ship.company, ship.first_name, ship.last_name].filter(Boolean).map(s => s.toLowerCase()).join(' ');
-  if (shipFields.includes('winkelstraat')) return 'shipping_address';
+  se (shipFields.include('winkelstraat')) restituisce 'indirizzo_di_spedizione';
   
-  return null;
+  restituisci null;
 }
 
-function riconosciMarketplace(ordine) {
+funzione riconosciMercato(ordine) {
   const rawSource = (ordine.source_name || '').trim();
   const sourceName = normalizeSourceName(rawSource);
   const tags = (ordine.tags || '').toLowerCase();
   const email = (ordine.email || ordine.customer?.email || '').toLowerCase();
   
   // PRIORITÀ 1: tag specifici che hanno precedenza sul source_name
-  // Brandsgateway è un dropship fornitore, arriva con source=web ma va classificato come BRANDSGATEWAY
-  if (tags.includes('brandsgateway')) {
-    return { key: 'BRANDSGATEWAY', config: MARKETPLACE_CONFIGS.BRANDSGATEWAY };
+  // Brandsgateway è un fornitore dropship, arriva con source=web ma è stato classificato come BRANDSGATEWAY
+  se (tag.include('brandsgateway')) {
+    restituisci { chiave: 'BRANDSGATEWAY', configurazione: MARKETPLACE_CONFIGS.BRANDSGATEWAY };
   }
   
-  // PRIORITÀ 2: Winkelstraat via Copernicus (import da external) - multi-criterio
+  // PRIORITÀ 2: Winkelstraat via Copernicus (import da external) - multicriterio
   const wsMatch = isWinkelstraatOrder(ordine);
-  if (wsMatch) {
-    return { key: 'WINKELSTRAAT', config: MARKETPLACE_CONFIGS.WINKELSTRAAT };
+  se (wsMatch) {
+    return { chiave: 'WINKELSTRAAT', configurazione: MARKETPLACE_CONFIGS.WINKELSTRAAT };
   }
   
-  // PRIORITÀ 3: Mark Foy's Department Store (condivide source 1615469 con The Bradery)
-  // Detection via tag "mark foy" oppure email non-bradery con source 1615469
-  if (tags.includes('mark foy') || tags.includes("mark foy's")) {
-    return { key: 'MARK_FOYS', config: MARKETPLACE_CONFIGS.MARK_FOYS };
+  // PRIORITÀ 3: Mark Foy's Department Store (condivide fonte 1615469 con The Bradery)
+  // Rilevamento tramite tag "mark foy" oppure email non-bradery con source 1615469
+  se (tag.include('mark foy') || tags.include("mark foy's")) {
+    restituisci { chiave: 'MARK_FOYS', configurazione: MARKETPLACE_CONFIGS.MARK_FOYS };
   }
   // Caso sub: source 1615469 MA email non è di thebradery → Mark Foy's
-  if (rawSource === '1615469' && email && !email.includes('thebradery')) {
-    return { key: 'MARK_FOYS', config: MARKETPLACE_CONFIGS.MARK_FOYS };
+  se (rawSource === '1615469' && email && !email.includes('thebradery')) {
+    restituisci { chiave: 'MARK_FOYS', configurazione: MARKETPLACE_CONFIGS.MARK_FOYS };
   }
   
-  // PRIORITÀ 4: Giglio.com - detection via shipping/billing company name
-  // Customer ha sempre ragione sociale "Giglio.com S.p.a." 
+  // PRIORITÀ 4: Giglio.com - rilevamento tramite il nome della società di spedizione/fatturazione
+  // Il cliente ha sempre ragione sociale "Giglio.com Spa"
   const shipCompany = (ordine.shipping_address?.company || '').toLowerCase();
   const billCompany = (ordine.billing_address?.company || '').toLowerCase();
   const custFirstName = (ordine.customer?.first_name || '').toLowerCase();
   const custLastName = (ordine.customer?.last_name || '').toLowerCase();
   const custDefaultCompany = (ordine.customer?.default_address?.company || '').toLowerCase();
-  if (
+  Se (
     shipCompany.includes('giglio') ||
     billCompany.includes('giglio') ||
     custDefaultCompany.includes('giglio') ||
     custFirstName.includes('giglio') ||
     custLastName.includes('giglio')
   ) {
-    return { key: 'GIGLIO', config: MARKETPLACE_CONFIGS.GIGLIO };
+    restituisci { chiave: 'GIGLIO', configurazione: MARKETPLACE_CONFIGS.GIGLIO };
   }
   
   // Match diretto normalizzato su source_name
-  if (SOURCE_NAME_MAP[sourceName]) return { key: SOURCE_NAME_MAP[sourceName], config: MARKETPLACE_CONFIGS[SOURCE_NAME_MAP[sourceName]] };
+  se (SOURCE_NAME_MAP[sourceName]) restituisci { chiave: SOURCE_NAME_MAP[sourceName], configurazione: MARKETPLACE_CONFIGS[SOURCE_NAME_MAP[sourceName]] };
   
-  // Poizon detection: source numerico + email customer "poizon"
+  // Rilevamento veleno: fonte numerica + email cliente "poizon"
   const isNumericSource = /^\d+$/.test(rawSource);
-  if (isNumericSource && email.includes('poizon')) {
-    return { key: 'POIZON', config: MARKETPLACE_CONFIGS.POIZON };
+  se (isNumericSource && email.includes('poizon')) {
+    restituisci { chiave: 'POIZON', configurazione: MARKETPLACE_CONFIGS.POIZON };
   }
   
-  // Partial match su source_name
-  for (const [pattern, mpKey] of Object.entries(SOURCE_NAME_MAP)) {
-    if (sourceName.includes(pattern) || pattern.includes(sourceName)) return { key: mpKey, config: MARKETPLACE_CONFIGS[mpKey] };
+  // Corrispondenza parziale su source_name
+  per (const [pattern, mpKey] di Object.entries(SOURCE_NAME_MAP)) {
+    se (sourceName.include(pattern) || pattern.include(sourceName)) restituisce { chiave: mpKey, configurazione: MARKETPLACE_CONFIGS[mpKey] };
   }
   
-  // Match su tags
-  for (const [pattern, mpKey] of Object.entries(SOURCE_NAME_MAP)) {
-    if (tags.includes(pattern)) return { key: mpKey, config: MARKETPLACE_CONFIGS[mpKey] };
+  // Corrispondenza dei tag su
+  per (const [pattern, mpKey] di Object.entries(SOURCE_NAME_MAP)) {
+    se (tags.includes(pattern)) restituisce { chiave: mpKey, configurazione: MARKETPLACE_CONFIGS[mpKey] };
   }
   
   const defaultKey = process.env.CURRENT_MARKETPLACE || 'TLUXY_SITE';
-  return { key: defaultKey, config: MARKETPLACE_CONFIGS[defaultKey] };
+  restituisci { chiave: defaultKey, configurazione: MARKETPLACE_CONFIGS[defaultKey] };
 }
 
-function hasJDTag(productTagsString) {
-  if (!productTagsString) return false;
+funzione hasJDTag(productTagsString) {
+  se (!productTagsString) restituisce falso;
   const tags = productTagsString.split(',').map(t => t.trim());
   const regex = /(^|[\s,\-_])JD([\s,\-_]|$)/i;
-  return tags.some(tag => regex.test(tag));
+  restituisci tags.some(tag => regex.test(tag));
 }
 
-async function fetchProductsTags(productIds, cache = {}) {
+funzione asincrona fetchProductsTags(productIds, cache = {}) {
   const toFetch = productIds.filter(id => id && !(id in cache));
-  if (toFetch.length === 0) return cache;
+  se (toFetch.length === 0) restituisci cache;
   const token = await getShopifyAccessToken();
   const chunks = [];
-  for (let i = 0; i < toFetch.length; i += 100) chunks.push(toFetch.slice(i, i + 100));
-  for (const chunk of chunks) {
-    try {
+  per (lascia i = 0; i < toFetch.length; i += 100) chunks.push(toFetch.slice(i, i + 100));
+  per (blocco costante di blocchi) {
+    Tentativo {
       const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?ids=${chunk.join(',')}&fields=id,tags`;
       const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
-      if (!response.ok) continue;
+      se (!response.ok) continua;
       const data = await response.json();
       (data.products || []).forEach(p => { cache[p.id] = p.tags || ''; });
       chunk.forEach(id => { if (!(id in cache)) cache[id] = ''; });
@@ -677,351 +677,351 @@ async function fetchProductsTags(productIds, cache = {}) {
       chunk.forEach(id => { if (!(id in cache)) cache[id] = ''; });
     }
   }
-  return cache;
+  restituisci la cache;
 }
 
-async function applyJDFilter(ordini) {
+funzione asincrona applyJDFilter(ordini) {
   const jdOrders = ordini.filter(o => riconosciMarketplace(o).key === 'JAMMY_DUDE');
-  if (jdOrders.length === 0) return ordini;
+  se (jdOrders.length === 0) restituisci ordini;
   const productIdsSet = new Set();
   jdOrders.forEach(o => (o.line_items || []).forEach(item => { if (item.product_id) productIdsSet.add(item.product_id); }));
   const tagsCache = await fetchProductsTags([...productIdsSet]);
-  return ordini.map(o => {
-    if (riconosciMarketplace(o).key !== 'JAMMY_DUDE') return o;
+  restituisci ordini.map(o => {
+    se (riconosciMarketplace(o).key !== 'JAMMY_DUDE') restituisci o;
     const filteredItems = (o.line_items || []).filter(item => hasJDTag(tagsCache[item.product_id]));
-    return { ...o, line_items: filteredItems, _jd_excluded: filteredItems.length === 0 };
+    restituisci { ...o, line_items: filteredItems, _jd_excluded: filteredItems.length === 0 };
   }).filter(o => !o._jd_excluded);
 }
 
-async function processOrders(ordini) {
+funzione asincrona processOrders(ordini) {
   const jdOrdersOriginalIds = new Set(ordini.filter(o => riconosciMarketplace(o).key === 'JAMMY_DUDE').map(o => o.id));
   const filtered = await applyJDFilter(ordini);
-  return filtered.map(o => {
-    if (jdOrdersOriginalIds.has(o.id)) {
+  restituisci filtered.map(o => {
+    se (jdOrdersOriginalIds.has(o.id)) {
       const newTotal = (o.line_items || []).reduce((sum, item) => sum + (parseFloat(item.price) || 0) * (parseInt(item.quantity) || 0), 0);
-      return { ...o, total_price: String(newTotal.toFixed(2)), total_tax: '0.00' };
+      restituisci { ...o, prezzo_totale: String(newTotal.toFixed(2)), imposta_totale: '0.00' };
     }
-    return o;
+    ritorno o;
   });
 }
 
-// ============ COSTO REALE (v4.3 - strategia products/{id}.json con logging) ============
+// ============ COSTO REALE (v4.3 - strategia product/{id}.json con logging) ============
 // Strategia: per ogni product_id unico, 1 chiamata a /products/{id}.json che ritorna
-// tutte le varianti del prodotto con i loro inventory_item_id. Poi batch /inventory_items.json
+// tutte le varianti del prodotto con il loro inventory_item_id. Batch Poi /inventory_items.json
 // Aggiunge logging dettagliato delle chiamate fallite.
-async function fetchVariantCosts(variantIds, orderProductIds = []) {
+funzione asincrona fetchVariantCosts(variantIds, orderProductIds = []) {
   const stats = { products_tentati: 0, products_ok: 0, products_falliti: [], variants_mappati: 0, inventory_tentati: 0, inventory_ok: 0, inventory_falliti: [], kv_hit: 0, kv_miss: 0, kv_new_saved: 0 };
-  if (variantIds.length === 0) return { costs: {}, stats };
+  se (variantIds.length === 0) restituisci { costi: {}, statistiche };
   
   const uniqueVariantIds = [...new Set(variantIds.filter(Boolean))];
   const costsFromKV = {};
   
   // STEP 0: PROVO A LEGGERE DAL KV (cache persistente) PRIMA di chiamare Shopify
-  if (KV_ENABLED) {
+  se (KV_ENABLED) {
     const kvKeys = uniqueVariantIds.map(v => `variant_cost_${v}`);
     const kvResults = await kvMGet(kvKeys);
     uniqueVariantIds.forEach(v => {
       const key = `variant_cost_${v}`;
-      if (kvResults[key] !== undefined) {
+      se (kvResults[key] !== undefined) {
         const parsed = parseFloat(kvResults[key]);
         if (!isNaN(parsed)) { costsFromKV[v] = parsed; stats.kv_hit++; }
-        else stats.kv_miss++;
-      } else stats.kv_miss++;
+        altrimenti stats.kv_miss++;
+      } altrimenti stats.kv_miss++;
     });
   }
   
-  // Solo variant_id che NON abbiamo già nel KV vanno chiamati su Shopify
+  // Solo variante_id che NON abbiamo già nel KV vanno chiamati su Shopify
   const variantsToFetch = uniqueVariantIds.filter(v => !(v in costsFromKV));
   const uniqueProductIds = [...new Set(orderProductIds.filter(Boolean))];
   const variantToInventoryItem = {};
   
-  // Se tutti i variant sono in cache, skip le chiamate Shopify
-  if (variantsToFetch.length === 0) {
-    return { costs: costsFromKV, stats };
+  // Se tutti i varianti sono in cache, salta le chiamate Shopify
+  se (variantsToFetch.length === 0) {
+    restituisci { costi: costiDaKV, statistiche };
   }
   
   const token = await getShopifyAccessToken();
   
   // STEP 1: per ogni product_id, chiamo /products/{id}.json (funziona sempre)
-  async function fetchProductWithRetry(pid, attempt = 0) {
-    stats.products_tentati++;
-    try {
+  funzione asincrona fetchProductWithRetry(pid, attempt = 0) {
+    statistiche_prodotti_tentati++;
+    Tentativo {
       const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products/${pid}.json?fields=id,variants`;
       const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
-      if (response.status === 429 || response.status >= 500) {
-        if (attempt < 4) {
+      se (response.status === 429 || response.status >= 500) {
+        se (tentativo < 4) {
           const wait = 600 * Math.pow(2, attempt) + Math.random() * 400;
-          await new Promise(r => setTimeout(r, wait));
-          return fetchProductWithRetry(pid, attempt + 1);
+          attendi nuova Promise(r => impostaTimeout(r, attendi));
+          restituisci fetchProductWithRetry(pid, tentativo + 1);
         }
         stats.products_falliti.push({ product_id: pid, status: response.status, reason: 'max_retries' });
-        return;
+        ritorno;
       }
-      if (!response.ok) {
+      se (!risposta.ok) {
         stats.products_falliti.push({ product_id: pid, status: response.status, reason: 'http_error' });
-        return;
+        ritorno;
       }
       const data = await response.json();
-      stats.products_ok++;
+      statistiche_prodotti_ok++;
       (data.product?.variants || []).forEach(v => {
-        if (v.id && v.inventory_item_id) {
+        se (v.id && v.inventory_item_id) {
           variantToInventoryItem[v.id] = v.inventory_item_id;
-          stats.variants_mappati++;
+          statistiche.varianti_mappati++;
         }
       });
     } catch (e) {
-      if (attempt < 3) {
-        await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
-        return fetchProductWithRetry(pid, attempt + 1);
+      se (tentativo < 3) {
+        attendi nuova Promise(r => impostaTimeout(r, 600 * (tentativo + 1)));
+        restituisci fetchProductWithRetry(pid, tentativo + 1);
       }
       stats.products_falliti.push({ product_id: pid, status: 'exception', reason: e.message });
     }
   }
   
-  const concurrency = 3;
-  for (let i = 0; i < uniqueProductIds.length; i += concurrency) {
+  const concorrenza = 3;
+  per (sia i = 0; i < uniqueProductIds.length; i += concorrenza) {
     const batch = uniqueProductIds.slice(i, i + concurrency);
     await Promise.all(batch.map(p => fetchProductWithRetry(p)));
   }
   
-  // STEP 1b: per variant non trovate tramite product, fallback a /variants/{id}.json
+  // PASSO 1b: per variante non trovata tramite product, fallback a /variants/{id}.json
   const missing = uniqueVariantIds.filter(vid => !(vid in variantToInventoryItem));
-  if (missing.length > 0) {
-    async function fetchVariantSingle(vid, attempt = 0) {
-      try {
+  se (lunghezza mancante > 0) {
+    funzione asincrona fetchVariantSingle(vid, attempt = 0) {
+      Tentativo {
         const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/variants/${vid}.json?fields=id,inventory_item_id`;
         const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
-        if (response.status === 429 || response.status >= 500) {
-          if (attempt < 4) {
+        se (response.status === 429 || response.status >= 500) {
+          se (tentativo < 4) {
             const wait = 600 * Math.pow(2, attempt) + Math.random() * 400;
-            await new Promise(r => setTimeout(r, wait));
-            return fetchVariantSingle(vid, attempt + 1);
+            attendi nuova Promise(r => impostaTimeout(r, attendi));
+            restituisci fetchVariantSingle(vid, tentativo + 1);
           }
-          return;
+          ritorno;
         }
-        if (!response.ok) return;
+        se (!risposta.ok) restituisci;
         const data = await response.json();
-        if (data.variant && data.variant.inventory_item_id) {
+        se (data.variant && data.variant.inventory_item_id) {
           variantToInventoryItem[vid] = data.variant.inventory_item_id;
-          stats.variants_mappati++;
+          statistiche.varianti_mappati++;
         }
       } catch (e) {
-        if (attempt < 3) {
-          await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
-          return fetchVariantSingle(vid, attempt + 1);
+        se (tentativo < 3) {
+          attendi nuova Promise(r => impostaTimeout(r, 600 * (tentativo + 1)));
+          restituisci fetchVariantSingle(vid, tentativo + 1);
         }
       }
     }
-    for (let i = 0; i < missing.length; i += concurrency) {
-      const batch = missing.slice(i, i + concurrency);
+    per (sia i = 0; i < lunghezza mancante; i += concorrenza) {
+      const batch = missing.slice(i, i + concorrenza);
       await Promise.all(batch.map(v => fetchVariantSingle(v)));
     }
   }
   
-  // STEP 2: batch /inventory_items.json?ids= (questo endpoint supporta ids multipli)
+  // PASSO 2: batch /inventory_items.json?ids= (questo endpoint supporta ids multipli)
   const inventoryIds = [...new Set(Object.values(variantToInventoryItem).filter(Boolean))];
   const inventoryToCost = {};
   const invChunks = [];
   for (let i = 0; i < inventoryIds.length; i += 50) invChunks.push(inventoryIds.slice(i, i + 50)); // chunk 50 invece di 100 per sicurezza
   
-  async function fetchInvWithRetry(chunk, attempt = 0) {
-    stats.inventory_tentati++;
-    try {
+  funzione asincrona fetchInvWithRetry(chunk, attempt = 0) {
+    statistiche_inventario_tentati++;
+    Tentativo {
       const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/inventory_items.json?ids=${chunk.join(',')}`;
       const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
-      if (response.status === 429 || response.status >= 500) {
-        if (attempt < 4) {
+      se (response.status === 429 || response.status >= 500) {
+        se (tentativo < 4) {
           const wait = 600 * Math.pow(2, attempt) + Math.random() * 400;
-          await new Promise(r => setTimeout(r, wait));
-          return fetchInvWithRetry(chunk, attempt + 1);
+          attendi nuova Promise(r => impostaTimeout(r, attendi));
+          restituisci fetchInvWithRetry(chunk, tentativo + 1);
         }
         stats.inventory_falliti.push({ chunk_size: chunk.length, status: response.status, reason: 'max_retries' });
-        return;
+        ritorno;
       }
-      if (!response.ok) {
+      se (!risposta.ok) {
         stats.inventory_falliti.push({ chunk_size: chunk.length, status: response.status, reason: 'http_error' });
-        return;
+        ritorno;
       }
       const data = await response.json();
-      stats.inventory_ok++;
+      statistiche inventario_ok++;
       (data.inventory_items || []).forEach(item => {
         const costValue = item.cost;
-        inventoryToCost[item.id] = (costValue !== null && costValue !== undefined && costValue !== '' && !isNaN(parseFloat(costValue))) ? parseFloat(costValue) : null;
+        inventoryToCost[item.id] = (costValue !== null && costValue !== undefinito && costValue !== '' && !isNaN(parseFloat(costValue))) ? parseFloat(valorecosto): null;
       });
     } catch (e) {
-      if (attempt < 3) {
-        await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
-        return fetchInvWithRetry(chunk, attempt + 1);
+      se (tentativo < 3) {
+        attendi nuova Promise(r => impostaTimeout(r, 600 * (tentativo + 1)));
+        restituisci fetchInvWithRetry(chunk, tentativo + 1);
       }
       stats.inventory_falliti.push({ chunk_size: chunk.length, status: 'exception', reason: e.message });
     }
   }
   
-  for (const chunk of invChunks) {
-    await fetchInvWithRetry(chunk);
+  per (blocco costante di invChunks) {
+    attendi fetchInvWithRetry(chunk);
   }
   
-  // Map finale + salvataggio KV dei NUOVI costi letti
+  // Mappa finale + salvataggio KV dei NUOVI costi letti
   const newCostsFromShopify = {};
   Object.entries(variantToInventoryItem).forEach(([variantId, invId]) => {
-    const cost = invId && inventoryToCost[invId] !== undefined ? inventoryToCost[invId] : null;
-    if (cost !== null && cost !== undefined) newCostsFromShopify[variantId] = cost;
+    costo const = invId && inventoryToCost[invId] !== undefinito ? inventarioToCost[invId]: null;
+    se (costo !== null && costo !== undefined) newCostsFromShopify[variantId] = costo;
   });
   
   // SALVA i nuovi costi su KV per il futuro (anche se il prodotto sarà cancellato)
-  if (KV_ENABLED && Object.keys(newCostsFromShopify).length > 0) {
+  se (KV_ENABLED && Object.keys(newCostsFromShopify).length > 0) {
     const kvPairs = {};
     Object.entries(newCostsFromShopify).forEach(([vid, cost]) => {
       kvPairs[`variant_cost_${vid}`] = String(cost);
     });
-    await kvMSet(kvPairs);
+    attendi kvMSet(kvPairs);
     stats.kv_new_saved = Object.keys(kvPairs).length;
   }
   
-  // Merge: costi da KV (già persistenti) + costi nuovi letti da Shopify
-  const costs = { ...costsFromKV, ...newCostsFromShopify };
-  // Aggiungo null per i variant che Shopify non ha restituito e che non erano in KV
+  // Unisci: costi da KV (già persistenti) + costi nuovi letti da Shopify
+  const costi = { ...costiDaKV, ...nuoviCostiDaShopify };
+  // Aggiungo null per i variante che Shopify non ha restituito e che non erano in KV
   uniqueVariantIds.forEach(v => { if (!(v in costs)) costs[v] = null; });
   
-  return { costs, stats };
+  restituisci { costi, statistiche };
 }
 
-function calcolaCostoOrdine(ordine, variantCosts, duoUserCosts = {}) {
-  let costo_totale = 0;
+funzione calcolaCostoOrdine(ordine, variantCosts, duoUserCosts = {}) {
+  lascia costo_totale = 0;
   const errori = [];
-  for (const item of (ordine.line_items || [])) {
+  per (elemento costante di (ordine_line_items || [])) {
     const quantity = parseInt(item.quantity) || 0;
     let costUnit = item.variant_id ? variantCosts[item.variant_id] : null;
     // Fallback: per prodotti DUO, usa il costo inserito manualmente dall'utente nel simulatore
-    if ((costUnit === null || costUnit === undefined) && isDuoSku(item.sku) && item.variant_id && duoUserCosts[item.variant_id] !== undefined) {
-      costUnit = duoUserCosts[item.variant_id];
+    se ((costUnit === null || costUnit === undefined) && isDuoSku(item.sku) && item.variant_id && duoUserCosts[item.variant_id] !== undefined) {
+      costoUnità = duoUserCosts[item.variant_id];
     }
-    if (costUnit === null || costUnit === undefined) {
-      errori.push({ title: item.title, sku: item.sku || '', variant_id: item.variant_id, is_duo: isDuoSku(item.sku) });
-      continue;
+    se (costUnit === null || costUnit === undefined) {
+      errori.push({ titolo: item.title, sku: item.sku || '', variant_id: item.variant_id, is_duo: isDuoSku(item.sku) });
+      continuare;
     }
-    costo_totale += costUnit * quantity;
+    costo_totale +=unità di costo * quantità;
   }
   return { costo: costo_totale, errori };
 }
 
-function calcolaFeesShopify(prezzo_netto, mpKey) {
-  if (mpKey !== 'TLUXY_SITE') return 0;
-  return prezzo_netto * SHOPIFY_FEE_PERCENT + SHOPIFY_FEE_FIXED;
+funzione calcolaFeesShopify(prezzo_netto, mpKey) {
+  se (mpKey !== 'TLUXY_SITE') restituisci 0;
+  restituisci prezzo_netto * PERCENTUALE_COMMISSIONE_SHOPIFY + COMMISSIONE_FISSA_SHOPIFY;
 }
 
-function calcolaMarginalita(prezzo_lordo, iva_scorporata, costo_merce, spedizione, mp, mpKey) {
+funzione calcolaMarginalita(prezzo_lordo, iva_scorporata, costo_merce, spedizione, mp, mpKey) {
   const prezzo_netto_iva = prezzo_lordo - iva_scorporata;
-  const prezzo_netto_marketplace = prezzo_netto_iva * (1 - mp.sconto_percentuale / 100);
+  const prezzo_netto_marketplace = prezzo_netto_iva*(1 - mp.sconto_percentuale/100);
   const fees_shopify = calcolaFeesShopify(prezzo_netto_marketplace, mpKey);
-  const fee_principale = prezzo_netto_marketplace * (mp.fee_principale / 100);
-  const fee_secondaria = prezzo_netto_marketplace * ((mp.fee_secondaria || 0) / 100);
-  const fee_accessoria = prezzo_netto_marketplace * ((mp.fee_accessoria || 0) / 100);
-  const fees_marketplace = fee_principale + fee_secondaria + fee_accessoria + (mp.fee_fissa_trasporto || 0) + (mp.fee_fissa_packaging || 0);
+  const fee_principale = prezzo_netto_marketplace* (mp.fee_principale/100);
+  const commissione_secondaria = prezzo_netto_marketplace * ((mp.commissione_secondaria || 0) / 100);
+  const tariffa_accessoria = prezzo_netto_marketplace * ((mp.tariffa_accessoria || 0) / 100);
+  const fee_marketplace = fee_principale + fee_secondaria + fee_accessoria + (mp.fee_fissa_trasporto || 0) + (mp.fee_fissa_packaging || 0);
   const margine_netto = prezzo_netto_marketplace - fees_shopify - fees_marketplace - costo_merce - spedizione;
-  const margine_percentuale = prezzo_lordo > 0 ? (margine_netto / prezzo_lordo * 100) : 0;
+  const margine_percentuale = prezzo_lordo > 0 ? (margine_netto/prezzo_lordo*100): 0;
   const costi_totali = costo_merce + spedizione + fees_shopify + fees_marketplace + iva_scorporata;
   return { prezzo_lordo_iva_inclusa: prezzo_lordo, iva_scorporata, prezzo_netto_iva, prezzo_netto_marketplace, fees_shopify, fees_marketplace, costo_merce, spedizione, costi_totali, margine_netto, margine_percentuale: parseFloat(margine_percentuale.toFixed(2)) };
 }
 
-// ============ FUSO ORARIO EUROPE/ROME REALE ============
-// Ottiene la data di oggi in formato YYYY-MM-DD secondo il fuso di Roma
-function getRomeDateString(date = new Date()) {
-  // Usa Intl per ottenere data reale a Roma (gestisce automaticamente DST)
+// ============ FUSO ORARIO EUROPA/ROMA REALE ============
+// Ottiene la data di oggi in formato AAAA-MM-GG secondo il fuso di Roma
+funzione getRomeDateString(date = new Date()) {
+  // Usa Intl per ottenere dati reali a Roma (gestisce automaticamente DST)
   const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Rome',
-    year: 'numeric', month: '2-digit', day: '2-digit'
+    Fuso orario: 'Europa/Roma',
+    anno: 'numerico', mese: 'a 2 cifre', giorno: 'a 2 cifre'
   });
   return formatter.format(date); // es. "2026-04-20"
 }
 
 // Ottiene offset in minuti di Roma per una data specifica (gestisce DST)
-function getRomeOffset(date) {
+funzione getRomeOffset(data) {
   const romeStr = date.toLocaleString('en-US', { timeZone: 'Europe/Rome' });
   const utcStr = date.toLocaleString('en-US', { timeZone: 'UTC' });
   const rome = new Date(romeStr);
   const utc = new Date(utcStr);
-  return (rome - utc) / 60000; // minuti
+  andata e ritorno (roma - utc)/60000; // minuti
 }
 
 // Converte una data Rome (YYYY-MM-DD HH:mm:ss) in Date UTC
-function romeDateTimeToUTC(dateStr, timeStr = '00:00:00') {
+funzione romeDateTimeToUTC(dateStr, timeStr = '00:00:00') {
   // Creiamo una data ipotetica locale e calcoliamo l'offset Roma per quel momento
   const testDate = new Date(dateStr + 'T' + timeStr + 'Z');
   const offsetMin = getRomeOffset(testDate);
   // Invertiamo: se Roma è UTC+2, dobbiamo sottrarre 2 ore per ottenere l'UTC
-  return new Date(testDate.getTime() - offsetMin * 60000);
+  restituisci nuovo Date(testDate.getTime() - offsetMin * 60000);
 }
 
-function getDateRange(periodo, dateFromCustom, dateToCustom) {
-  let dateFrom, dateTo;
-  if (dateFromCustom && dateToCustom) {
+funzione getDateRange(periodo, dateFromCustom, dateToCustom) {
+  siano dateDa, dateA;
+  se (dateFromCustom && dateToCustom) {
     dateFrom = romeDateTimeToUTC(dateFromCustom, '00:00:00');
     dateTo = romeDateTimeToUTC(dateToCustom, '23:59:59');
-    return { dateFrom, dateTo };
+    restituisci { dataDa, dataA };
   }
   
   const romeToday = getRomeDateString(); // es. "2026-04-20"
   const now = new Date();
   
-  switch(periodo) {
-    case 'today':
+  interruttore(periodo) {
+    caso 'oggi':
       dateFrom = romeDateTimeToUTC(romeToday, '00:00:00');
       dateTo = romeDateTimeToUTC(romeToday, '23:59:59');
-      break;
-    case 'yesterday': {
-      // Calcola data di ieri a Roma
+      rottura;
+    caso 'ieri': {
+      // Calcola i dati di ieri a Roma
       const yesterdayRome = new Date(now.getTime() - 24*60*60*1000);
       const yesterdayStr = getRomeDateString(yesterdayRome);
       dateFrom = romeDateTimeToUTC(yesterdayStr, '00:00:00');
       dateTo = romeDateTimeToUTC(yesterdayStr, '23:59:59');
-      break;
+      rottura;
     }
-    case 'week': {
+    caso 'settimana': {
       const weekAgo = new Date(now.getTime() - 7*24*60*60*1000);
       const weekAgoStr = getRomeDateString(weekAgo);
       dateFrom = romeDateTimeToUTC(weekAgoStr, '00:00:00');
       dateTo = romeDateTimeToUTC(romeToday, '23:59:59');
-      break;
+      rottura;
     }
-    case 'month': {
+    caso 'mese': {
       const monthAgo = new Date(now.getTime() - 30*24*60*60*1000);
       const monthAgoStr = getRomeDateString(monthAgo);
-      dateFrom = romeDateTimeToUTC(monthAgoStr, '00:00:00');
+      dateFrom = romeDateTimeToUTC(meseAgoStr, '00:00:00');
       dateTo = romeDateTimeToUTC(romeToday, '23:59:59');
-      break;
+      rottura;
     }
-    case 'quarter': {
+    caso 'trimestre': {
       const qAgo = new Date(now.getTime() - 90*24*60*60*1000);
       const qAgoStr = getRomeDateString(qAgo);
       dateFrom = romeDateTimeToUTC(qAgoStr, '00:00:00');
       dateTo = romeDateTimeToUTC(romeToday, '23:59:59');
-      break;
+      rottura;
     }
-    case 'year': {
+    caso 'anno': {
       const yAgo = new Date(now.getTime() - 365*24*60*60*1000);
       const yAgoStr = getRomeDateString(yAgo);
       dateFrom = romeDateTimeToUTC(yAgoStr, '00:00:00');
       dateTo = romeDateTimeToUTC(romeToday, '23:59:59');
-      break;
+      rottura;
     }
-    default:
+    predefinito:
       dateFrom = romeDateTimeToUTC(romeToday, '00:00:00');
       dateTo = romeDateTimeToUTC(romeToday, '23:59:59');
   }
-  return { dateFrom, dateTo };
+  restituisci { dataDa, dataA };
 }
 
-async function getShopifyOrders(periodo = 'today', dateFromCustom = null, dateToCustom = null) {
+funzione asincrona getShopifyOrders(periodo = 'oggi', dateFromCustom = null, dateToCustom = null) {
   const token = await getShopifyAccessToken();
   const { dateFrom, dateTo } = getDateRange(periodo, dateFromCustom, dateToCustom);
-  let allOrders = [];
+  lascia tutti gli ordini = [];
   let url = `https://${SHOPIFY_STORE}/admin/api/2024-01/orders.json?status=any&created_at_min=${dateFrom.toISOString()}&created_at_max=${dateTo.toISOString()}&limit=250`;
-  let pageCount = 0;
+  lascia pageCount = 0;
   const maxPages = 20;
-  while (url && pageCount < maxPages) {
+  mentre (url && pageCount < maxPages) {
     const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    se (!response.ok) genera un nuovo Errore(`HTTP ${response.status}`);
     const data = await response.json();
     allOrders = allOrders.concat(data.orders || []);
     const linkHeader = response.headers.get('link') || response.headers.get('Link');
@@ -1029,87 +1029,87 @@ async function getShopifyOrders(periodo = 'today', dateFromCustom = null, dateTo
     if (linkHeader) { const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/); if (nextMatch) url = nextMatch[1]; }
     pageCount++;
   }
-  return allOrders;
+  restituisci tutti gli ordini;
 }
 
-function calcolaBestSellers(ordini, top = 20, variantCosts = {}) {
+funzionecalBestSellers(ordini, top = 20, variantCosts = {}) {
   const prodotti = {};
   ordini.forEach(ordine => {
-    const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
+    const paese = ordine.indirizzo_spedizione?.codice_paese || ordine.indirizzo_fatturazione?.codice_paese;
     const ivaPerc = getIvaPerPaese(country);
     const ordCurrency = ordine.currency || SHOP_CURRENCY;
-    (ordine.line_items || []).forEach(item => {
+    (ordine_line_items || []).forEach(item => {
       const productId = item.product_id || item.variant_id || item.title;
       // PREZZO IN EUR (da price_set.shop_money quando disponibile)
       const prezzo_unit_lordo = toEurAmount(item.price_set, item.price, ordCurrency);
       const quantity = parseInt(item.quantity) || 0;
-      const prezzo_unit_netto = prezzo_unit_lordo / (1 + ivaPerc / 100);
+      const prezzo_unit_netto = prezzo_unit_lordo/(1+ivaPerc/100);
       const costo_unit_reale = item.variant_id && variantCosts[item.variant_id] != null ? variantCosts[item.variant_id] : 0;
-      const fatturato_lordo = prezzo_unit_lordo * quantity;
-      const fatturato_netto = prezzo_unit_netto * quantity;
-      const costo_tot = costo_unit_reale * quantity;
+      const fatturato_lordo = prezzo_unit_lordo * quantità;
+      const fatturato_netto = prezzo_unit_netto * quantità;
+      const costo_tot = costo_unit_reale * quantità;
       const ricavo_stimato = fatturato_netto - costo_tot;
-      if (!prodotti[productId]) {
-        prodotti[productId] = { product_id: item.product_id, variant_id: item.variant_id, titolo: item.title, variante: item.variant_title || '', sku: item.sku || '', vendor: item.vendor || '', prezzo_unit_lordo, prezzo_unit_netto, costo_unit: costo_unit_reale, quantita_venduta: 0, fatturato_lordo: 0, fatturato_netto: 0, ricavo_stimato: 0, immagine: null };
+      se (!prodotti[productId]) {
+        prodotti[productId] = { product_id: articolo.product_id, variante_id: articolo.variant_id, titolo: articolo.title, variante: articolo.variant_title || '', sku: articolo.sku || '', venditore: item.vendor || '', prezzo_unit_lordo, prezzo_unit_netto, costo_unit: costo_unit_reale, quantita_venduta: 0, fatturato_lordo: 0, fatturato_netto: 0, ricavo_stimato: 0, immagine: null };
       }
-      prodotti[productId].quantita_venduta += quantity;
+      prodotti[productId].quantita_venduta += quantità;
       prodotti[productId].fatturato_lordo += fatturato_lordo;
       prodotti[productId].fatturato_netto += fatturato_netto;
-      prodotti[productId].ricavo_stimato += ricavo_stimato;
+      prodotti[productId].ricavo_stimato +=ricavo_stimato;
     });
   });
   return Object.values(prodotti).sort((a, b) => b.fatturato_lordo - a.fatturato_lordo).slice(0, top);
 }
 
-async function arricchisciConImmagini(prodotti) {
+funzione asincrona arricchisciConImmagini(prodotti) {
   if (prodotti.length === 0) return prodotti;
-  try {
+  Tentativo {
     const token = await getShopifyAccessToken();
     const productIds = prodotti.map(p => p.product_id).filter(Boolean).join(',');
-    if (!productIds) return prodotti;
+    if (!productIds) restituisce prodotti;
     const response = await fetch(`https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?ids=${productIds}&fields=id,image,images`, { headers: { 'X-Shopify-Access-Token': token } });
-    if (!response.ok) return prodotti;
+    if (!response.ok) restituisce prodotti;
     const data = await response.json();
     const imageMap = {};
-    (data.products || []).forEach(p => { imageMap[p.id] = p.image?.src || (p.images?.[0]?.src) || null; });
-    return prodotti.map(p => ({ ...p, immagine: imageMap[p.product_id] || null }));
+    (data.products || []).forEach(p => { imageMap[p.id] = p.image?.src || (p.images?.[0]?.src) || ​​null; });
+    restituisci prodotti.map(p => ({ ...p, immagine: imageMap[p.product_id] || null }));
   } catch (e) { return prodotti; }
 }
 
 const DASHBOARD_HTML = `<!DOCTYPE html>
 <html lang="it">
-<head>
+<testa>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>T. Luxy ERP — Dashboard Marginalità</title>
+<title>T. Luxy ERP — Marginalità del pannello di controllo</title>
 <style>
-  :root {
-    --green-primary: #008060; --green-dark: #004C3F; --green-light: #E8F4F0;
-    --gold: #C9A961; --gold-light: #F4ECD8;
-    --beige: #F4F1EB; --cream: #FAFAF7;
-    --black: #1A1A1A; --gray-900: #2D2D2D; --gray-700: #5C5C5C; --gray-500: #8E8E8E;
+  :radice {
+    --verde-primario: #008060; --verde-scuro: #004C3F; --verde-chiaro: #E8F4F0;
+    --oro: #C9A961; --oro chiaro: #F4ECD8;
+    --beige: #F4F1EB; --crema: #FAFAF7;
+    --nero: #1A1A1A; --grigio-900: #2D2D2D; --grigio-700: #5C5C5C; --grigio-500: #8E8E8E;
     --gray-300: #D4D4D4; --gray-200: #E8E8E8; --gray-100: #F2F2F0;
-    --white: #FFFFFF; --red: #BF4747; --red-light: #FCEEEE;
+    --bianco: #FFFFFF; --rosso: #BF4747; --luce rossa: #FCEEEE;
     --shadow-sm: 0 1px 2px rgba(26,26,26,0.04);
     --shadow-md: 0 4px 12px rgba(26,26,26,0.06);
     --shadow-lg: 0 12px 32px rgba(26,26,26,0.08);
     --radius-sm: 8px; --radius-md: 12px; --radius-lg: 20px;
     --font-main: 'Century Gothic', 'CenturyGothic', 'AppleGothic', Futura, 'Trebuchet MS', sans-serif;
   }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  * { margine: 0; spaziatura interna: 0; ridimensionamento box: bordo; }
   body { font-family: var(--font-main); background: var(--beige); min-height: 100vh; color: var(--black); -webkit-font-smoothing: antialiased; line-height: 1.5; letter-spacing: 0.01em; }
   .container { max-width: 1440px; margin: 0 auto; padding: 24px; }
   .header { background: var(--white); border-radius: var(--radius-lg); padding: 32px 40px; margin-bottom: 24px; box-shadow: var(--shadow-md); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px; border: 1px solid var(--gray-100); }
   .header-left { display: flex; align-items: center; gap: 28px; }
   .logo { font-family: var(--font-main); font-weight: 700; font-size: 2.6rem; color: var(--black); letter-spacing: 0.02em; line-height: 1; text-transform: uppercase; }
   .logo .dot { color: var(--gold); }
-  .header-divider { width: 1px; height: 52px; background: var(--gray-200); }
+  .header-divider { larghezza: 1px; altezza: 52px; sfondo: var(--gray-200); }
   .header-info h1 { font-size: 1.05rem; font-weight: 700; color: var(--gray-900); margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
   .header-info p { font-size: 0.8rem; color: var(--gray-500); letter-spacing: 0.03em; }
   .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .status-pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--green-light); color: var(--green-dark); border-radius: 50px; font-size: 0.75rem; font-weight: 700; border: 1px solid rgba(0,128,96,0.15); letter-spacing: 0.05em; text-transform: uppercase; }
-  .status-dot { width: 7px; height: 7px; background: var(--green-primary); border-radius: 50%; animation: pulse 2s infinite; }
-  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .status-dot { larghezza: 7px; altezza: 7px; sfondo: var(--green-primary); raggio del bordo: 50%; animazione: impulso 2s infinito; }
+  @keyframes pulse { 0%,100% { opacità: 1; } 50% { opacità: 0.4; } }
   .tabs-wrap { background: var(--white); border-radius: var(--radius-lg); padding: 8px; margin-bottom: 24px; box-shadow: var(--shadow-sm); border: 1px solid var(--gray-100); }
   .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
   .tab { flex: 1; min-width: 130px; padding: 14px 20px; border: none; background: transparent; border-radius: var(--radius-md); cursor: pointer; font-family: var(--font-main); font-weight: 700; font-size: 0.82rem; color: var(--gray-700); transition: all 0.25s ease; letter-spacing: 0.06em; text-transform: uppercase; }
@@ -1117,7 +1117,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .tab.active { background: var(--black); color: var(--white); }
   .tab-content { display: none; animation: fade 0.4s ease; }
   .tab-content.active { display: block; }
-  @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes fade { da { opacità: 0; trasformazione: translateY(8px); } a { opacità: 1; trasformazione: translateY(0); } }
   .section { background: var(--white); border-radius: var(--radius-lg); padding: 36px; margin-bottom: 24px; box-shadow: var(--shadow-sm); border: 1px solid var(--gray-100); }
   .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; flex-wrap: wrap; gap: 16px; }
   .section-title { font-family: var(--font-main); font-size: 1.6rem; font-weight: 700; color: var(--black); letter-spacing: 0.02em; text-transform: uppercase; }
@@ -1157,8 +1157,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .breakdown-title { font-size: 0.95rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--black); margin-bottom: 12px; }
   .breakdown-sub { font-size: 0.8rem; color: var(--gray-500); margin-bottom: 16px; }
   .breakdown-table-wrap { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--gray-200); }
-  .breakdown-table { width: 100%; border-collapse: collapse; background: var(--white); }
-  .breakdown-table thead { background: var(--black); color: var(--white); }
+  .breakdown-table { larghezza: 100%; bordo-collasso: collasso; sfondo: var(--white); }
+  .breakdown-table head { background: var(--black); color: var(--white); }
   .breakdown-table th { padding: 14px 14px; text-align: left; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; white-space: nowrap; }
   .breakdown-table th.num, .breakdown-table td.num { text-align: right; }
   .breakdown-table td { padding: 14px 14px; border-bottom: 1px solid var(--gray-100); font-size: 0.88rem; color: var(--gray-900); }
@@ -1184,7 +1184,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .duo-title { font-weight: 700; font-size: 0.92rem; color: var(--black); margin-bottom: 4px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-transform: uppercase; letter-spacing: 0.02em; }
   .duo-meta { font-size: 0.7rem; color: var(--gray-500); margin-bottom: 8px; font-family: monospace; }
   .duo-listino { font-size: 0.82rem; color: var(--gray-700); margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px dotted var(--gray-200); }
-  .duo-input-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .duo-input-row { display: flex; align-items: center; g ap: 10px; margin-bottom: 8px; }
   .duo-input-row label { flex: 0 0 110px; font-size: 0.7rem; color: var(--gray-700); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
   .duo-input-row input, .duo-input-row select { flex: 1; padding: 7px 10px; border: 1px solid var(--gray-200); border-radius: 6px; font-size: 0.85rem; font-family: var(--font-main); background: var(--white); }
   .duo-input-row input:focus, .duo-input-row select:focus { outline: none; border-color: var(--green-primary); }
@@ -1262,15 +1262,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   @media (max-width: 768px) { .container { padding: 16px; } .header { padding: 24px; } .logo { font-size: 1.9rem; } .section { padding: 24px; } .tabs { flex-direction: column; } .tab { min-width: auto; } .header-divider { display: none; } .kpi-value { font-size: 1.5rem; } .filter-bar { flex-direction: column; align-items: stretch; } .custom-range { flex-wrap: wrap; } }
 </style>
 </head>
-<body>
+<corpo>
 <div class="container">
   <div class="header">
     <div class="header-left">
       <div class="logo">T<span class="dot">.</span> LUXY</div>
       <div class="header-divider"></div>
       <div class="header-info">
-        <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.11</p>
+        <h1>Marginalità ERP</h1>
+        <p>Dashboard di Business Intelligence · v5.12</p>
       </div>
     </div>
     <div class="header-right">
@@ -1280,10 +1280,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   </div>
   <div class="tabs-wrap">
     <div class="tabs">
-      <button class="tab active" data-tab="analytics">Analytics</button>
-      <button class="tab" data-tab="bestsellers">Best Seller</button>
+      <button class="tab active" data-tab="analytics">Analisi</button>
+      <button class="tab" data-tab="bestsellers">Più venduti</button>
       <button class="tab" data-tab="compare">Confronto MP</button>
-      <button class="tab" data-tab="calculator">Calcolatore</button>
+      <button class="tab" data-tab="calcolatore">Calcolatore</button>
       <button class="tab" data-tab="marketplaces">Marketplace</button>
       <button class="tab" data-tab="duo">Simulatore DUO</button>
       <button class="tab" data-tab="forecast">💰 Previsioni Incassi</button>
@@ -1294,7 +1294,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <div id="analytics-tab" class="tab-content active">
     <div class="section">
       <div class="section-header"><div><div class="section-title">Performance</div><div class="section-subtitle">Analisi vendite e marginalità in tempo reale</div></div></div>
-      <div class="info-box">Fuso orario Europa/Roma reale. Costo merce letto da Shopify. Ordini senza "Cost per item" segnalati sotto.</div>
+      <div class="info-box">Fuso orario Europa/Roma reale. Costo merce letto da Shopify. Ordini senza "Costo per articolo" segnalati sotto.</div>
       <div class="filter-bar">
         <div class="period-selector" data-analytics-periods>
           <button class="period-btn active" data-period="today">Oggi</button>
@@ -1307,9 +1307,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="custom-range"><label>Da</label><input type="date" id="date-from"><label>A</label><input type="date" id="date-to"><button class="apply-btn" id="analytics-apply">Applica</button></div>
       </div>
       <div class="kpi-grid">
-        <div class="kpi primary"><div class="kpi-label">Lordo IVA inclusa</div><div class="kpi-value" id="lordo">—</div><div class="kpi-sub" id="ordini-count">— ordini</div></div>
+        <div class="kpi primary"><div class="kpi-label">Lordo IVA incluso</div><div class="kpi-value" id="lordo">—</div><div class="kpi-sub" id="ordini-count">— ordini</div></div>
         <div class="kpi"><div class="kpi-label">IVA Scorporata</div><div class="kpi-value" id="iva">—</div><div class="kpi-sub">Da versare</div></div>
-        <div class="kpi"><div class="kpi-label">Costi Totali</div><div class="kpi-value" id="costi">—</div><div class="kpi-split" id="costi-split" style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.08); font-size:0.78rem; line-height:1.5;"><div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-700);">Merce</span><span id="costi-merce" style="font-weight:600; font-variant-numeric:tabular-nums;">—</span></div><div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-700);">Fees + sped.</span><span id="costi-fees" style="font-weight:600; font-variant-numeric:tabular-nums;">—</span></div></div></div>
+        <div class="kpi"><div class="kpi-label">Costi Totali</div><div class="kpi-value" id="costi">—</div><div class="kpi-split" id="costi-split" style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.08); font-size:0.78rem; line-height:1.5;"><div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-700);">Merce</span><span id="costi-merce" style="font-weight:600; font-variant-numeric:tabular-nums;">—</span></div><div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-700);">Costi + velocità.</span><span id="costi-fees" style="font-weight:600; font-variant-numeric:tabular-nums;">—</span></div></div></div>
         <div class="kpi green"><div class="kpi-label">Margine Netto</div><div class="kpi-value" id="netto">—</div><div class="kpi-sub">Profitto reale</div></div>
         <div class="kpi gold"><div class="kpi-label">Margine %</div><div class="kpi-value" id="margine">—</div><div class="kpi-sub">Su lordo</div></div>
       </div>
@@ -1317,7 +1317,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div id="foreign-currency-panel"></div>
       <div id="errors-panel"></div>
       <div class="breakdown-section">
-        <div class="breakdown-title">Breakdown per Marketplace</div>
+        <div class="breakdown-title">Ripartizione per Marketplace</div>
         <div class="breakdown-sub">Clicca su un marketplace per vedere il dettaglio di tutti gli ordini</div>
         <div class="breakdown-table-wrap">
           <table class="breakdown-table">
@@ -1331,7 +1331,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   </div>
   <div id="bestsellers-tab" class="tab-content">
     <div class="section">
-      <div class="section-header"><div><div class="section-title">Best Seller</div><div class="section-subtitle">Top 20 prodotti più venduti per fatturato</div></div></div>
+      <div class="section-header"><div><div class="section-title">I più venduti</div><div class="section-subtitle">I 20 prodotti più venduti per fatturato</div></div></div>
       <div class="info-box">Foto, prezzo, costo merce reale e ricavo effettivo.</div>
       <div class="filter-bar">
         <div class="period-selector" data-bs-periods>
@@ -1352,7 +1352,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="info-box">Modifica i valori per confronto in tempo reale.</div>
       <div class="confronto-form">
         <div class="form-grid">
-          <div class="form-group"><label>Prezzo IVA inclusa (€)</label><input type="number" id="c-prezzo" value="100" step="0.01"></div>
+          <div class="form-group"><label>Prezzo IVA incluso (€)</label><input type="number" id="c-prezzo" value="100" step="0.01"></div>
           <div class="form-group"><label>Paese / IVA</label><select id="c-iva">
             <option value="22">🇮🇹 Italia (22%)</option><option value="20">🇫🇷 Francia (20%)</option><option value="19">🇩🇪 Germania (19%)</option><option value="21">🇪🇸 Spagna (21%)</option><option value="21">🇳🇱 Olanda (21%)</option><option value="21">🇧🇪 Belgio (21%)</option><option value="20">🇦🇹 Austria (20%)</option><option value="23">🇮🇪 Irlanda (23%)</option><option value="23">🇵🇱 Polonia (23%)</option><option value="25">🇸🇪 Svezia (25%)</option><option value="25">🇩🇰 Danimarca (25%)</option><option value="20">🇬🇧 Regno Unito (20%)</option><option value="0">🇺🇸 USA / Extra-UE (0%)</option>
           </select></div>
@@ -1360,47 +1360,59 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="form-group"><label>Spedizione (€)</label><input type="number" id="c-spedizione" value="5" step="0.01"></div>
         </div>
       </div>
-      <div class="table-wrap"><table class="compare-table" id="compare-table"><thead><tr><th>Marketplace</th><th>Sconto</th><th>Prezzo Netto</th><th>Fees Shopify</th><th>Fees MP</th><th>Margine €</th><th>Margine %</th><th>Esito</th></tr></thead><tbody id="compare-body"></tbody></table></div>
+      <div class="table-wrap"><table class="compare-table" id="compare-table"><thead><tr><th>Marketplace</th><th>Sconto</th><th>Prezzo Netto</th><th>Commissioni Shopify</th><th>Commissioni MP</th><th>Margine €</th><th>Margine %</th><th>Esito</th></tr></thead><tbody id="compare-body"></tbody></table></div>
       <div class="compare-summary" id="compare-summary"></div>
     </div>
   </div>
   <div id="calculator-tab" class="tab-content">
     <div class="section">
-      <div class="section-header"><div><div class="section-title">Calcolatore</div><div class="section-subtitle">Simulatore marginalità singolo marketplace</div></div></div>
-      <div class="info-box">Inserisci prezzo IVA inclusa e aliquota IVA del paese.</div>
+      <div class="section-header"><div><div class="section-title">Calcolatore</div><div class="section-subtitle">Simulator marginalità singolo marketplace</div></div></div>
+      <div class="info-box">Inserisci il <strong>Retail</strong> ei due sconti (vendita + costo fornitore) — Prezzo IVA e Costo Merce si calcolano automaticamente. Oppure compila direttamente Prezzo e Costo.</div>
+      
+      <!-- Box Retail + 2 sconti (scorciatoia) -->
+      <div style="background:var(--cream); border:1.5px solid var(--gray-200); border-radius:var(--radius-md); padding:18px 20px; margin-bottom:20px;">
+        <div style="font-size:0.7rem; color:var(--gray-700); text-transform:uppercase; letter-spacing:0.08em; font-weight:700; margin-bottom:12px;">🧮 Scorciatoia Retail → auto-calcolo</div>
+        <div class="form-grid" style="margin-bottom:0;">
+          <div class="form-group"><label>Prezzo al dettaglio consigliato (€)</label><input type="number" id="calc-retail" placeholder="es. 500" step="0.01"></div>
+          <div class="form-group"><label>Sconto vendita % (dal retail)</label><input type="number" id="calc-sconto-vendita" placeholder="es. 10" step="0.1" min="0" max="100"></div>
+          <div class="form-group"><label>Sconto costo % (fornitore)</label><input type="number" id="calc-sconto-costo" placeholder="es. 50" step="0.1" min="0" max="100"></div>
+        </div>
+        <div id="calc-retail-summary" style="margin-top:12px; padding:10px 14px; background:var(--green-light); border-left:3px solid var(--green-primary); border-radius:8px; font-size:0.85rem; color:var(--green-dark); display:none;"></div>
+      </div>
+      
       <div class="form-grid">
-        <div class="form-group"><label>Prezzo IVA inclusa (€)</label><input type="number" id="prezzo" value="100" step="0.01"></div>
+        <div class="form-group"><label>Prezzo IVA incluso (€) <span style="font-size:0.65rem; color:var(--green-dark); text-transform:none; letter-spacing:0; font-weight:500;" id="prezzo-auto-badge"></span></label><input type="number" id="prezzo" placeholder="es. 100" step="0.01"></div>
         <div class="form-group"><label>Paese / IVA</label><select id="iva-select">
           <option value="22">🇮🇹 Italia (22%)</option><option value="20">🇫🇷 Francia (20%)</option><option value="19">🇩🇪 Germania (19%)</option><option value="21">🇪🇸 Spagna (21%)</option><option value="21">🇳🇱 Olanda (21%)</option><option value="21">🇧🇪 Belgio (21%)</option><option value="20">🇦🇹 Austria (20%)</option><option value="23">🇮🇪 Irlanda (23%)</option><option value="23">🇵🇱 Polonia (23%)</option><option value="25">🇸🇪 Svezia (25%)</option><option value="25">🇩🇰 Danimarca (25%)</option><option value="20">🇬🇧 Regno Unito (20%)</option><option value="0">🇺🇸 USA / Extra-UE (0%)</option>
         </select></div>
-        <div class="form-group"><label>Costo Merce (€)</label><input type="number" id="costo" value="45" step="0.01"></div>
+        <div class="form-group"><label>Costo Merce (€) <span style="font-size:0.65rem; color:var(--green-dark); text-transform:none; letter-spacing:0; font-weight:500;" id="costo-auto-badge"></span></label><input type="number" id="costo" placeholder="es. 45" step="0.01"></div>
         <div class="form-group"><label>Spedizione (€)</label><input type="number" id="spedizione" value="5" step="0.01"></div>
         <div class="form-group"><label>Marketplace</label><select id="mp-select"></select></div>
       </div>
       <button class="btn-primary" id="calcola-btn">Calcola Marginalità</button>
-      <div class="results" id="results" style="display:none;">
+      <div class="risultati" id="risultati" style="display:none;">
         <div class="result-card"><div class="result-label">Lordo IVA incl.</div><div class="result-value" id="r-lordo">-</div></div>
-        <div class="result-card"><div class="result-label">IVA Scorporata</div><div class="result-value" id="r-iva">-</div></div>
+        <div class="result-card"><div class="result-label">IVA Società</div><div class="result-value" id="r-iva">-</div></div>
         <div class="result-card"><div class="result-label">Netto IVA</div><div class="result-value" id="r-netto-iva">-</div></div>
         <div class="result-card"><div class="result-label">Netto Marketplace</div><div class="result-value" id="r-netto">-</div></div>
-        <div class="result-card"><div class="result-label">Fees Shopify</div><div class="result-value" id="r-shopify">-</div></div>
-        <div class="result-card"><div class="result-label">Fees Marketplace</div><div class="result-value" id="r-mp">-</div></div>
+        <div class="result-card"><div class="result-label">Commissioni Shopify</div><div class="result-value" id="r-shopify">-</div></div>
+        <div class="result-card"><div class="result-label">Mercato delle tariffe</div><div class="result-value" id="r-mp">-</div></div>
         <div class="result-card" id="r-margine-card"><div class="result-label">Margine Netto</div><div class="result-value" id="r-margine">-</div></div>
         <div class="result-card"><div class="result-label">Margine %</div><div class="result-value" id="r-perc">-</div></div>
         <div class="result-card" id="r-redd-card"><div class="result-label">Esito</div><div class="result-value" id="r-redd">-</div></div>
       </div>
     </div>
     
-    <!-- ============ EXCEL BATCH CALCULATOR (v5.10) ============ -->
+    <!-- ============ CALCOLATORE LOTTO EXCEL (v5.10) ============ -->
     <div class="section" style="margin-top:24px;">
       <div class="section-header">
         <div>
           <div class="section-title">📊 Calcolo batch da Excel</div>
-          <div class="section-subtitle">Carica un file Excel/CSV con prodotti · calcolo margine su tutti i 16 marketplace · supporta sconto% fornitore</div>
+          <div class="section-subtitle">Carica un file Excel/CSV con prodotti · calcolo del margine su tutti i 16 marketplace · supporta il fornitore di sconto%</div>
         </div>
       </div>
       <div class="info-box">
-        <strong>Obbligatorie</strong>: <code>SKU</code>, <code>Retail</code> (o Listino), e <code>Costo</code> O <code>Sconto%</code>. <strong>Opzionali</strong>: <code>Titolo</code>, <code>Stock</code>, <code>Listino</code> (di vendita), <code>IVA</code>.<br>
+        <strong>Obbligatori</strong>: <code>SKU</code>, <code>Retail</code> (o Listino), e <code>Costo</code> O <code>Sconto%</code>. <strong>Opzionali</strong>: <code>Titolo</code>, <code>Stock</code>, <code>Listino</code> (di vendita), <code>IVA</code>.<br>
         <strong>Esempio</strong>: Retail €500 con Sconto% 50 → Costo €250 calcolato automaticamente. Puoi anche caricare direttamente Retail + Costo.
       </div>
       <div class="filter-bar" style="gap:12px;">
@@ -1409,10 +1421,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           <input type="file" id="batch-file" accept=".xlsx,.xls,.csv" style="display:none;">
         </label>
         <button id="batch-template-btn" class="apply-btn" style="background:var(--gray-700); padding:10px 18px;">
-          <i style="display:inline-block; transform:scale(1.2); margin-right:4px;">📥</i> Scarica template
+          <i style="display:inline-block; transform:scale(1.2); margin-right:4px;">📥</i> Scarica il template
         </button>
         <div style="margin-left:auto; display:flex; gap:10px; align-items:center;">
-          <label style="font-size:0.72rem; color:var(--gray-700); font-weight:700; text-transform:uppercase; letter-spacing:0.06em;">IVA default</label>
+          <label style="font-size:0.72rem; color:var(--gray-700); font-weight:700; text-transform:uppercase; letter-spacing:0.06em;">IVA predefinita</label>
           <select id="batch-iva-default" style="padding:8px 12px; border:1.5px solid var(--gray-200); border-radius:8px; font-size:0.85rem; font-family:inherit;">
             <option value="22" selected>🇮🇹 Italia 22%</option>
             <option value="20">🇫🇷🇬🇧🇦🇹 20%</option>
@@ -1421,7 +1433,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
             <option value="23">🇵🇱🇮🇪🇵🇹 23%</option>
             <option value="25">🇸🇪🇩🇰 25%</option>
             <option value="0">🌍 Extra-UE 0%</option>
-          </select>
+          </seleziona>
         </div>
       </div>
       <div id="batch-status" style="font-size:0.85rem; color:var(--gray-700); margin:10px 0;"></div>
@@ -1430,8 +1442,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   </div>
   <div id="marketplaces-tab" class="tab-content">
     <div class="section">
-      <div class="section-header"><div><div class="section-title">Portfolio Marketplace</div><div class="section-subtitle">Configurazioni canali</div></div></div>
-      <div class="warn-box">Riconoscimento via <code>source_name</code>. Verifica con <code>/api/debug-orders</code>.</div>
+      <div class="section-header"><div><div class="section-title">Marketplace del portfolio</div><div class="section-subtitle">Configurazioni canali</div></div></div>
+      <div class="warn-box">Riconoscimento tramite <code>source_name</code>. Verifica con <code>/api/debug-orders</code>.</div>
       <div class="mp-grid" id="mp-grid"></div>
     </div>
   </div>
@@ -1446,7 +1458,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div id="duo-kv-status" class="warn-box">Caricamento stato KV...</div>
       <div class="filter-bar" style="gap:12px;">
         <button class="apply-btn" id="duo-reload" style="background:var(--black);">🔄 Ricarica prodotti</button>
-        <label class="apply-btn" style="background:var(--green-primary); cursor:pointer;">📤 Import costi CSV
+        <label class="apply-btn" style="background:var(--green-primary); cursor:pointer;">📤 Importa costi CSV
           <input type="file" id="duo-csv-file" accept=".csv" style="display:none;">
         </label>
         <span id="duo-import-status" style="font-size:0.85rem; color:var(--gray-700);"></span>
@@ -1456,10 +1468,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
       <div class="info-box" style="margin-top:12px;">
-        <strong>Come funziona</strong>: clicca "Ricarica prodotti" per vedere tutti i DUO attivi. Inserisci il costo fornitore e il prezzo vendita, scegli il marketplace → ti mostro il margine reale. Puoi anche importare tutti i costi in blocco da un file CSV con colonne <code>variant_id,cost</code> (o <code>sku,cost</code>).
+        <strong>Come funziona</strong>: clicca "Ricarica prodotti" per vedere tutti i DUO attivi. Inserisci il costo fornitore e il prezzo di vendita, scegli il marketplace → ti mostro il margine reale. Puoi anche importare tutti i costi in blocco da un file CSV con colonne <code>variant_id,cost</code> (o <code>sku,cost</code>).
       </div>
       <div id="duo-content">
-        <div class="bs-empty">Clicca "Ricarica prodotti" per caricare i DUO da Shopify.</div>
+        <div class="bs-empty">Fai clic su "Ricarica prodotti" per caricare il DUO da Shopify.</div>
       </div>
     </div>
   </div>
@@ -1471,8 +1483,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="section-subtitle">Scadenziario bonifici MP · cache aggiornata 1 volta al giorno</div>
         </div>
         <div style="display:flex; gap:8px;">
-          <button class="apply-btn" id="forecast-reload" style="background:var(--gray-700);" title="Ricarica dalla cache (veloce)">Mostra</button>
-          <button class="apply-btn" id="forecast-refresh" style="background:var(--black);" title="Rifà tutti i calcoli (lento)">🔄 Aggiorna ora</button>
+          <button class="apply-btn" id="forecast-reload" style=" background:var(--gray-700);" title="Ricarica dalla cache (veloce)">Mostra</button>
+          <button class="apply-btn" id="forecast-refresh" style=" background:var(--black);" title="Rifà tutti i calcoli (lento)">🔄 Aggiorna ora</button>
         </div>
       </div>
       <div id="forecast-content">
@@ -1485,7 +1497,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="section-header">
         <div>
           <div class="section-title">Snapshot inventario</div>
-          <div class="section-subtitle">Pezzi attivi con stock > 0 · categoria × gender · cache 24h</div>
+          <div class="section-subtitle">Pezzi attivi con stock > 0 · categoria × genere · cache 24h</div>
         </div>
         <div style="display:flex; gap:8px;">
           <button class="apply-btn" id="inventory-reload" style="background:var(--gray-700);" title="Carica dalla cache">Mostra</button>
@@ -1498,7 +1510,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         <button class="inv-filter" data-filter="duo" style="border:none; background:transparent; color:var(--gray-700); padding:6px 14px; font-size:0.82rem; font-weight:400; border-radius:6px; cursor:pointer;">Solo DUO</button>
       </div>
       <div id="inventory-content">
-        <div class="bs-empty">Clicca "Mostra" o "Aggiorna ora" per caricare lo snapshot.</div>
+        <div class="bs-empty">Fai clic su "Mostra" o "Aggiorna ora" per caricare lo snapshot.</div>
       </div>
     </div>
   </div>
@@ -1517,10 +1529,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           <div style="font-size:2.5rem; margin-bottom:14px;">💬</div>
           <div style="font-size:0.95rem; margin-bottom:18px;">Ciao Alessio, sono il tuo assistente. Posso aiutarti con:</div>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; max-width:520px; margin:0 auto;">
-            <button class="chat-suggest" style="padding:10px 14px; background:var(--white); border:1px solid var(--gray-200); border-radius:8px; font-size:0.82rem; cursor:pointer; text-align:left; font-family:inherit;">📊 Quanto ho fatturato questo mese?</button>
+            <button class="chat-suggest" style="padding:10px 14px; background:var(--white); border:1px solid var(--gray-200); border-radius:8px; font-size:0.82rem; cursor:pointer; text-align:left; font-family:inherit;">📊 Quanto ho guadagnato questo mese?</button>
             <button class="chat-suggest" style="padding:10px 14px; background:var(--white); border:1px solid var(--gray-200); border-radius:8px; font-size:0.82rem; cursor:pointer; text-align:left; font-family:inherit;">🏆 Qual è il MP più redditizio?</button>
             <button class="chat-suggest" style="padding:10px 14px; background:var(--white); border:1px solid var(--gray-200); border-radius:8px; font-size:0.82rem; cursor:pointer; text-align:left; font-family:inherit;">⚠️ Quanti ordini hanno costi mancanti?</button>
-            <button class="chat-suggest" style="padding:10px 14px; background:var(--white); border:1px solid var(--gray-200); border-radius:8px; font-size:0.82rem; cursor:pointer; text-align:left; font-family:inherit;">↩️ Mostrami i resi recenti</button>
+            <button class="chat-suggest" style="padding:10px 14px; background:var(--white); border:1px solid var(--gray-200); border-radius:8px; font-size:0.82rem; cursor:pointer; text-align:left; font-family:inherit;">↩️ Mostrami i risultati recenti</button>
             <button class="chat-suggest" style="padding:10px 14px; background:var(--white); border:1px solid var(--gray-200); border-radius:8px; font-size:0.82rem; cursor:pointer; text-align:left; font-family:inherit;">💰 Quanto incasserò il prossimo mese?</button>
             <button class="chat-suggest" style="padding:10px 14px; background:var(--white); border:1px solid var(--gray-200); border-radius:8px; font-size:0.82rem; cursor:pointer; text-align:left; font-family:inherit;">📦 Stato inventario per categoria?</button>
           </div>
@@ -1534,41 +1546,41 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   </div>
 </div>
 <script>
-const MARKETPLACES = ${JSON.stringify(MARKETPLACE_CONFIGS)};
+const MERCATI = ${JSON.stringify(CONFIGURAZIONI_MERCATI)};
 const MP_COLORS = { TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC', MARK_FOYS:'#2E5F8F', GIGLIO:'#7B4F8A' };
 
 function setActiveButton(selector, btn) { document.querySelectorAll(selector).forEach(b => b.classList.remove('active')); if (btn) btn.classList.add('active'); }
 async function fetchNoCache(url) { const sep = url.includes('?') ? '&' : '?'; const res = await fetch(url + sep + '_=' + Date.now(), { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } }); return res.json(); }
 
-function showTab(name) {
+funzione mostraTab(nome) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
   document.getElementById(name + '-tab').classList.add('active');
   const tabBtn = document.querySelector('.tab[data-tab="' + name + '"]'); if (tabBtn) tabBtn.classList.add('active');
-  if (name === 'compare' && !document.getElementById('compare-body').children.length) confronta();
+  se (nome === 'compare' && !document.getElementById('compare-body').children.length) confronta();
   if (name === 'bestsellers') { const bsContent = document.getElementById('bs-content'); if (bsContent.querySelector('.bs-empty')) { const activeBtn = document.querySelector('[data-bs-periods] .period-btn.active') || document.querySelector('[data-bs-periods] .period-btn[data-period="month"]'); loadBestSellers(activeBtn ? activeBtn.dataset.period : 'month', activeBtn); } }
 }
 
-function renderErrors(ordiniConErrori) {
+funzione renderErrors(ordiniConErrori) {
   const panel = document.getElementById('errors-panel');
   if (!ordiniConErrori || ordiniConErrori.length === 0) { panel.innerHTML = ''; return; }
   const rows = ordiniConErrori.slice(0, 50).map(o => {
-    const prods = o.prodotti_senza_costo.map(p => '&nbsp;&nbsp;&nbsp;• ' + (p.title || 'Senza titolo') + (p.sku ? ' [SKU: ' + p.sku + ']' : '')).join('<br>');
+    const prods = o.prodotti_senza_costo.map(p => '   • ' + (p.title || 'Senza titolo') + (p.sku ? ' [SKU: ' + p.sku + ']' : '')).join('<br>');
     const origPrice = o.currency && o.currency !== 'EUR' ? o.currency + ' ' + o.total_price + ' → €' + (o.total_price_eur || 0).toFixed(2) : '€' + o.total_price;
-    return '<div><strong>Ordine #' + (o.order_number || o.name || o.id) + '</strong> (' + o.marketplace + ', ' + origPrice + ')<br>' + prods + '</div>';
-  }).join('');
+    restituisci '<div><strong>Ordine n.' + (o.order_number || o.name || o.id) + '</strong> (' + o.marketplace + ', ' + origPrice + ')<br>' + prods + '</div>';
+  }).giuntura('');
   const moreMsg = ordiniConErrori.length > 50 ? '<div style="margin-top:8px; font-style:italic;">... e altri ' + (ordiniConErrori.length - 50) + ' ordini</div>' : '';
   panel.innerHTML = '<div class="error-box"><strong>⚠ ' + ordiniConErrori.length + ' ordini esclusi: prodotti senza "Cost per item" su Shopify</strong>Aggiungi il costo su Shopify → Prodotti → Inventario.<div class="error-list">' + rows + moreMsg + '</div></div>';
 }
 
-function renderForeignCurrency(ordiniEstero) {
+funzione renderForeignCurrency(ordiniEstero) {
   const panel = document.getElementById('foreign-currency-panel');
-  if (!panel) return;
+  se (!pannello) restituisci;
   if (!ordiniEstero || ordiniEstero.length === 0) { panel.innerHTML = ''; return; }
   // Raggruppa per valuta
   const byCurrency = {};
   ordiniEstero.forEach(o => {
-    if (!byCurrency[o.currency]) byCurrency[o.currency] = { count: 0, total_orig: 0, total_eur: 0, rates: [] };
+    se (!byCurrency[o.currency]) byCurrency[o.currency] = { count: 0, total_orig: 0, total_eur: 0, rates: [] };
     byCurrency[o.currency].count++;
     byCurrency[o.currency].total_orig += o.total_original;
     byCurrency[o.currency].total_eur += o.total_eur;
@@ -1577,21 +1589,21 @@ function renderForeignCurrency(ordiniEstero) {
   const summary = Object.entries(byCurrency).map(([cur, info]) => {
     const avgRate = info.rates.reduce((a, b) => a + b, 0) / info.rates.length;
     return '<div style="padding:6px 0; border-bottom:1px dotted #E8C77A;"><strong>' + cur + '</strong>: ' + info.count + ' ordini · ' + cur + ' ' + info.total_orig.toFixed(2) + ' → <strong>€' + info.total_eur.toFixed(2) + '</strong> (cambio medio ~' + avgRate.toFixed(4) + ')</div>';
-  }).join('');
+  }).giuntura('');
   panel.innerHTML = '<div style="background:#FFF4D6; border-left:4px solid #E8C77A; border-radius:8px; padding:14px 18px; margin-bottom:16px;"><div style="font-weight:700; color:#8B6914; margin-bottom:8px;">💱 ' + ordiniEstero.length + ' ordine' + (ordiniEstero.length > 1 ? ' in' : '') + ' valuta estera (convertit' + (ordiniEstero.length > 1 ? 'i' : 'o') + ' in EUR al cambio storico Shopify)</div><div style="font-size:0.82rem; color:#6B4E0E;">' + summary + '</div></div>';
 }
 
-function renderRefunds(resi) {
+funzione renderRefunds(resi) {
   const panel = document.getElementById('refunds-panel');
-  if (!panel) return;
-  if (!resi || resi.totale_count === 0) { panel.innerHTML = ''; return; }
+  se (!pannello) restituisci;
+  if (!resi || resi.totale_count === 0) { panel.innerHTML = ''; ritorno; }
   // Riepilogo
   const dettagliRecenti = (resi.dettaglio || []).slice(0, 8).map(r => {
     const dataFmt = r.created_at ? new Date(r.created_at).toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit'}) : '—';
     const tipoBadge = r.tipo === 'totale' ? '<span style="background:#FCEEEE; color:#BF4747; padding:1px 6px; border-radius:8px; font-size:0.65rem; font-weight:700; margin-left:4px;">TOTALE</span>' : '<span style="background:#FFE4D6; color:#8B4F14; padding:1px 6px; border-radius:8px; font-size:0.65rem; font-weight:700; margin-left:4px;">PARZIALE</span>';
     return '<div style="padding:4px 0; border-bottom:1px dotted #E89A5A;"><strong>' + (r.name || '#' + r.order_number) + '</strong>' + tipoBadge + ' · ' + dataFmt + ' · ' + r.marketplace + ' · <strong>€' + r.importo_rimborsato_eur.toFixed(2) + '</strong> rimborsati' + (r.tipo === 'parziale' ? ' (' + r.quantita_rimborsata + '/' + r.quantita_totale + ' articoli)' : '') + '</div>';
-  }).join('');
-  const moreMsg = (resi.dettaglio || []).length > 8 ? '<div style="margin-top:6px; font-style:italic; font-size:0.78rem; color:#8B4F14;">... e altri ' + ((resi.dettaglio || []).length - 8) + ' resi</div>' : '';
+  }).giuntura('');
+  const moreMsg = (resi.dettaglio || []).lunghezza > 8 ? '<div style="margin-top:6px; font-style:italic; font-size:0.78rem; color:#8B4F14;">... e altri ' + ((resi.dettaglio || []).length - 8) + ' resi</div>' : '';
   panel.innerHTML = '<div style="background:#FFE4D6; border-left:4px solid #E89A5A; border-radius:8px; padding:14px 18px; margin-bottom:16px;">' +
     '<div style="font-weight:700; color:#8B4F14; margin-bottom:10px; font-size:0.95rem;">↩️ ' + resi.totale_count + ' resi nel periodo · €' + resi.importo_totale_eur.toFixed(2) + ' rimborsati (' + resi.percentuale_su_lordo.toFixed(1) + '% del fatturato lordo)</div>' +
     '<div style="font-size:0.78rem; color:#6B3D14; margin-bottom:8px;">📊 ' + resi.totali_count + ' totali · ' + resi.parziali_count + ' parziali · ' + resi.articoli_resi_qty + ' articoli rimborsati</div>' +
@@ -1599,51 +1611,51 @@ function renderRefunds(resi) {
   '</div>';
 }
 
-function renderBreakdown(breakdown) {
+funzione renderBreakdown(breakdown) {
   const body = document.getElementById('breakdown-body'); const foot = document.getElementById('breakdown-foot');
-  if (!breakdown || Object.keys(breakdown).length === 0) { body.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--gray-500); font-style:italic;">Nessun ordine.</td></tr>'; foot.innerHTML = ''; return; }
+  if (!breakdown || Object.keys(breakdown).length === 0) { body.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--gray-500); font-style:italic;"> Nessun ordine.</td></tr>'; foot.innerHTML = ''; return; }
   const arr = Object.entries(breakdown).map(([key, v]) => ({ key, ...v })); arr.sort((a, b) => b.fatturato - a.fatturato);
-  let totOrdini = 0, totFatt = 0, totIva = 0, totCosti = 0, totMargine = 0;
+  poniamo totOrdini = 0, totFatt = 0, totIva = 0, totCosti = 0, totMargine = 0;
   body.innerHTML = arr.map(r => {
     totOrdini += r.ordini; totFatt += r.fatturato; totIva += (r.iva || 0); totCosti += (r.costo_merce || 0); totMargine += r.margine;
-    const marginePerc = r.fatturato > 0 ? (r.margine / r.fatturato * 100) : 0;
+    const marginePerc = r.fatturato > 0 ? (r.margine / r.fatturato*100) : 0;
     const marginCls = r.margine >= 0 ? 'margin-pos' : 'margin-neg';
     const color = MP_COLORS[r.key] || '#8E8E8E';
     // Riga principale cliccabile + riga dettagli nascosta
-    const mainRow = '<tr class="mp-row" data-mp-key="' + r.key + '" style="cursor:pointer"><td><span class="toggle-arrow" id="arrow-' + r.key + '">▶</span>&nbsp;<span class="mp-badge" style="background:' + color + '">' + r.nome + '</span></td><td class="num">' + r.ordini + '</td><td class="num">€' + Math.round(r.fatturato).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(r.iva || 0).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(r.costo_merce || 0).toLocaleString('it-IT') + '</td><td class="num ' + marginCls + '">€' + Math.round(r.margine).toLocaleString('it-IT') + '</td><td class="num ' + marginCls + '">' + marginePerc.toFixed(1) + '%</td></tr>';
+    const mainRow = '<tr class="mp-row" data-mp-key="' + r.key + '" style="cursor:pointer"><td><span class="toggle-arrow" id="arrow-' + r.key + '">▶</span> <span class="mp-badge" style="background:' + color + '">' + r.nome + '</span></td><td class="num">' + r.ordini + '</td><td class="num">€' + Math.round(r.fatturato).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(r.iva || 0).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(r.costo_merce || 0).toLocaleString('it-IT') + '</td><td class="num ' + marginCls + '">€' + Math.round(r.margine).toLocaleString('it-IT') + '</td><td class="num ' + marginCls + '">' + marginePerc.toFixed(1) + '%</td></tr>';
     // Dettaglio ordini (nascosto default)
-    const detailRow = '<tr class="mp-detail" id="detail-' + r.key + '" style="display:none;"><td colspan="7" style="padding:0; background:var(--cream);"><div style="padding:16px;"><table class="detail-table"><thead><tr><th>Ordine</th><th>Data</th><th>Paese</th><th>Articoli</th><th class="num">Fatturato</th><th class="num">IVA</th><th class="num">Costo</th><th class="num">Fees MP</th><th class="num">Margine €</th><th class="num">%</th></tr></thead><tbody>' + 
+    const detailRow = '<tr class="mp-detail" id="detail-' + r.key + '" style="display:none;"><td colspan="7" style="padding:0; background:var(--cream);"><div style="padding:16px;"><table class="detail-table"><thead><tr><th>Ordine</th><th>Data</th><th>Paese</th><th>Articoli</th><th class="num">Fatturato</th><th class="num">IVA</th><th class="num">Costo</th><th class="num">Fees MP</th><th class="num">Margine €</th><th class="num">%</th></tr></thead><tbody>' +
       (r.dettaglio_ordini || []).map(o => {
         const dataFmt = o.created_at ? new Date(o.created_at).toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit', year:'2-digit'}) : '—';
-        const orderNumFmt = o.name || ('#' + o.order_number);
+        const orderNumFmt = o.nome || ('#' + o.numero_ordine);
         const articoli = (o.articoli || []).map(a => {
           // Margine netto unitario = allocato proporzionalmente sul fatturato del singolo articolo
-          const totFatturatoOrdine = (o.articoli || []).reduce((s, x) => s + (x.prezzo_unit * x.quantity), 0);
-          const fattArticolo = a.prezzo_unit * a.quantity;
-          const quotaFatt = totFatturatoOrdine > 0 ? fattArticolo / totFatturatoOrdine : 0;
-          const margineNettoArticolo = o.margine_netto * quotaFatt;
+          const totFatturatoOrdine = (o.articoli || []).reduce((s, x) => s + (x.prezzo_unit * x.quantità), 0);
+          const fattArticolo = a.prezzo_unità * a.quantità;
+          const quotaFatt = totFatturatoOrdine > 0 ? fattArticolo / totFatturatoOrdine: 0;
+          const margineNettoArticolo = o.margine_netto *quotaFatt;
           const margineNettoUnit = a.quantity > 0 ? margineNettoArticolo / a.quantity : 0;
           const badgeStyle = margineNettoUnit >= 0
             ? 'display:inline-block; background:var(--green-light); color:var(--green-dark); border:1px solid rgba(0,128,96,0.3); padding:2px 9px; border-radius:6px; font-weight:700; font-size:0.78rem;'
             : 'display:inline-block; background:var(--red-light); color:var(--red); border:1px solid rgba(191,71,71,0.3); padding:2px 9px; border-radius:6px; font-weight:700; font-size:0.78rem;';
-          const segno = margineNettoUnit >= 0 ? '+' : '';
-          return '<div style="padding:4px 0; border-bottom:1px dotted var(--gray-200);"><strong style="font-size:0.82rem;">' + a.title + '</strong><br><span style="font-size:0.72rem; color:var(--gray-500);">SKU: ' + a.sku + ' · qty ' + a.quantity + '</span><br><span style="font-size:0.75rem;">Prezzo: <strong>€' + a.prezzo_unit.toFixed(2) + '</strong> · Costo: <strong>€' + a.cost_unit.toFixed(2) + '</strong> · <span style="' + badgeStyle + '" title="Margine netto per unità (dopo IVA, fees, spedizione)">Netto ' + segno + '€' + margineNettoUnit.toFixed(2) + '</span></span></div>';
-        }).join('');
-        const marginCls2 = o.margine_netto >= 0 ? 'margin-pos' : 'margin-neg';
-        const currencyBadge = o.is_foreign_currency ? '<span style="display:inline-block; background:#FFF4D6; color:#8B6914; padding:2px 7px; border-radius:10px; font-size:0.68rem; font-weight:700; margin-left:6px; border:1px solid #E8C77A;" title="Ordine in ' + o.currency + ' convertito in EUR al cambio del giorno (' + o.exchange_rate.toFixed(4) + ')">💱 ' + o.currency + ' ' + (o.total_original || 0).toFixed(0) + '</span>' : '';
-        const refundBadge = o.refund_status === 'partial' ? '<span style="display:inline-block; background:#FFE4D6; color:#8B4F14; padding:2px 7px; border-radius:10px; font-size:0.68rem; font-weight:700; margin-left:6px; border:1px solid #E89A5A;" title="Reso parziale: ' + (o.refund_quantity || 0) + '/' + (o.refund_total_quantity || 0) + ' articoli, €' + (o.refund_amount_eur || 0).toFixed(2) + ' rimborsati">↩️ RESO PARZIALE €' + (o.refund_amount_eur || 0).toFixed(0) + '</span>' : '';
-        return '<tr><td><strong>' + orderNumFmt + '</strong>' + currencyBadge + refundBadge + '</td><td>' + dataFmt + '</td><td>' + (o.country || '—') + '</td><td style="max-width:340px;">' + articoli + '</td><td class="num">€' + o.fatturato.toFixed(2) + '</td><td class="num">€' + o.iva.toFixed(2) + '</td><td class="num">€' + o.costo_merce.toFixed(2) + '</td><td class="num">€' + o.fees_marketplace.toFixed(2) + '</td><td class="num ' + marginCls2 + '">€' + o.margine_netto.toFixed(2) + '</td><td class="num ' + marginCls2 + '">' + o.margine_percentuale.toFixed(1) + '%</td></tr>';
+          const segno = margineNettoUnità >= 0 ? '+':'';
+          return '<div style="padding:4px 0; border-bottom:1px dotted var(--gray-200);"><strong style="font-size:0.82rem;">' + a.title + '</strong><br><span style="font-size:0.72rem; color:var(--gray-500);">SKU: ' + a.sku + ' · qty ' + a.quantity + '</span><br><span style="font-size:0.75rem;">Prezzo: <strong>€' + a.prezzo_unit.toFixed(2) + '</strong> · Costo: <strong>€' + a.cost_unit.toFixed(2) + '</strong> · <span style="' + badgeStyle + '" title="Margine netto per unità (dopo IVA, commissioni, spedizione)">Netto ' + segno + '€' + margineNettoUnit.toFixed(2) + '</span></span></div>';
+        }).giuntura('');
+        const marginCls2 = o.margine_netto >= 0 ? 'margine-pos': 'margine-neg';
+        const currencyBadge = o.is_foreign_currency ? '<span style="display:inline-block; background:#FFF4D6; color:#8B6914; padding:2px 7px; border-radius:10px; font-size:0.68rem; font-weight:700; margin-left:6px; border:1px solid #E8C77A;" title="Ordine in ' + o.currency + ' convert in EUR al cambio del giorno (' + o.exchange_rate.toFixed(4) + ')">💱 ' + o.currency + ' ' + (o.total_original || 0).toFixed(0) + '</span>' : '';
+        const refundBadge = o.refund_status === 'partial' ? '<span style="display:inline-block; background:#FFE4D6; color:#8B4F14; padding:2px 7px; border-radius:10px; font-size:0.68rem; font-weight:700; margin-left:6px; border:1px solid #E89A5A;" title="Rimborso parziale: ' + (o.refund_quantity || 0) + '/' + (o.refund_total_quantity || 0) + ' articoli, €' + (o.refund_amount_eur || 0).toFixed(2) + ' rimborsati">↩️ RISPARMIO PARZIALE €' + (o.refund_amount_eur || 0).toFixed(0) + '</span>' : '';
+        restituisci '<tr><td><strong>' + orderNumFmt + '</strong>' + currencyBadge + refundBadge + '</td><td>' + dataFmt + '</td><td>' + (o.country || '—') + '</td><td style="max-width:340px;">' + articoli + '</td><td class="num">€' + o.fatturato.toFixed(2) + '</td><td class="num">€' + o.iva.toFixed(2) + '</td><td class="num">€' + o.costo_merce.toFixed(2) + '</td><td class="num">€' + o.fees_marketplace.toFixed(2) + '</td><td class="num ' + marginCls2 + '">€' + o.margine_netto.toFixed(2) + '</td><td class="num ' + marginCls2 + '">' + o.margine_percentuale.toFixed(1) + '%</td></tr>';
       }).join('') +
       '</tbody></table></div></td></tr>';
-    return mainRow + detailRow;
-  }).join('');
-  // Toggle handler via event delegation
+    restituisci rigaprincipale + rigadettaglio;
+  }).giuntura('');
+  // Gestore di attivazione/disattivazione tramite delega di eventi
   document.querySelectorAll('.mp-row').forEach(row => {
-    row.addEventListener('click', () => {
+    riga.aggiungiListenerEvent('click', () => {
       const key = row.dataset.mpKey;
       const detail = document.getElementById('detail-' + key);
       const arrow = document.getElementById('arrow-' + key);
-      if (detail && arrow) {
+      se (dettaglio e freccia) {
         const isOpen = detail.style.display !== 'none';
         detail.style.display = isOpen ? 'none' : 'table-row';
         arrow.textContent = isOpen ? '▶' : '▼';
@@ -1654,156 +1666,251 @@ function renderBreakdown(breakdown) {
   foot.innerHTML = '<tr><td>TOTALE</td><td class="num">' + totOrdini + '</td><td class="num">€' + Math.round(totFatt).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(totIva).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(totCosti).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(totMargine).toLocaleString('it-IT') + '</td><td class="num">' + totMargPerc.toFixed(1) + '%</td></tr>';
 }
 
-async function fetchAnalytics(url) {
+funzione asincrona fetchAnalytics(url) {
   ['lordo','iva','costi','netto','margine'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '...'; });
   document.getElementById('ordini-count').textContent = 'Caricamento (leggo costi reali)...';
   document.getElementById('breakdown-body').innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--gray-500); font-style:italic;">Caricamento...</td></tr>';
   document.getElementById('breakdown-foot').innerHTML = ''; document.getElementById('errors-panel').innerHTML = '';
-  try {
+  Tentativo {
     const data = await fetchNoCache(url);
-    if (data.success) {
+    se (dati di successo) {
       document.getElementById('lordo').textContent = '€' + Math.round(data.lordo_iva_inclusa).toLocaleString('it-IT');
       document.getElementById('iva').textContent = '€' + Math.round(data.iva_totale).toLocaleString('it-IT');
       document.getElementById('costi').textContent = '€' + Math.round(data.costi_totali).toLocaleString('it-IT');
-      // Split Merce / Fees+sped.
+      // Dividi Merce / Commissioni + spedizione.
       const merce = data.costi_merce_totali || 0;
       const fees = data.costi_fees_totali || 0;
       document.getElementById('costi-merce').textContent = '€' + Math.round(merce).toLocaleString('it-IT');
       document.getElementById('costi-fees').textContent = '€' + Math.round(fees).toLocaleString('it-IT');
       document.getElementById('netto').textContent = '€' + Math.round(data.margine_netto).toLocaleString('it-IT');
       document.getElementById('margine').textContent = data.margine_percentuale.toFixed(1) + '%';
-      const countLabel = data.ordini_con_errori_count > 0 ? data.ordini_totali + ' validi (' + data.ordini_con_errori_count + ' esclusi)' : data.ordini_totali + ' ordini';
+      const countLabel = data.ordini_con_errori_count > 0 ? data.ordini_totali + ' validi (' + data.ordini_con_errori_count + ' esclusioni)' : data.ordini_totali + ' ordini';
       document.getElementById('ordini-count').textContent = countLabel;
       renderBreakdown(data.breakdown_marketplace);
       renderErrors(data.ordini_con_errori || []);
       renderForeignCurrency(data.ordini_valuta_estera || []);
       renderRefunds(data.resi || null);
-      return true;
+      restituisci vero;
     }
   } catch(e) { console.error(e); }
   ['lordo','iva','costi','netto','margine'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '—'; });
   document.getElementById('ordini-count').textContent = 'Errore caricamento';
   document.getElementById('breakdown-body').innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--red);">Errore.</td></tr>';
-  return false;
+  restituire falso;
 }
 
 async function setPeriod(p, btn) { setActiveButton('[data-analytics-periods] .period-btn', btn); await fetchAnalytics('/api/analytics?periodo=' + p); }
-async function applyCustomRange() {
+funzione asincrona applyCustomRange() {
   const from = document.getElementById('date-from').value; const to = document.getElementById('date-to').value;
-  if (!from || !to) { alert('Seleziona date'); return; } if (from > to) { alert('Da deve precedere A'); return; }
+  if (!from || !to) { alert('Seleziona data'); return; } if (from > to) { alert('Da deve precedere A'); return; }
   setActiveButton('[data-analytics-periods] .period-btn', null); await fetchAnalytics('/api/analytics?from=' + from + '&to=' + to);
 }
-async function loadBestSellers(p, btn) {
+funzione asincrona loadBestSellers(p, btn) {
   setActiveButton('[data-bs-periods] .period-btn', btn);
   const cont = document.getElementById('bs-content'); cont.innerHTML = '<div class="bs-empty">Caricamento prodotti...</div>';
   try { const data = await fetchNoCache('/api/bestsellers?periodo=' + p); if (data.success && data.prodotti && data.prodotti.length > 0) { renderBestSellers(data.prodotti); return; } cont.innerHTML = '<div class="bs-empty">Nessun prodotto.</div>'; } catch(e) { cont.innerHTML = '<div class="bs-empty">Errore: ' + e.message + '</div>'; }
 }
-async function applyBsCustomRange() {
+funzione asincrona applyBsCustomRange() {
   const from = document.getElementById('bs-date-from').value; const to = document.getElementById('bs-date-to').value;
-  if (!from || !to) { alert('Seleziona date'); return; } if (from > to) { alert('Da deve precedere A'); return; }
+  if (!from || !to) { alert('Seleziona data'); return; } if (from > to) { alert('Da deve precedere A'); return; }
   setActiveButton('[data-bs-periods] .period-btn', null);
   const cont = document.getElementById('bs-content'); cont.innerHTML = '<div class="bs-empty">Caricamento...</div>';
-  try { const data = await fetchNoCache('/api/bestsellers?from=' + from + '&to=' + to); if (data.success && data.prodotti && data.prodotti.length > 0) { renderBestSellers(data.prodotti); return; } cont.innerHTML = '<div class="bs-empty">Nessun prodotto.</div>'; } catch(e) { cont.innerHTML = '<div class="bs-empty">Errore: ' + e.message + '</div>'; }
+  try { const data = await fetchNoCache('/api/bestsellers?from=' + from + '&to=' + to); if (data.success && data.prodotti && data.prodotti.length > 0) { renderBestSellers(data.prodotti); return; } cont.innerHTML = '<div class="bs-empty"> Nessun prodotto.</div>'; } catch(e) { cont.innerHTML = '<div class="bs-empty">Errore: ' + e.message + '</div>'; }
 }
-function renderBestSellers(prodotti) {
+funzione renderBestSellers(prodotti) {
   const cont = document.getElementById('bs-content');
-  if (!prodotti || prodotti.length === 0) { cont.innerHTML = '<div class="bs-empty">Nessun prodotto.</div>'; return; }
+  if (!prodotti || prodotti.length === 0) { cont.innerHTML = '<div class="bs-empty">Nessun prodotto.</div>'; ritorno; }
   cont.innerHTML = prodotti.map((p, i) => {
     const rank = p.rank || (i + 1); const rankClass = rank <= 3 ? 'top3' : '';
     const img = p.immagine ? '<img src="' + p.immagine + '" alt="' + p.titolo + '" loading="lazy">' : '<div class="bs-image-placeholder">◇</div>';
-    return '<div class="bs-card"><div class="bs-rank ' + rankClass + '">' + rank + '</div><div class="bs-image">' + img + '</div><div class="bs-body"><div class="bs-title">' + p.titolo + '</div><div class="bs-variant">' + (p.variante || '') + (p.sku ? ' · ' + p.sku : '') + '</div><div class="bs-stats"><div class="bs-stat"><div class="bs-stat-label">Prezzo</div><div class="bs-stat-value">€' + p.prezzo_unit_lordo.toFixed(2) + '</div></div><div class="bs-stat"><div class="bs-stat-label">Pezzi</div><div class="bs-stat-value">' + p.quantita_venduta + '</div></div><div class="bs-stat fatturato"><div class="bs-stat-label">Fatturato</div><div class="bs-stat-value">€' + Math.round(p.fatturato_lordo).toLocaleString('it-IT') + '</div></div><div class="bs-stat ricavo"><div class="bs-stat-label">Ricavo</div><div class="bs-stat-value">€' + Math.round(p.ricavo_stimato).toLocaleString('it-IT') + '</div></div></div></div></div>';
-  }).join('');
+    return '<div class="bs-card"><div class="bs-rank ' + rankClass + '">' + rank + '</div><div class="bs-image">' + img + '</div><div class="bs-body"><div class="bs-title">' + p.titolo + '</div><div class="bs-variant">' + (p.variante || '') + (p.sku ? ' · ' + p.sku : '') + '</div><div class="bs-stats"><div class="bs-stat"><div class="bs-stat-label">Prezzo</div><div class="bs-stat-value">€' + p.prezzo_unit_lordo.toFixed(2) + '</div></div><div class="bs-stat"><div class="bs-stat-label">Pezzi</div><div class="bs-stat-value">' + p.quantita_venduta + '</div></div><div class="bs-stat rotazione"><div class="bs-stat-label">Fatturato</div><div class="bs-stat-value">€' + Math.round(p.fatturato_lordo).toLocaleString('it-IT') + '</div></div><div class="bs-stat ricavo"><div class="bs-stat-label">Ricavo</div><div class="bs-stat-value">€' + Math.round(p.ricavo_stimato).toLocaleString('it-IT') + '</div></div></div></div></div>';
+  }).giuntura('');
 }
-function confronta() {
+funzione di confronto() {
   const prezzoLordo = parseFloat(document.getElementById('c-prezzo').value) || 0;
   const ivaPerc = parseFloat(document.getElementById('c-iva').value) || 0;
   const costo = parseFloat(document.getElementById('c-costo').value) || 0;
   const spedizione = parseFloat(document.getElementById('c-spedizione').value) || 0;
-  const prezzoNettoIva = prezzoLordo / (1 + ivaPerc / 100);
+  const prezzoNettoIva = prezzoLordo/(1+ivaPerc/100);
   const risultati = Object.entries(MARKETPLACES).map(([key, mp]) => {
-    const prezzoNetto = prezzoNettoIva * (1 - mp.sconto_percentuale / 100);
+    const prezzoNetto = prezzoNettoIva* (1 - mp.sconto_percentuale/100);
     const feesShop = key === 'TLUXY_SITE' ? prezzoNetto * 0.0015 : 0;
-    const feeP = prezzoNetto * (mp.fee_principale / 100); const feeS = prezzoNetto * ((mp.fee_secondaria || 0) / 100); const feeA = prezzoNetto * ((mp.fee_accessoria || 0) / 100);
-    const feesMp = feeP + feeS + feeA + (mp.fee_fissa_trasporto || 0) + (mp.fee_fissa_packaging || 0);
+    tariffa constP = prezzoNetto * (mp.fee_principale/100); tariffa const = prezzoNetto * ((mp.fee_secondaria || 0) / 100); tariffa constA = prezzoNetto * ((mp.fee_accessoria || 0) / 100);
+    const tariffeMp = tariffaP + tariffaS + tariffaA + (mp.tariffa_fissa_trasporto || 0) + (mp.tariffa_fissa_imballaggio || 0);
     const margine = prezzoNetto - feesShop - feesMp - costo - spedizione;
-    const margineP = prezzoLordo > 0 ? (margine / prezzoLordo * 100) : 0;
+    const margineP = prezzoLordo > 0 ? (margine/prezzoLordo*100) : 0;
     return { key, nome: mp.nome, sconto: mp.sconto_percentuale, prezzoNetto, feesShop, feesMp, margine, margineP };
   });
   risultati.sort((a, b) => b.margine - a.margine);
-  const best = risultati[0]; const worst = risultati[risultati.length - 1];
+  const migliore = risultati[0]; const peggiori = risultati[risultati.length - 1];
   document.getElementById('compare-body').innerHTML = risultati.map((r, i) => {
-    let cls = '', pill = '';
-    if (i === 0) { cls = 'best'; pill = '<span class="mp-pill win">Top</span>'; }
-    if (i === risultati.length - 1) { cls = 'worst'; pill = '<span class="mp-pill lose">Last</span>'; }
-    const numCls = r.margine >= 0 ? 'num-pos' : 'num-neg';
-    const esito = r.margine >= 0 ? '✓' : '✕';
+    lascia cls = '', pill = '';
+    if (i === 0) { cls = 'migliore'; pill = '<span class="mp-pill win">Migliore</span>'; }
+    if (i === risultati.length - 1) { cls = 'peggiore'; pill = '<span class="mp-pill lose">Ultima</span>'; }
+    const numCls = r.margine >= 0 ? 'num-pos': 'num-neg';
+    const esito = r.margine >= 0 ? ' ✓' : '✕';
     return '<tr class="' + cls + '"><td><strong>' + r.nome + '</strong>' + pill + '</td><td>' + r.sconto + '%</td><td>€' + r.prezzoNetto.toFixed(2) + '</td><td>€' + r.feesShop.toFixed(2) + '</td><td>€' + r.feesMp.toFixed(2) + '</td><td class="' + numCls + '">€' + r.margine.toFixed(2) + '</td><td class="' + numCls + '">' + r.margineP.toFixed(1) + '%</td><td style="font-size:1.1rem; font-weight:700; color:' + (r.margine >= 0 ? 'var(--green-primary)' : 'var(--red)') + '">' + esito + '</td></tr>';
-  }).join('');
+  }).giuntura('');
   const redditizi = risultati.filter(r => r.margine > 0).length; const inPerdita = risultati.filter(r => r.margine <= 0).length;
   document.getElementById('compare-summary').innerHTML = '<div class="summary-card best-mp"><div class="summary-label">Migliore</div><div class="summary-value">' + best.nome + '</div><div class="summary-detail">€' + best.margine.toFixed(2) + ' (' + best.margineP.toFixed(1) + '%)</div></div><div class="summary-card worst-mp"><div class="summary-label">Peggiore</div><div class="summary-value">' + worst.nome + '</div><div class="summary-detail">€' + worst.margine.toFixed(2) + ' (' + worst.margineP.toFixed(1) + '%)</div></div><div class="summary-card info"><div class="summary-label">Redditizi</div><div class="summary-value">' + redditizi + ' su ' + risultati.length + '</div><div class="summary-detail">' + inPerdita + ' in perdita</div></div>';
 }
-function calcola() {
+// ============ CALCOLATORE: RETAIL + SCONTI (v5.12) ============
+// Sincronizzazione bidirezionale: cambia retail/sconti → aggiorna prezzo/costo. Cambia prezzo/costo → aggiorna sconti.
+lascia che calcSyncing = false; // flag per prevenire il loop infinito
+
+funzione calcUpdateFromRetail() {
+  se (calcSyncing) restituisci;
+  CalcSyncing = true;
+  const retail = parseFloat(document.getElementById('calc-retail').value);
+  const scontoV = parseFloat(document.getElementById('calc-sconto-vendita').value);
+  const scontoC = parseFloat(document.getElementById('calc-sconto-costo').value);
+  const prezzoEl = document.getElementById('prezzo');
+  const costoEl = document.getElementById('costo');
+  const prezzoBadge = document.getElementById('prezzo-auto-badge');
+  const costoBadge = document.getElementById('costo-auto-badge');
+  // Calcola Prezzo da retail + sconto vendita
+  if (!isNaN(vendita al dettaglio) && vendita al dettaglio > 0) {
+    if (!isNaN(scontoV) && scontoV >= 0 && scontoV <= 100) {
+      const nuovoPrezzo = retail* (1 - scontoV/100);
+      prezzoEl.value = nuovoPrezzo.toFixed(2);
+      prezzoBadge.textContent = '↻ auto da vendita';
+      prezzoEl.style.background = 'rgba(0,128,96,0.05)';
+    } altrimenti se (isNaN(scontoV)) {
+      // Solo vendita al dettaglio → prezzo = vendita al dettaglio pieno
+      prezzoEl.value = retail.toFixed(2);
+      prezzoBadge.textContent = '↻ = prezzo al dettaglio';
+      prezzoEl.style.background = 'rgba(0,128,96,0.05)';
+    }
+    // Calcola Costo da retail + sconto costo
+    if (!isNaN(scontoC) && scontoC >= 0 && scontoC <= 100) {
+      const nuovoCosto = retail* (1 - scontoC/100);
+      costoEl.value = nuovoCosto.toFixed(2);
+      costoBadge.textContent = '↻ auto da retail';
+      costoEl.style.background = 'rgba(0,128,96,0.05)';
+    }
+  }
+  aggiornaRiepilogoRetail();
+  // Ri-renderizza i risultati se già visibili
+  se (document.getElementById('results').style.display !== 'none') calcola();
+  calcSyncing = falso;
+}
+
+funzione calcUpdateFromPrezzoCosto() {
+  se (calcSyncing) restituisci;
+  CalcSyncing = true;
+  const retail = parseFloat(document.getElementById('calc-retail').value);
+  const prezzo = parseFloat(document.getElementById('prezzo').value);
+  const costo = parseFloat(document.getElementById('costo').value);
+  // Se ho il retail, ricalcolo gli sconti in base a prezzo/costo manuali
+  if (!isNaN(vendita al dettaglio) && vendita al dettaglio > 0) {
+    if (!isNaN(prezzo) && prezzo > 0) {
+      const newScontoV = ((prezzo al dettaglio - prezzo) / prezzo al dettaglio) * 100;
+      document.getElementById('calc-sconto-vendita').value = newScontoV.toFixed(1);
+    }
+    if (!isNaN(costo) && costo >= 0) {
+      const newScontoC = ((prezzo al dettaglio - costo) / prezzo al dettaglio) * 100;
+      document.getElementById('calc-sconto-costo').value = newScontoC.toFixed(1);
+    }
+  }
+  // Rimuovi badge auto perché l'utente ha modificato manualmente
+  document.getElementById('prezzo-auto-badge').textContent = '';
+  document.getElementById('costo-auto-badge').textContent = '';
+  document.getElementById('prezzo').style.background = '';
+  document.getElementById('costo').style.background = '';
+  aggiornaRiepilogoRetail();
+  se (document.getElementById('results').style.display !== 'none') calcola();
+  calcSyncing = falso;
+}
+
+funzione aggiornaRiepilogoRetail() {
+  const retail = parseFloat(document.getElementById('calc-retail').value);
+  const prezzo = parseFloat(document.getElementById('prezzo').value);
+  const costo = parseFloat(document.getElementById('costo').value);
+  const summary = document.getElementById('calc-retail-summary');
+  se (!riepilogo) restituisci;
+  if (isNaN(retail) || retail <= 0) { summary.style.display = 'none'; ritorno; }
+  const scontoV = !isNaN(prezzo) && prezzo > 0 ? ((retail - prezzo) / retail * 100) : null;
+  const scontoC = !isNaN(costo) && costo >= 0 ? ((vendita al dettaglio - costo) / vendita al dettaglio * 100) : null;
+  let html = '<strong>Riepilogo</strong> · Prezzo consigliato al pubblico <strong>€' + retail.toFixed(2) + '</strong>';
+  se (scontoV !== null) {
+    const segno = scontoV >= 0 ? '-': '+';
+    html += ' · vendo a <strong>€' + prezzo.toFixed(2) + '</strong> (' + segno + Math.abs(scontoV).toFixed(1) + '%)';
+  }
+  se (scontoC !== null) {
+    const segno = scontoC >= 0 ? '-': '+';
+    html += ' · compro a <strong>€' + costo.toFixed(2) + '</strong> (' + segno + Math.abs(scontoC).toFixed(1) + '%)';
+  }
+  summary.innerHTML = html;
+  summary.style.display = 'block';
+}
+
+funzione c_c() {
   const prezzoLordo = parseFloat(document.getElementById('prezzo').value) || 0;
   const ivaPerc = parseFloat(document.getElementById('iva-select').value) || 0;
   const costo = parseFloat(document.getElementById('costo').value) || 0;
   const spedizione = parseFloat(document.getElementById('spedizione').value) || 0;
   const mpKey = document.getElementById('mp-select').value;
-  const mp = MARKETPLACES[mpKey];
-  const prezzoNettoIva = prezzoLordo / (1 + ivaPerc / 100); const ivaScorporata = prezzoLordo - prezzoNettoIva;
-  const prezzoNetto = prezzoNettoIva * (1 - mp.sconto_percentuale / 100);
+  const mp = MERCATI[mpKey];
+  // Protezione: se prezzo a 0 o MP non valido, non calcolare
+  if (prezzoLordo <= 0 || !mp) {
+    document.getElementById('results').style.display = 'none';
+    ritorno;
+  }
+  const prezzoNettoIva = prezzoLordo/(1+ivaPerc/100); const ivaScorporata = prezzoLordo - prezzoNettoIva;
+  const prezzoNetto = prezzoNettoIva* (1 - mp.sconto_percentuale/100);
   const feesShop = mpKey === 'TLUXY_SITE' ? prezzoNetto * 0.0015 : 0;
-  const feeP = prezzoNetto * (mp.fee_principale / 100); const feeS = prezzoNetto * ((mp.fee_secondaria || 0) / 100); const feeA = prezzoNetto * ((mp.fee_accessoria || 0) / 100);
-  const feesMp = feeP + feeS + feeA + (mp.fee_fissa_trasporto || 0) + (mp.fee_fissa_packaging || 0);
+  tariffa constP = prezzoNetto * (mp.fee_principale/100); tariffa const = prezzoNetto * ((mp.fee_secondaria || 0) / 100); tariffa constA = prezzoNetto * ((mp.fee_accessoria || 0) / 100);
+  const tariffeMp = tariffaP + tariffaS + tariffaA + (mp.tariffa_fissa_trasporto || 0) + (mp.tariffa_fissa_imballaggio || 0);
   const margine = prezzoNetto - feesShop - feesMp - costo - spedizione;
-  const margineP = prezzoLordo > 0 ? (margine / prezzoLordo * 100) : 0;
+  const margineP = prezzoLordo > 0 ? (margine/prezzoLordo*100) : 0;
   document.getElementById('results').style.display = 'grid';
   document.getElementById('r-lordo').textContent = '€' + prezzoLordo.toFixed(2);
   document.getElementById('r-iva').textContent = '€' + ivaScorporata.toFixed(2);
   document.getElementById('r-netto-iva').textContent = '€' + prezzoNettoIva.toFixed(2);
   document.getElementById('r-netto').textContent = '€' + prezzoNetto.toFixed(2);
   document.getElementById('r-shopify').textContent = '€' + feesShop.toFixed(2);
-  document.getElementById('r-mp').textContent = '€' + feesMp.toFixed(2);
+  document.getElementById('r-mp').textContent = '€' + feeMp.toFixed(2);
   document.getElementById('r-margine').textContent = '€' + margine.toFixed(2);
   document.getElementById('r-perc').textContent = margineP.toFixed(1) + '%';
   const mc = document.getElementById('r-margine-card'); const rc = document.getElementById('r-redd-card'); const re = document.getElementById('r-redd');
   if (margine > 0) { mc.className = 'result-card positive'; rc.className = 'result-card positive'; re.textContent = '✓ Redditizio'; }
-  else { mc.className = 'result-card negative'; rc.className = 'result-card negative'; re.textContent = '✕ In Perdita'; }
+  altrimenti { mc.className = 'result-card negative'; rc.className = 'result-card negative'; re.textContent = '✕ In Perdita'; }
 }
-function loadMarketplaces() {
+funzione loadMarketplaces() {
   const select = document.getElementById('mp-select'); const grid = document.getElementById('mp-grid');
   Object.entries(MARKETPLACES).forEach(([key, mp]) => {
-    const opt = document.createElement('option'); opt.value = key; opt.textContent = mp.nome; select.appendChild(opt);
+    const opt ​​= document.createElement('option'); opt.value = key; opt.textContent = mp.nome; select.appendChild(opt);
     const card = document.createElement('div'); card.className = 'mp-card';
-    card.addEventListener('click', () => { select.value = key; showTab('calculator'); calcola(); });
-    card.innerHTML = '<div class="mp-name">' + mp.nome + '</div><div class="mp-pay">Pagamento: ' + (mp.pagamento || 'N/D') + '</div><div class="mp-fees"><div><strong>Sconto</strong>' + mp.sconto_percentuale + '%</div><div><strong>Fee Princ.</strong>' + mp.fee_principale + '%</div><div><strong>Fee Sec.</strong>' + (mp.fee_secondaria || 0) + '%</div><div><strong>Trasporto</strong>€' + (mp.fee_fissa_trasporto || 0) + '</div><div><strong>Packaging</strong>€' + (mp.fee_fissa_packaging || 0) + '</div>' + (mp.fee_accessoria ? '<div><strong>Fee Acc.</strong>' + mp.fee_accessoria + '%</div>' : '') + '</div>';
+    card.addEventListener('click', () => { select.value = key; showTab('calcolatrice'); calcola(); });
+    card.innerHTML = '<div class="mp-name">' + mp.nome + '</div><div class="mp-pay">Pagamento: ' + (mp.pagamento || 'N/D') + '</div><div class="mp-fees"><div><strong>Sconto</strong>' + mp.sconto_percentuale + '%</div><div><strong>Commissione principale.</strong>' + mp.fee_principale + '%</div><div><strong>Commissione secondaria.</strong>' + (mp.fee_secondaria || 0) + '%</div><div><strong>Trasporto</strong>€' + (mp.fee_fissa_trasporto || 0) + '</div><div><strong>Imballaggio</strong>€' + (mp.fee_fissa_packaging || 0) + '</div>' + (mp.fee_accessoria ? '<div><strong>Commissione Acc.</strong>' + mp.fee_accessoria + '%</div>' : '') + '</div>';
     grid.appendChild(card);
   });
 }
 
 // ============ SIMULATORE DUO ============
-let duoProducts = [];
-function calcolaMargineDUO(prezzoLordo, costo, mpKey, ivaPerc) {
-  if (!prezzoLordo || !mpKey) return null;
-  const mp = MARKETPLACES[mpKey]; if (!mp) return null;
-  const prezzoNettoIva = prezzoLordo / (1 + ivaPerc / 100);
+lascia duoProducts = [];
+funzione calcolaMargineDUO(prezzoLordo, costo, mpKey, ivaPerc) {
+  se (!valoreLordo || !mpKey) restituisci null;
+  const mp = MERCATI[mpKey]; se (!mp) restituisci null;
+  const prezzoNettoIva = prezzoLordo/(1+ivaPerc/100);
   const ivaScorp = prezzoLordo - prezzoNettoIva;
-  const prezzoNetto = prezzoNettoIva * (1 - mp.sconto_percentuale / 100);
+  const prezzoNetto = prezzoNettoIva* (1 - mp.sconto_percentuale/100);
   const feesShop = mpKey === 'TLUXY_SITE' ? prezzoNetto * 0.0015 : 0;
-  const feeP = prezzoNetto * (mp.fee_principale / 100);
-  const feeS = prezzoNetto * ((mp.fee_secondaria || 0) / 100);
-  const feeA = prezzoNetto * ((mp.fee_accessoria || 0) / 100);
-  const feesMp = feeP + feeS + feeA + (mp.fee_fissa_trasporto || 0) + (mp.fee_fissa_packaging || 0);
+  tariffa constP = prezzoNetto * (mp.fee_principale/100);
+  tariffa const = prezzoNetto * ((mp.fee_secondaria || 0) / 100);
+  tariffa constA = prezzoNetto * ((mp.fee_accessoria || 0) / 100);
+  const tariffeMp = tariffaP + tariffaS + tariffaA + (mp.tariffa_fissa_trasporto || 0) + (mp.tariffa_fissa_imballaggio || 0);
   const margine = prezzoNetto - feesShop - feesMp - costo;
-  const marginePerc = prezzoLordo > 0 ? (margine / prezzoLordo * 100) : 0;
+  const marginePerc = prezzoLordo > 0 ? (margine/prezzoLordo*100) : 0;
   return { margine, marginePerc, prezzoNetto, ivaScorp, feesShop, feesMp };
 }
 
 // Calcola il prezzo minimo (IVA inclusa) per raggiungere un margine target
 function prezzoMinimoPerMargine(costo, mpKey, ivaPerc, margineTargetPerc) {
-  const mp = MARKETPLACES[mpKey]; if (!mp) return null;
+  const mp = MERCATI[mpKey]; se (!mp) restituisci null;
   const totalPercFee = (mp.fee_principale + (mp.fee_secondaria || 0) + (mp.fee_accessoria || 0) + (mpKey === 'TLUXY_SITE' ? 0.15 : 0)) / 100;
-  const scontoPerc = mp.sconto_percentuale / 100;
-  const feeFissa = (mp.fee_fissa_trasporto || 0) + (mp.fee_fissa_packaging || 0);
+  const scontoPerc = mp.sconto_percentuale/100;
+  tariffa fissaFissa = (mp.tariffa_fissa_trasporto || 0) + (mp.tariffa_fissa_imballaggio || 0);
   // Formula: prezzoNetto(1-totalPercFee) - costo - feeFissa = margineTarget
   // prezzoNetto = prezzoLordo/(1+iva) * (1-scontoPerc)
   // prezzoLordo = X. Risolvo per X.
@@ -1812,34 +1919,34 @@ function prezzoMinimoPerMargine(costo, mpKey, ivaPerc, margineTargetPerc) {
   // X/(1+iva)*(1-sconto)*(1-totalFee) - costo - feeFissa = margineTargetPerc/100 * X
   // X * [(1-sconto)*(1-totalFee)/(1+iva) - margineTargetPerc/100] = costo + feeFissa
   const coef = (1 - scontoPerc) * (1 - totalPercFee) / (1 + ivaPerc / 100) - margineTargetPerc / 100;
-  if (coef <= 0) return Infinity; // impossibile raggiungere quel margine
-  return (costo + feeFissa) / coef;
+  se (coef <= 0) restituisce Infinito; // impossibile raggiungere quel margine
+  reso (costo+commissioneFissa)/coef;
 }
 
-async function loadDuoProducts() {
+funzione asincrona loadDuoProducts() {
   const cont = document.getElementById('duo-content');
   cont.innerHTML = '<div class="bs-empty">Caricamento prodotti DUO da Shopify...</div>';
-  try {
+  Tentativo {
     const data = await fetchNoCache('/api/duo-products');
     if (!data.success) { cont.innerHTML = '<div class="bs-empty">Errore: ' + (data.error || 'sconosciuto') + '</div>'; return; }
-    duoProducts = data.prodotti || [];
+    duoProdotti = dati.prodotti || [];
     renderDuoProducts(duoProducts);
   } catch(e) { cont.innerHTML = '<div class="bs-empty">Errore: ' + e.message + '</div>'; }
 }
 
-function renderDuoProducts(products) {
+funzione renderDuoProducts(prodotti) {
   const cont = document.getElementById('duo-content');
-  if (!products || products.length === 0) { cont.innerHTML = '<div class="bs-empty">Nessun prodotto DUO trovato (SKU che inizia con "DUO-").</div>'; return; }
+  if (!products ||products.length === 0) { cont.inner HTML = '<div class="bs-empty">Nessun prodotto DUO trovato (SKU che inizia con "DUO-").</div>'; ritorno; }
   const mpOptions = Object.entries(MARKETPLACES).map(([k, v]) => '<option value="' + k + '">' + v.nome + '</option>').join('');
   cont.innerHTML = '<div class="duo-grid">' + products.map(p => {
-    // Placeholder compatto con iniziale + sfondo colorato (no immagini)
+    // Segnaposto compatto con iniziale + sfondo colorato (no immagini)
     const initial = (p.title || 'D').charAt(0).toUpperCase();
     const hue = ((p.variant_id || 0) % 360);
-    const costoSaved = p.costo_fornitore !== null && p.costo_fornitore !== undefined ? p.costo_fornitore : '';
-    const costBadge = p.costo_fornitore !== null 
-      ? '<span style="display:inline-block; background:#E6F4EE; color:var(--green-dark); padding:1px 6px; border-radius:8px; font-size:0.65rem; font-weight:700; margin-left:4px;">Cost Shopify</span>'
-      : '<span style="display:inline-block; background:#FCEEEE; color:var(--red); padding:1px 6px; border-radius:8px; font-size:0.65rem; font-weight:700; margin-left:4px;">Cost mancante</span>';
-    return '<div class="duo-card" data-vid="' + p.variant_id + '">' +
+    const costoSaved = p.costo_fornitore !== null && p.costo_fornitore !== unfine ? p.costo_fornitore:'';
+    const costBadge = p.costo_fornitore !== null
+      ? '<span style="display:inline-block; background:#E6F4EE; color:var(--green-dark); padding:1px 6px; border-radius:8px; font-size:0.65rem; font-weight:700; margin-left:4px;">Costo Shopify</span>'
+      : '<span style="display:inline-block; background:#FCEEEE; color:var(--red); padding:1px 6px; border-radius:8px; font-size:0.65rem; font-weight:700; margin-left:4px;">Costo mancante</span>';
+    restituisci '<div class="duo-card" data-vid="' + p.variant_id + '">' +
       '<div class="duo-body" style="padding:14px;">' +
         '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">' +
           '<div style="width:36px; height:36px; border-radius:8px; background:hsl(' + hue + ', 35%, 88%); color:hsl(' + hue + ', 45%, 30%); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.95rem; flex-shrink:0;">' + initial + '</div>' +
@@ -1852,109 +1959,109 @@ function renderDuoProducts(products) {
         '<div class="duo-input-row"><label>Costo €</label><input type="number" class="duo-cost" value="' + costoSaved + '" step="0.01" min="0" data-vid="' + p.variant_id + '"></div>' +
         '<div class="duo-input-row"><label>Marketplace</label><select class="duo-mp" data-vid="' + p.variant_id + '"><option value="">— scegli —</option>' + mpOptions + '</select></div>' +
         '<div class="duo-input-row"><label>IVA %</label><select class="duo-iva" data-vid="' + p.variant_id + '"><option value="22">IT (22%)</option><option value="20">FR/UK/AT (20%)</option><option value="19">DE (19%)</option><option value="21">ES/NL/BE (21%)</option><option value="23">PL/IE/PT (23%)</option><option value="25">SE/DK (25%)</option><option value="0">Extra-UE (0%)</option></select></div>' +
-        '<div class="duo-input-row"><label>Prezzo test €</label><input type="number" class="duo-prezzo-test" value="' + p.prezzo_listino.toFixed(2) + '" step="0.01" data-vid="' + p.variant_id + '"></div>' +
+        '<div class="duo-input-row"><label>Test Prezzo €</label><input type="number" class="duo-prezzo-test" value="' + p.prezzo_listino.toFixed(2) + '" step="0.01" data-vid="' + p.variant_id + '"></div>' +
         '<div class="duo-result" id="duo-res-' + p.variant_id + '">—</div>' +
       '</div>' +
     '</div>';
   }).join('') + '</div>';
   
-  // Listeners: solo calcolo locale, NO salvataggio KV (semplice)
+  // Ascoltatori: solo calcolo locale, NO salvataggio KV (semplice)
   cont.querySelectorAll('.duo-cost, .duo-mp, .duo-iva, .duo-prezzo-test').forEach(el => {
     el.addEventListener('input', e => updateDuoCard(e.target.dataset.vid));
     el.addEventListener('change', e => updateDuoCard(e.target.dataset.vid));
   });
   
-  // Auto-update tutti i prodotti con costo noto (triggera calcolo margine immediato)
+  // Aggiornamento automatico di tutti i prodotti con costo noto (attiva calcolo margine immediato)
   setTimeout(() => {
     cont.querySelectorAll('.duo-card').forEach(card => {
       const vid = card.dataset.vid;
-      if (vid) updateDuoCard(vid);
+      se (vid) aggiornaDuoCard(vid);
     });
   }, 50);
 }
 
-function updateDuoCard(vid) {
+funzione updateDuoCard(vid) {
   const card = document.querySelector('.duo-card[data-vid="' + vid + '"]'); if (!card) return;
   const costo = parseFloat(card.querySelector('.duo-cost').value) || 0;
   const mpKey = card.querySelector('.duo-mp').value;
   const iva = parseFloat(card.querySelector('.duo-iva').value);
   const prezzo = parseFloat(card.querySelector('.duo-prezzo-test').value) || 0;
   const resDiv = card.querySelector('.duo-result');
-  if (!costo || !mpKey || !prezzo) { resDiv.innerHTML = '<span style="color:var(--gray-500); font-style:italic;">Compila costo, marketplace e prezzo per vedere il margine</span>'; resDiv.className = 'duo-result'; return; }
+  if (!costo || !mpKey || !prezzo) { resDiv.innerHTML = '<span style="color:var(--gray-500); font-style:italic;">Compila costo, marketplace e prezzo per vedere il margine</span>'; resDiv.className = 'duo-risultato'; ritorno; }
   const r = calcolaMargineDUO(prezzo, costo, mpKey, iva);
-  if (!r) { resDiv.innerHTML = 'Errore calcolo'; return; }
+  if (!r) { resDiv.innerHTML = 'Errore calcolo'; ritorno; }
   const prezzoBE = prezzoMinimoPerMargine(costo, mpKey, iva, 0);
   const prezzo20 = prezzoMinimoPerMargine(costo, mpKey, iva, 20);
   const prezzo30 = prezzoMinimoPerMargine(costo, mpKey, iva, 30);
   const marginCls = r.margine >= 0 ? 'margin-pos' : 'margin-neg';
   resDiv.className = 'duo-result ' + (r.margine >= 0 ? 'duo-pos' : 'duo-neg');
   resDiv.innerHTML = '<div class="duo-main-result"><span class="duo-result-label">MARGINE</span><span class="' + marginCls + '" style="font-size:1.3rem; font-weight:700;">€' + r.margine.toFixed(2) + '</span><span class="' + marginCls + '">' + r.marginePerc.toFixed(1) + '%</span></div>' +
-    '<div class="duo-breakeven"><strong>Break-even</strong>: €' + (isFinite(prezzoBE) ? prezzoBE.toFixed(2) : '—') + '<br><strong>Per 20% margine</strong>: €' + (isFinite(prezzo20) ? prezzo20.toFixed(2) : '—') + '<br><strong>Per 30% margine</strong>: €' + (isFinite(prezzo30) ? prezzo30.toFixed(2) : '—') + '</div>';
+    '<div class="duo-breakeven"><strong>Pareggio</strong>: €' + (isFinite(prezzoBE) ? prezzoBE.toFixed(2) : '—') + '<br><strong>Margine del 20%</strong>: €' + (isFinite(prezzo20) ? prezzo20.toFixed(2) : '—') + '<br><strong>Per Margine 30%</strong>: €' + (isFinite(prezzo30) ? prezzo30.toFixed(2) : '—') + '</div>';
 }
 
-function filterDuoProducts() {
+funzione filterDuoProducts() {
   const q = (document.getElementById('duo-search').value || '').toLowerCase().trim();
   if (!q) { renderDuoProducts(duoProducts); return; }
   const filtered = duoProducts.filter(p => p.title.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
-  renderDuoProducts(filtered);
+  renderDuoProducts(filtrato);
 }
 
-async function checkKvStatus() {
+funzione asincrona checkKvStatus() {
   const el = document.getElementById('duo-kv-status');
-  try {
+  Tentativo {
     const data = await fetchNoCache('/api/kv-status');
-    if (data.kv_enabled) {
+    se (data.kv_enabled) {
       el.className = 'info-box';
       el.style.cssText = 'background:var(--green-light); border-left-color:var(--green-primary); color:var(--green-dark);';
-      el.innerHTML = '✅ <strong>DB persistente attivo</strong>: i costi vengono salvati permanentemente (non si perdono se i prodotti vengono archiviati).';
-    } else {
+      el.innerHTML = '✅ <strong>DB persistente attivo</strong>: i costi vengono salvati permanentemente (non si perdono se i prodotti archiviati).';
+    } altro {
       el.className = 'warn-box';
-      el.innerHTML = '⚠️ <strong>DB persistente NON configurato</strong>. Vai su Vercel → Storage → Create KV Database. Senza KV il simulatore non può salvare i costi.';
+      el.innerHTML = '⚠️ <strong>DB persistente NON configurato</strong>. Vai su Vercel → Archiviazione → Crea database KV. Senza KV il simulatore non può salvare i costi.';
     }
   } catch(e) { el.innerHTML = '❌ Errore verifica KV: ' + e.message; }
 }
 
-function parseCSV(text) {
+funzione parseCSV(testo) {
   const lines = text.split(/\\r?\\n/).filter(l => l.trim());
-  if (lines.length === 0) return { costs: {}, err: 'File vuoto' };
+  se (lines.length === 0) restituisci { costi: {}, err: 'File vuoto' };
   const header = lines[0].split(/[,;]/).map(h => h.trim().toLowerCase().replace(/^"|"$/g, ''));
   const vidIdx = header.findIndex(h => h === 'variant_id' || h === 'variantid');
   const skuIdx = header.findIndex(h => h === 'sku');
-  const costIdx = header.findIndex(h => h === 'cost' || h === 'costo' || h === 'costo_fornitore');
-  if (costIdx < 0) return { costs: {}, err: 'Colonna "cost" non trovata nel CSV' };
+  const costIdx = header.findIndex(h => h === 'costo' || h === 'costo' || h === 'costo_fornitore');
+  if (costIdx < 0) return {costs: {}, err: 'Colonna "cost" non trovata nel CSV' };
   if (vidIdx < 0 && skuIdx < 0) return { costs: {}, err: 'Devi avere colonna "variant_id" o "sku"' };
-  const costs = {}; const skippedSkus = [];
-  for (let i = 1; i < lines.length; i++) {
+  const costi = {}; const skippedSkus = [];
+  per (sia i = 1; i < lines.length; i++) {
     const parts = lines[i].split(/[,;]/).map(p => p.trim().replace(/^"|"$/g, ''));
     const cost = parseFloat(parts[costIdx]);
-    if (isNaN(cost)) continue;
-    let vid = null;
-    if (vidIdx >= 0 && parts[vidIdx]) vid = parts[vidIdx];
-    else if (skuIdx >= 0 && parts[skuIdx]) {
+    se (costo è NaN) continua;
+    lascia vid = null;
+    se (vidIdx >= 0 e parti[vidIdx]) vid = parti[vidIdx];
+    altrimenti se (skuIdx >= 0 e parti[skuIdx]) {
       const sku = parts[skuIdx];
       const match = duoProducts.find(p => p.sku === sku);
       if (match) vid = String(match.variant_id); else { skippedSkus.push(sku); continue; }
     }
-    if (vid) costs[vid] = cost;
+    se (vid) costi[vid] = costo;
   }
-  return { costs, skippedSkus };
+  restituisci { costi, skippedSkus };
 }
 
-async function handleCsvImport(file) {
+funzione asincrona handleCsvImport(file) {
   const status = document.getElementById('duo-import-status');
   status.textContent = '📄 Lettura CSV...';
-  try {
-    const text = await file.text();
-    const { costs, err, skippedSkus } = parseCSV(text);
+  Tentativo {
+    const testo = await file.text();
+    const { costi, err, skippedSkus } = parseCSV(testo);
     if (err) { status.textContent = '❌ ' + err; status.style.color = 'var(--red)'; return; }
     const n = Object.keys(costs).length;
-    if (n === 0) { status.textContent = '❌ Nessun costo valido nel CSV'; status.style.color = 'var(--red)'; return; }
-    status.textContent = '💾 Salvataggio ' + n + ' costi...';
+    if (n === 0) { status.textContent = '❌ Nessun costo valido nel CSV'; status.style.color = 'var(--red)'; ritorno; }
+    status.textContent = '💾 Salvataggio ' + n + 'costi...';
     const res = await fetch('/api/duo-costs-import', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({costs}) });
     const data = await res.json();
-    if (data.success) {
-      let msg = '✅ Salvati ' + data.salvati + ' costi';
-      if (skippedSkus && skippedSkus.length) msg += ' (' + skippedSkus.length + ' SKU sconosciuti skippati)';
+    se (dati di successo) {
+      let msg = '✅ Salvati ' + data.salvati + 'costi';
+      if (skippedSkus && skippedSkus.length) msg ​​+= ' (' + skippedSkus.length + ' SKU sconosciuti skippati)';
       status.textContent = msg; status.style.color = 'var(--green-dark)';
       setTimeout(loadDuoProducts, 500);
     } else { status.textContent = '❌ ' + data.error; status.style.color = 'var(--red)'; }
@@ -1962,55 +2069,55 @@ async function handleCsvImport(file) {
 }
 
 // ============ PREVISIONI INCASSI ============
-let forecastData = null;
+lascia forecastData = null;
 
-function fmtEur(n) { return '€' + Math.round(n).toLocaleString('it-IT'); }
-function fmtEur2(n) { return '€' + (n || 0).toFixed(2); }
-function fmtDateIT(dateStr) {
-  if (!dateStr) return '—';
+funzione fmtEur(n) { restituisce '€' + Math.round(n).toLocaleString('it-IT'); }
+funzione fmtEur2(n) { restituisce '€' + (n || 0).toFixed(2); }
+funzione fmtDateIT(dateStr) {
+  se (!dateStr) restituisci '—';
   const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' });
+  restituisci d.toLocaleDateString('it-IT', { day: '2 cifre', month: 'breve', year: 'numerico' });
 }
-function fmtMonthIT(monthKey) {
-  if (!monthKey) return '—';
+funzione fmtMonthIT(monthKey) {
+  se (!monthKey) restituisci '—';
   const [y, m] = monthKey.split('-');
   const d = new Date(parseInt(y), parseInt(m) - 1, 1);
-  return d.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
+  restituisci d.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
 }
 
-async function loadForecast(forceRefresh) {
+funzione asincrona loadForecast(forceRefresh) {
   const cont = document.getElementById('forecast-content');
   cont.innerHTML = '<div class="bs-empty">' + (forceRefresh ? '🔄 Ricalcolo in corso (legge 120gg ordini da Shopify, ~10-30 sec)...' : 'Caricamento previsioni...') + '</div>';
-  try {
+  Tentativo {
     const url = forceRefresh ? '/api/forecast?refresh=1' : '/api/forecast';
     const data = await fetchNoCache(url);
     if (!data.success) { cont.innerHTML = '<div class="bs-empty" style="color:var(--red);">Errore: ' + (data.error || 'sconosciuto') + '</div>'; return; }
-    forecastData = data;
-    renderForecast(data);
+    forecastData = dati;
+    renderForecast(dati);
   } catch(e) { cont.innerHTML = '<div class="bs-empty" style="color:var(--red);">Errore: ' + e.message + '</div>'; }
 }
 
-function renderForecast(data) {
+funzione renderForecast(dati) {
   const cont = document.getElementById('forecast-content');
   const kpi = data.kpi;
   const bg = data.balardi_wallet;
   const todayStr = new Date().toISOString().split('T')[0];
   
-  // Banner cache status
-  let cacheInfoHtml = '';
-  if (data.from_cache) {
-    const age = data.cache_age_hours || 0;
+  // Stato della cache del banner
+  lascia cacheInfoHtml = '';
+  se (dati dalla cache) {
+    const età = data.cache_età_ore || 0;
     const ageLabel = age < 1 ? Math.round(age * 60) + ' min fa' : age.toFixed(1) + ' ore fa';
     cacheInfoHtml = '<div style="background:#E8F0F5; border-left:3px solid #4A7FBC; border-radius:6px; padding:8px 14px; margin-bottom:16px; font-size:0.78rem; color:#1A4A78; display:flex; justify-content:space-between; align-items:center;">' +
       '<span>⚡ Dati dalla cache · ultimo aggiornamento ' + ageLabel + ' · scade tra ' + (data.cache_expires_in_hours || 0).toFixed(1) + ' ore</span>' +
     '</div>';
-  } else if (data.cached_to_kv) {
+  } altrimenti se (data.cached_to_kv) {
     cacheInfoHtml = '<div style="background:#E6F4EE; border-left:3px solid var(--green-primary); border-radius:6px; padding:8px 14px; margin-bottom:16px; font-size:0.78rem; color:var(--green-dark);">' +
       '✅ Dati appena calcolati e salvati in cache (valida 24h)' +
     '</div>';
   }
   
-  // KPI cards: solo mese corrente, mese prossimo, totale 2 mesi
+  // Schede KPI: solo mese corrente, mese prossimo, totale 2 mesi
   const totale2mesi = (kpi.incasso_mese_corrente.importo || 0) + (kpi.incasso_mese_prossimo.importo || 0);
   const count2mesi = (kpi.incasso_mese_corrente.ordini || 0) + (kpi.incasso_mese_prossimo.ordini || 0);
   const kpiHtml = '<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin-bottom:24px;">' +
@@ -2027,12 +2134,12 @@ function renderForecast(data) {
     '<div style="background:linear-gradient(135deg, #F0EBDF 0%, #E5DDC8 100%); padding:18px 22px; border-radius:12px; border-left:4px solid var(--gray-700);">' +
       '<div style="font-size:0.7rem; color:var(--gray-700); text-transform:uppercase; letter-spacing:0.08em; font-weight:700; margin-bottom:6px;">Totale 2 mesi</div>' +
       '<div style="font-size:1.5rem; font-weight:800; color:var(--black);">' + fmtEur(totale2mesi) + '</div>' +
-      '<div style="font-size:0.75rem; color:var(--gray-700); margin-top:2px;">' + count2mesi + ' pagamenti</div>' +
+      '<div style="font-size:0.75rem; color:var(--gray-700); margin-top:2px;">' + count2mesi + ' transazioni</div>' +
     '</div>' +
   '</div>';
   
-  // Card per marketplace con scadenziari aggregati
-  // Raggruppo i pagamenti per MP per mese
+  // Carta per marketplace con scadenziari aggregati
+  // Raggruppo i pagamenti per MP al mese
   const breakdownMP = data.breakdown_marketplace || [];
   const meseCorrente = kpi.incasso_mese_corrente.mese;
   const meseProssimo = kpi.incasso_mese_prossimo.mese;
@@ -2044,34 +2151,34 @@ function renderForecast(data) {
     const perMese = {};
     (mp.pagamenti || []).forEach(p => {
       const monthKey = p.data.substring(0, 7);
-      if (!perMese[monthKey]) perMese[monthKey] = { importo: 0, count: 0, note: new Set() };
+      se (!perMese[monthKey]) perMese[monthKey] = { importo: 0, conteggio: 0, nota: nuovo Set() };
       perMese[monthKey].importo += p.importo_eur;
       perMese[monthKey].count++;
-      if (p.nota) perMese[monthKey].note.add(p.nota);
+      se (p.nota) perMese[monthKey].note.add(p.nota);
     });
     mpAggregato[mp.nome] = {
       ...mp,
-      scadenze: Object.entries(perMese).map(([mese, info]) => ({
+      decanze: Object.entries(perMese).map(([mese, info]) => ({
         mese, importo: info.importo, count: info.count, note: [...info.note].join(' · ')
       })).sort((a, b) => a.mese.localeCompare(b.mese))
     };
   });
   
-  // Filtra scadenze: solo mese corrente in avanti
+  // Filtra cadenze: solo mese corrente in avanti
   const mpVisibili = Object.values(mpAggregato).filter(mp => {
     const future = mp.scadenze.filter(s => s.mese >= meseCorrente);
-    mp.scadenzeFuture = future;
-    return future.length > 0;
+    mp.scadenzeFuture = futuro;
+    restituisci future.length > 0;
   });
   
   // Ordina per: prima MP con pagamenti nel mese corrente, poi per totale futuro
   mpVisibili.sort((a, b) => {
-    const aNow = a.scadenzeFuture.some(s => s.mese === meseCorrente) ? 1 : 0;
+    const aNow = a.scadenzeFuture.some(s => s.mese === meseCorrente) ? 1:0;
     const bNow = b.scadenzeFuture.some(s => s.mese === meseCorrente) ? 1 : 0;
-    if (aNow !== bNow) return bNow - aNow;
+    se (aNow !== bNow) restituisci bNow - aNow;
     const aTot = a.scadenzeFuture.reduce((s, x) => s + x.importo, 0);
     const bTot = b.scadenzeFuture.reduce((s, x) => s + x.importo, 0);
-    return bTot - aTot;
+    restituisci bTot - aTot;
   });
   
   const MP_BADGE_COLORS = { Miinto:'#008060', 'The Bradery':'#C9A961', Brandsgateway:'#4A7FBC', Winkelstraat:'#479CCF', 'Secret Sales':'#6B5320', Italist:'#2D2D2D', Archivist:'#004C3F', 'Intra Mirror':'#B89550', 'Fashion Tamers':'#5C5C5C', 'Boutique Mall':'#E8573A', 'Jammy Dude':'#8E4FBF', 'T. Luxy (proprio)':'#1A1A1A', Poizon:'#D4397A' };
@@ -2081,17 +2188,17 @@ function renderForecast(data) {
     (mpVisibili.length > 0 ? mpVisibili.map(mp => {
       const color = MP_BADGE_COLORS[mp.nome] || '#8E8E8E';
       const totaleFuturo = mp.scadenzeFuture.reduce((s, x) => s + x.importo, 0);
-      const scadenzeHtml = mp.scadenzeFuture.map(sc => {
+      const decadenzeHtml = mp.scadenzeFuture.map(sc => {
         const isCorrente = sc.mese === meseCorrente;
         const isProssimo = sc.mese === meseProssimo;
         const mensileLabel = isCorrente ? ' (corrente)' : (isProssimo ? ' (prossimo)' : '');
         const color2 = isCorrente ? 'var(--green-dark)' : (isProssimo ? '#8B6914' : 'var(--gray-700)');
-        return '<div style="display:flex; justify-content:space-between; align-items:baseline; padding:5px 0; font-size:0.88rem;">' +
+        restituisci '<div style="display:flex; justify-content:space-between; align-items:baseline; padding:5px 0; font-size:0.88rem;">' +
           '<span style="color:' + color2 + ';"><strong style="text-transform:capitalize;">' + fmtMonthIT(sc.mese) + '</strong>' + mensileLabel + ' · ' + sc.count + ' ord.' + (sc.note ? ' <span style="color:var(--gray-500); font-size:0.78rem;">(' + sc.note + ')</span>' : '') + '</span>' +
-          '<span style="font-weight:700; font-variant-numeric:tabular-nums;">' + fmtEur(sc.importo) + '</span>' +
+          '<span style="font-weight:700; font-variant-numeric:tabular-nums;">' + fmtEur(sc. importanza) + '</span>' +
         '</div>';
-      }).join('');
-      return '<div style="background:var(--white); border:1px solid var(--gray-200); border-radius:12px; padding:14px 18px;">' +
+      }).giuntura('');
+      restituisci '<div style="background:var(--white); border:1px solid var(--gray-200); border-radius:12px; padding:14px 18px;">' +
         '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:10px; border-bottom:1px solid var(--gray-100);">' +
           '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">' +
             '<span class="mp-badge" style="background:' + color + '; font-size:0.8rem;">' + mp.nome + '</span>' +
@@ -2099,22 +2206,22 @@ function renderForecast(data) {
           '</div>' +
           '<div style="font-size:1.05rem; font-weight:800;">Totale <span style="color:var(--black);">' + fmtEur(totaleFuturo) + '</span></div>' +
         '</div>' +
-        scadenzeHtml +
+        degradanzeHtml +
       '</div>';
     }).join('') : '<div style="text-align:center; padding:24px; color:var(--gray-500); font-style:italic;">Nessun pagamento previsto nei prossimi 2 mesi.</div>') +
     '</div>';
   
   // Balardi — pannello compatto in basso
   const residuo = bg.credito_residuo;
-  const percConsumo = bg.credito_ricaricato > 0 ? (bg.credito_consumato / bg.credito_ricaricato * 100) : 0;
+  const percConsumo = bg.credito_ricaricato > 0 ? (bg.credito_consumato/bg.credito_ricaricato*100): 0;
   const residuoClass = residuo > 300 ? 'var(--green-primary)' : (residuo > 0 ? '#C9A961' : 'var(--red)');
   const residuoLabel = residuo < 300 && residuo >= 0 ? ' ⚠️ Ricarica presto' : (residuo < 0 ? ' 🔴 Credito esaurito' : '');
-  const ricaricheHtml = (bg.ricariche || []).slice().reverse().slice(0, 5).map(r => 
+  const ricaricheHtml = (bg.ricariche || []).slice().reverse().slice(0, 5).map(r =>
     '<div style="padding:5px 0; border-bottom:1px dotted var(--gray-200); font-size:0.8rem; display:flex; justify-content:space-between;">' +
       '<span>' + fmtDateIT(r.data_ricarica) + (r.nota ? ' · <span style="color:var(--gray-500);">' + r.nota + '</span>' : '') + '</span>' +
-      '<span><strong>+' + fmtEur2(r.importo) + '</strong> <button onclick="deleteRicarica(' + r.id + ')" style="background:none; border:none; color:var(--red); cursor:pointer; font-size:0.75rem; margin-left:6px;" title="Elimina">✕</button></span>' +
+      '<span><strong>+' + fmtEur2(r. importanza) + '</strong> <button onclick="deleteRicarica(' + r.id + ')" style="background:none; border:none; color:var(--red); cursor:pointer; font-size:0.75rem; margin-left:6px;" title="Elimina">✕</button></span>' +
     '</div>'
-  ).join('');
+  ).giuntura('');
   const balardiHtml = '<div style="background:var(--gray-100); border-radius:12px; padding:14px 18px;">' +
     '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">' +
       '<div>' +
@@ -2130,94 +2237,94 @@ function renderForecast(data) {
     (ricaricheHtml ? '<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:0.78rem; color:var(--gray-700); font-weight:600;">Ultime ricariche (' + (bg.ricariche || []).length + ')</summary><div style="margin-top:6px;">' + ricaricheHtml + '</div></details>' : '') +
   '</div>';
   
-  cont.innerHTML = cacheInfoHtml + kpiHtml + cardsHtml + balardiHtml;
+  cont.innerHTML = cacheInfoHtml + kpiHtml +cardsHtml + balardiHtml;
   
-  // Handler ricarica Balardi
+  // Handler ricaricabile Balardi
   const ricBtn = document.getElementById('balardi-ricarica-btn');
-  if (ricBtn) {
+  se (ricBtn) {
     ricBtn.addEventListener('click', async () => {
       const importo = parseFloat(document.getElementById('balardi-new-importo').value);
       const nota = document.getElementById('balardi-new-nota').value;
-      if (isNaN(importo) || importo <= 0) { alert('Inserisci un importo valido'); return; }
+      if (isNaN(importo) || importo <= 0) { alert('Inserisci un importo valido'); ritorno; }
       ricBtn.disabled = true; ricBtn.textContent = '...';
-      try {
+      Tentativo {
         const res = await fetch('/api/balardi-ricarica', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ importo, nota }) });
         const r = await res.json();
-        if (r.success) { loadForecast(); } else { alert('Errore: ' + (r.error || 'sconosciuto')); ricBtn.disabled = false; ricBtn.textContent = '+ Ricarica'; }
-      } catch(e) { alert('Errore: ' + e.message); ricBtn.disabled = false; ricBtn.textContent = '+ Ricarica'; }
+        if (r.success) { loadForecast(); } else { alert('Errore: ' + (r.error || 'sconosciuto')); ricBtn.disabled = falso; ricBtn.textContent = '+ Ricarica'; }
+      } catch(e) { alert('Errore: ' + e.message); ricBtn.disabled = falso; ricBtn.textContent = '+ Ricarica'; }
     });
   }
 }
 
-async function deleteRicarica(id) {
+funzione asincrona deleteRicarica(id) {
   if (!confirm('Eliminare questa ricarica?')) return;
-  try {
+  Tentativo {
     const res = await fetch('/api/balardi-ricarica-delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id }) });
     const r = await res.json();
-    if (r.success) loadForecast();
+    se (r.successo) caricaPrevisione();
     else alert('Errore: ' + (r.error || 'sconosciuto'));
   } catch(e) { alert('Errore: ' + e.message); }
 }
 
-// ============ INVENTORY SNAPSHOT ============
-let inventoryData = null;
+// ============ RIEPILOGO DELL'INVENTARIO ============
+lascia che inventoryData = null;
 let inventoryFilter = 'tutto';
 
-async function loadInventory(forceRefresh) {
+funzione asincrona loadInventory(forceRefresh) {
   const cont = document.getElementById('inventory-content');
   cont.innerHTML = '<div class="bs-empty">' + (forceRefresh ? '🔄 Fetch catalogo da Shopify in corso (20-60 secondi)...' : 'Caricamento snapshot...') + '</div>';
-  try {
+  Tentativo {
     const url = forceRefresh ? '/api/inventory?refresh=1' : '/api/inventory';
     const data = await fetchNoCache(url);
     if (!data.success) { cont.innerHTML = '<div class="bs-empty" style="color:var(--red);">Errore: ' + (data.error || 'sconosciuto') + '</div>'; return; }
-    inventoryData = data;
+    dati_inventario = dati;
     renderInventory();
   } catch(e) { cont.innerHTML = '<div class="bs-empty" style="color:var(--red);">Errore: ' + e.message + '</div>'; }
 }
 
-function renderInventory() {
-  if (!inventoryData) return;
-  const d = inventoryData;
+funzione renderInventory() {
+  se (!dati di inventario) restituisci;
+  const d = dati_inventario;
   const cont = document.getElementById('inventory-content');
   const snap = d.snapshot[inventoryFilter];
   
-  // Header info
-  let subtitle = '';
+  // Informazioni di intestazione
+  lascia sottotitolo = '';
   if (inventoryFilter === 'tutto') subtitle = d.totale_prodotti_attivi_con_stock + ' prodotti · ' + d.totale_pezzi.toLocaleString('it-IT') + ' pezzi (di cui ' + d.duo_prodotti + ' DUO)';
-  else if (inventoryFilter === 'own') subtitle = d.own_prodotti + ' prodotti · ' + d.own_pezzi.toLocaleString('it-IT') + ' pezzi (esclusi ' + d.duo_prodotti + ' DUO)';
-  else subtitle = d.duo_prodotti + ' prodotti DUO · ' + d.duo_pezzi.toLocaleString('it-IT') + ' pezzi';
+  else if (inventoryFilter === 'own') sottotitolo = d.own_prodotti + ' prodotti · ' + d.own_pezzi.toLocaleString('it-IT') + ' pezzi (esclusi ' + d.duo_prodotti + ' DUO)';
+  else sottotitolo = d.duo_prodotti + ' prodotti DUO · ' + d.duo_pezzi.toLocaleString('it-IT') + ' pezzi';
   
-  // Banner cache
-  let cacheHtml = '';
-  if (d.dalla_cache_discovery && d.cached_at) {
+  // Cache del banner
+  lascia cacheHtml = '';
+  se (d.dalla_cache_discovery && d.cached_at) {
     const age = Math.round((Date.now() - new Date(d.cached_at).getTime()) / 3600000 * 10) / 10;
     cacheHtml = '<div style="background:#E8F0F5; border-left:3px solid #4A7FBC; border-radius:6px; padding:8px 14px; margin-bottom:16px; font-size:0.78rem; color:#1A4A78;">⚡ Dati dalla cache · aggiornati ' + age + ' ore fa</div>';
-  } else {
+  } altro {
     cacheHtml = '<div style="background:#E6F4EE; border-left:3px solid var(--green-primary); border-radius:6px; padding:8px 14px; margin-bottom:16px; font-size:0.78rem; color:var(--green-dark);">✅ Dati appena scaricati da Shopify e salvati in cache (24h)</div>';
   }
   
-  // Tabella categoria × gender
-  const CATEGORIE = [
-    { key: 'bag', nome: 'Bag' },
-    { key: 'shoes', nome: 'Shoes' },
-    { key: 'accessori', nome: 'Accessori' },
-    { key: 'clothing', nome: 'Clothing' }
+  // Tabella categoria × genere
+  const CATEGORIA = [
+    { chiave: 'borsa', nome: 'Borsa' },
+    { chiave: 'scarpe', nome: 'Scarpe' },
+    { chiave: 'accessori', nome: 'Accessori' },
+    { chiave: 'abbigliamento', nome: 'Abbigliamento' }
   ];
   
-  function fmtCell(p, pz) {
+  funzione fmtCell(p, pz) {
     return '<td class="num" style="font-variant-numeric:tabular-nums;"><span style="color:var(--gray-500);">' + p.toLocaleString('it-IT') + '</span> · <strong>' + pz.toLocaleString('it-IT') + '</strong></td>';
   }
   
-  let rows = '';
-  let totDonnaP = 0, totDonnaPz = 0, totUomoP = 0, totUomoPz = 0, totUniP = 0, totUniPz = 0;
+  lascia righe = '';
+  poniamo totDonnaP = 0, totDonnaPz = 0, totUomoP = 0, totUomoPz = 0, totUniP = 0, totUniPz = 0;
   CATEGORIE.forEach(cat => {
     const c = snap[cat.key];
-    const rowP = c.donna.prodotti + c.uomo.prodotti + c.unisex.prodotti;
-    const rowPz = c.donna.pezzi + c.uomo.pezzi + c.unisex.pezzi;
+    const rigaP = c.donna.prodotti + c.uomo.prodotti + c.unisex.prodotti;
+    const rigaPz = c.donna.pezzi + c.uomo.pezzi + c.unisex.pezzi;
     totDonnaP += c.donna.prodotti; totDonnaPz += c.donna.pezzi;
     totUomoP += c.uomo.prodotti; totUomoPz += c.uomo.pezzi;
     totUniP += c.unisex.prodotti; totUniPz += c.unisex.pezzi;
-    rows += '<tr>' +
+    righe += '<tr>' +
       '<td style="font-weight:600;">' + cat.nome + '</td>' +
       fmtCell(c.donna.prodotti, c.donna.pezzi) +
       fmtCell(c.uomo.prodotti, c.uomo.pezzi) +
@@ -2227,7 +2334,7 @@ function renderInventory() {
   });
   const totRowP = totDonnaP + totUomoP + totUniP;
   const totRowPz = totDonnaPz + totUomoPz + totUniPz;
-  rows += '<tr style="background:var(--gray-100); font-weight:700;">' +
+  righe += '<tr style="background:var(--gray-100); font-weight:700;">' +
     '<td>Totale</td>' +
     fmtCell(totDonnaP, totDonnaPz) +
     fmtCell(totUomoP, totUomoPz) +
@@ -2245,23 +2352,23 @@ function renderInventory() {
         '<th class="num">Unisex <span style="font-weight:400; font-size:0.72rem; color:var(--gray-500);">prod · pezzi</span></th>' +
         '<th class="num" style="background:var(--gray-100);">Totale <span style="font-weight:400; font-size:0.72rem; color:var(--gray-500);">prod · pezzi</span></th>' +
       '</tr></thead>' +
-      '<tbody>' + rows + '</tbody>' +
+      '<tbody>' + righe + '</tbody>' +
     '</table>' +
   '</div>';
   
   // Non classificati
   let orfaniHtml = '';
   const nc = d.non_classificati;
-  if (nc && nc.prodotti > 0) {
-    const orfaniTop = (nc.product_types_orfani || []).slice(0, 10).map(o => 
+  se (nc && nc.prodotti > 0) {
+    const orfaniTop = (nc.product_types_orfani || []).slice(0, 10).map(o =>
       '<div style="padding:4px 0; font-size:0.82rem;"><strong>' + o.product_type + '</strong> · ' + o.count + ' prodotti</div>'
-    ).join('');
-    const sampleHtml = (nc.sample_orfani || []).slice(0, 5).map(s => 
-      '<div style="padding:4px 0; font-size:0.78rem; color:var(--gray-700); border-bottom:1px dotted var(--gray-200);"><strong>' + s.title + '</strong><br><span style="color:var(--gray-500);">product_type: "' + (s.product_type || '(vuoto)') + '" · stock: ' + s.stock + '</span></div>'
-    ).join('');
+    ).giuntura('');
+    const sampleHtml = (nc.sample_orfani || []).slice(0, 5).map(s =>
+      '<div style="padding:4px 0; font-size:0.78rem; color:var(--gray-700); border-bottom:1px dotted var(--gray-200);"><strong>' + s.title + '</strong><br><span style="color:var(--gray-500);">tipo_prodotto: "' + (s.product_type || '(vuoto)') + '" · stock: ' + s.stock + '</span></div>'
+    ).giuntura('');
     orfaniHtml = '<div style="background:#FFF4D6; border-left:4px solid #E8C77A; border-radius:8px; padding:14px 18px; margin-bottom:16px;">' +
       '<div style="font-weight:700; color:#8B6914; margin-bottom:8px; font-size:0.92rem;">⚠️ ' + nc.prodotti + ' prodotti non classificati (' + nc.pezzi.toLocaleString('it-IT') + ' pezzi)</div>' +
-      '<div style="font-size:0.8rem; color:#6B4E0E; margin-bottom:10px;">Product types orfani più frequenti — dimmeli nella chat per aggiungerli alla classificazione:</div>' +
+      '<div style="font-size:0.8rem; color:#6B4E0E; margin-bottom:10px;">Tipi di prodotto orfani più frequenti — dimmeli nella chat per aggiungerli alla classificazione:</div>' +
       '<div style="margin-bottom:10px;">' + orfaniTop + '</div>' +
       '<details style="margin-top:6px;"><summary style="cursor:pointer; font-size:0.78rem; color:#6B4E0E; font-weight:600;">📋 Esempi di prodotti orfani</summary><div style="margin-top:8px;">' + sampleHtml + '</div></details>' +
     '</div>';
@@ -2270,12 +2377,12 @@ function renderInventory() {
   cont.innerHTML = cacheHtml + orfaniHtml + tableHtml;
 }
 
-// ============ EXCEL BATCH CALCULATOR (v5.10) ============
+// ============ CALCOLATORE LOTTO EXCEL (v5.10) ============
 // Caricamento dinamico SheetJS (CDN) per leggere/scrivere XLSX
-let SHEETJS_LOADED = false;
-async function loadSheetJS() {
+lascia SHEETJS_LOADED = false;
+funzione asincrona loadSheetJS() {
   if (SHEETJS_LOADED || (typeof XLSX !== 'undefined')) { SHEETJS_LOADED = true; return true; }
-  return new Promise((resolve, reject) => {
+  restituisci una nuova Promise((risolvi, rifiuta) => {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
     script.onload = () => { SHEETJS_LOADED = true; resolve(true); };
@@ -2284,40 +2391,40 @@ async function loadSheetJS() {
   });
 }
 
-let batchProducts = []; // {sku, titolo, stock, costo, listino, iva, calcoli: [{mp, margine, ...}]}
-let batchExpanded = null; // sku attualmente espanso
+lascia batchProdotti = []; // {sku, titolo, stock, costo, listino, iva, calcoli: [{mp, margine, ...}]}
+lascia che batchExpanded = null; // sku attualmente espanso
 
-function batchNormalizeHeader(h) {
-  return String(h || '').trim().toLowerCase().replace(/[\s_\-]+/g, '');
+funzione batchNormalizeHeader(h) {
+  restituisci String(h || '').trim().toLowerCase().replace(/[\s_\-]+/g, '');
 }
-function batchFindCol(headers, candidates) {
-  for (const c of candidates) {
+funzione batchFindCol(intestazioni, candidati) {
+  per (costante c di candidati) {
     const idx = headers.findIndex(h => batchNormalizeHeader(h) === batchNormalizeHeader(c));
-    if (idx >= 0) return idx;
+    se (idx >= 0) restituisci idx;
   }
-  return -1;
+  restituisci -1;
 }
 
-async function handleBatchFile(file) {
+funzione asincrona handleBatchFile(file) {
   const status = document.getElementById('batch-status');
   status.textContent = '⏳ Caricamento libreria Excel...';
   status.style.color = 'var(--gray-700)';
-  try {
-    await loadSheetJS();
-    status.textContent = '📄 Lettura file...';
+  Tentativo {
+    attendi loadSheetJS();
+    status.textContent = '📄 File di lettura...';
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: 'array' });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    if (!ws) { status.textContent = '❌ Nessun foglio trovato nel file'; status.style.color = 'var(--red)'; return; }
+    if (!ws) { status.textContent = '❌ Nessun foglio trovato nel file'; status.style.color = 'var(--red)'; ritorno; }
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-    if (rows.length < 2) { status.textContent = "❌ Il file ha solo l'intestazione, manca dati"; status.style.color = 'var(--red)'; return; }
+    if (rows.length < 2) { status.textContent = "❌ Il file ha solo l'intestazione, manca dati"; status.style.color = 'var(--red)'; ritorno; }
     
     const headers = rows[0];
     const skuIdx = batchFindCol(headers, ['sku', 'codice', 'codiceprodotto']);
-    // Retail RRP = prezzo di vendita pieno (può essere il listino se non c'è sconto vendita)
+    // RRP al dettaglio = prezzo di vendita pieno (può essere il listino se non c'è sconto vendita)
     const retailIdx = batchFindCol(headers, ['retail', 'rrp', 'retailprice', 'prezzoretail', 'prezzopieno']);
     // Sconto% fornitore (opzionale)
-    const scontoIdx = batchFindCol(headers, ['sconto', 'sconto%', 'scontofornitore', 'discountfornitore', 'discount%', 'scontoacquisto']);
+    const scontoIdx = batchFindCol(headers, ['sconto', 'sconto%', 'scontofornitore', 'discountfornitore', 'sconto%', 'scontoacquisto']);
     // Costo (opzionale, calcolato da sconto se manca)
     const costoIdx = batchFindCol(headers, ['costo', 'cost', 'costofornitore', 'costoacquisto', 'costopzunit']);
     // Listino di vendita (opzionale, default = retail)
@@ -2326,59 +2433,59 @@ async function handleBatchFile(file) {
     const stockIdx = batchFindCol(headers, ['stock', 'inventario', 'quantity', 'qty', 'disponibilita', 'pezzi']);
     const ivaIdx = batchFindCol(headers, ['iva', 'vat', 'tax']);
     
-    if (skuIdx < 0) { status.textContent = '❌ Colonna SKU non trovata'; status.style.color = 'var(--red)'; return; }
-    if (retailIdx < 0 && listinoIdx < 0) { status.textContent = '❌ Manca colonna Retail (o Listino)'; status.style.color = 'var(--red)'; return; }
-    if (costoIdx < 0 && scontoIdx < 0) { status.textContent = '❌ Manca colonna Costo (o Sconto% fornitore)'; status.style.color = 'var(--red)'; return; }
+    if (skuIdx < 0) { status.textContent = '❌ Colonna SKU non trovata'; status.style.color = 'var(--red)'; ritorno; }
+    if (retailIdx < 0 && listinoIdx < 0) { status.textContent = '❌ Manca colonna Retail (o Listino)'; status.style.color = 'var(--red)'; ritorno; }
+    if (costoIdx < 0 && scontoIdx < 0) { status.textContent = '❌ Manca colonna Costo (o Sconto% fornitore)'; status.style.color = 'var(--red)'; ritorno; }
     
     const ivaDefault = parseFloat(document.getElementById('batch-iva-default').value) || 22;
-    const products = [];
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i];
-      if (!row || row.every(c => c === '' || c === null || c === undefined)) continue;
+    const prodotti = [];
+    per (sia i = 1; i < rows.length; i++) {
+      const riga = righe[i];
+      se (!riga || riga.ogni(c => c === '' || c === null || c === undefined)) continua;
       const sku = String(row[skuIdx] || '').trim();
-      if (!sku) continue;
-      // Retail (se manca, usa listino)
+      se (!sku) continua;
+      // Vendita al dettaglio (se manca, usa listino)
       let retail = retailIdx >= 0 ? parseFloat(row[retailIdx]) : NaN;
       let listino = listinoIdx >= 0 ? parseFloat(row[listinoIdx]) : NaN;
       // Fallback: se manca uno, usa l'altro
       if (isNaN(retail) && !isNaN(listino)) retail = listino;
       if (isNaN(listino) && !isNaN(retail)) listino = retail;
-      if (isNaN(retail) || retail <= 0) continue;
-      // Sconto% e costo
+      if (isNaN(retail) || retail <= 0) continua;
+      //Sconto% e costo
       const scontoForn = scontoIdx >= 0 ? parseFloat(row[scontoIdx]) : NaN;
       let costo = costoIdx >= 0 ? parseFloat(row[costoIdx]) : NaN;
       // Se costo manca ma c'è sconto%, calcola da retail
       if (isNaN(costo) && !isNaN(scontoForn) && scontoForn >= 0 && scontoForn <= 100) {
-        costo = retail * (1 - scontoForn / 100);
+        costo = vendita al dettaglio * (1 - scontoForn / 100);
       }
-      if (isNaN(costo) || costo < 0) continue;
+      if (isNaN(costo) || costo < 0) continua;
       // Sconto% effettivo (calcolato dal costo)
-      const scontoEffettivo = retail > 0 ? ((retail - costo) / retail * 100) : 0;
+      const scontoEffettivo = dettaglio > 0 ? ((vendita al dettaglio - costo) / vendita al dettaglio * 100) : 0;
       const titolo = titoloIdx >= 0 ? String(row[titoloIdx] || '').trim() : '';
       const stock = stockIdx >= 0 ? (parseInt(row[stockIdx]) || 0) : null;
       let iva = ivaDefault;
-      if (ivaIdx >= 0) {
+      se (ivaIdx >= 0) {
         const ivaCol = parseFloat(row[ivaIdx]);
         if (!isNaN(ivaCol) && ivaCol >= 0 && ivaCol <= 30) iva = ivaCol;
       }
-      products.push({ sku, titolo, stock, retail, scontoForn: scontoEffettivo, costo, listino, iva });
+      prodotti.push({ sku, titolo, stock, retail, scontoForn: scontoEffettivo, costo, listino, iva });
     }
     
-    if (products.length === 0) {
+    se (products.length === 0) {
       status.textContent = '❌ Nessuna riga valida (controlla SKU + Retail + Costo/Sconto%)';
       status.style.color = 'var(--red)';
-      return;
+      ritorno;
     }
     
-    // Calcola margini per ogni prodotto su tutti i MP
-    products.forEach(p => {
+    // Calcola i margini per ogni prodotto su tutti i MP
+    prodotti.perogni(p => {
       p.calcoli = Object.entries(MARKETPLACES).map(([key, mp]) => {
         const r = batchCalcMargine(p.listino, p.costo, key, p.iva, p.retail);
-        return { mp_key: key, mp_nome: mp.nome, ...r };
+        return { mp_key: chiave, mp_nome: mp.nome, ...r };
       }).sort((a, b) => b.margine - a.margine);
     });
     
-    batchProducts = products;
+    batchProducts = prodotti;
     status.textContent = '✅ Caricati ' + products.length + ' prodotti';
     status.style.color = 'var(--green-dark)';
     renderBatch();
@@ -2390,55 +2497,55 @@ async function handleBatchFile(file) {
 }
 
 function batchCalcMargine(listino, costo, mpKey, iva, retail) {
-  const mp = MARKETPLACES[mpKey];
-  if (!mp) return null;
-  const nettoIva = listino / (1 + iva / 100);
-  const dopoSconto = nettoIva * (1 - mp.sconto_percentuale / 100);
-  const feeShop = mpKey === 'TLUXY_SITE' ? dopoSconto * 0.0015 : 0;
-  const feeP = dopoSconto * (mp.fee_principale / 100);
-  const feeS = dopoSconto * ((mp.fee_secondaria || 0) / 100);
-  const feeA = dopoSconto * ((mp.fee_accessoria || 0) / 100);
-  const feesMp = feeP + feeS + feeA + (mp.fee_fissa_trasporto || 0) + (mp.fee_fissa_packaging || 0);
+  const mp = MERCATI[mpKey];
+  se (!mp) restituisci null;
+  const nettoIva = listino/(1+iva/100);
+  const dopoSconto = nettoIva* (1 - mp.sconto_percentuale/100);
+  const feeShop = mpKey === 'TLUXY_SITE' ? dopoSconto*0.0015:0;
+  const feeP = dopoSconto* (mp.fee_principale/100);
+  tariffa const = dopoSconto * ((mp.tariffa_secondaria || 0) / 100);
+  const tariffaA = dopoSconto * ((mp.tariffa_accessoria || 0) / 100);
+  const tariffeMp = tariffaP + tariffaS + tariffaA + (mp.tariffa_fissa_trasporto || 0) + (mp.tariffa_fissa_imballaggio || 0);
   const margine = dopoSconto - feeShop - feesMp - costo;
-  const marginePerc = listino > 0 ? (margine / listino * 100) : 0;
+  const marginePerc = listino > 0 ? (margine/listino*100): 0;
   // Break-even, prezzo per 20%, prezzo per 30% (formula: stesso meccanismo di prezzoMinimoPerMargine)
-  function prezzoMin(targetPerc) {
+  funzione prezzoMin(targetPerc) {
     const totalPercFee = (mp.fee_principale + (mp.fee_secondaria || 0) + (mp.fee_accessoria || 0) + (mpKey === 'TLUXY_SITE' ? 0.15 : 0)) / 100;
-    const scontoP = mp.sconto_percentuale / 100;
-    const feeFissa = (mp.fee_fissa_trasporto || 0) + (mp.fee_fissa_packaging || 0);
-    const coef = (1 - scontoP) * (1 - totalPercFee) / (1 + iva / 100) - targetPerc / 100;
-    if (coef <= 0) return null;
-    return (costo + feeFissa) / coef;
+    const scontoP = mp.sconto_percentuale/100;
+    tariffa fissaFissa = (mp.tariffa_fissa_trasporto || 0) + (mp.tariffa_fissa_imballaggio || 0);
+    coef cost = (1 - scontoP) * (1 - totalPercFee) / (1 + iva / 100) - targetPerc / 100;
+    se (coef <= 0) restituisci null;
+    reso (costo+commissioneFissa)/coef;
   }
   // Margine se vendo a retail pieno
-  let margineRetail = null, margineRetailPerc = null;
-  if (retail && retail > 0 && retail !== listino) {
+  lascia margineRetail = null, margineRetailPerc = null;
+  se (vendita al dettaglio && vendita al dettaglio > 0 && vendita al dettaglio !== listino) {
     const r = batchCalcMargine(retail, costo, mpKey, iva, null);
     margineRetail = r ? r.margine : null;
     margineRetailPerc = r ? r.marginePerc : null;
   }
-  // Sconto massimo accettabile dal retail per fare 20% margine
+  // Sconto massimo accettabile dal retail per tariffa 20% margine
   // Se per fare 20% serve prezzo X, allora sconto max = (retail - X) / retail * 100
-  let scontoMax20 = null;
-  if (retail && retail > 0) {
+  lascia scontoMax20 = null;
+  se (vendita al dettaglio && vendita al dettaglio > 0) {
     const p20 = prezzoMin(20);
-    if (p20 !== null && p20 > 0) {
-      scontoMax20 = ((retail - p20) / retail) * 100;
+    se (p20 !== null && p20 > 0) {
+      scontoMax20 = ((prezzo al dettaglio - p20) / prezzo al dettaglio) * 100;
       // Se negativo significa che NON puoi scontare (devi vendere SOPRA retail)
-      if (scontoMax20 < 0) scontoMax20 = null; // impossibile
+      se (scontoMax20 < 0) scontoMax20 = nullo; // impossibile
     }
   }
-  return {
+  ritorno {
     margine, marginePerc, dopoSconto, feesMp, feeShop,
-    breakEven: prezzoMin(0),
+    punto di pareggio: prezzoMin(0),
     prezzo20: prezzoMin(20),
     prezzo30: prezzoMin(30),
     margineRetail, margineRetailPerc,
-    scontoMax20
+    Sconto Max20
   };
 }
 
-function renderBatch() {
+funzione renderBatch() {
   const cont = document.getElementById('batch-content');
   if (!batchProducts.length) { cont.innerHTML = ''; return; }
   
@@ -2474,7 +2581,7 @@ function renderBatch() {
     '<div style="background:var(--gray-100); border-left:3px solid var(--gray-700); padding:14px; border-radius:8px;">' +
       '<div style="font-size:0.7rem; color:var(--gray-700); text-transform:uppercase; letter-spacing:0.08em; font-weight:700;">MP più spesso #1</div>' +
       '<div style="font-size:1.05rem; font-weight:800; margin-top:4px;">' + (mpVincente ? mpVincente[0] : '—') + '</div>' +
-      '<div style="font-size:0.75rem; color:var(--gray-700);">' + (mpVincente ? mpVincente[1] + ' volte top' : '') + '</div>' +
+      '<div style="font-size:0.75rem; color:var(--gray-700);">' + (mpVincente ? mpVincente[1] + ' volte in alto' : '') + '</div>' +
     '</div>' +
   '</div>';
   
@@ -2484,19 +2591,19 @@ function renderBatch() {
     '<button id="batch-clear-btn" class="apply-btn" style="background:var(--gray-700); padding:10px 18px;">🗑️ Pulisci</button>' +
   '</div>';
   
-  // Tabella compatta
+  // Tabella condivisa
   const tableHtml = '<div class="table-wrap" style="margin-top:8px;">' +
     '<table class="breakdown-table" style="font-size:0.85rem;">' +
       '<thead><tr>' +
         '<th>SKU</th>' +
         '<th>Titolo</th>' +
         (batchProducts.some(p => p.stock !== null) ? '<th class="num">Stock</th>' : '') +
-        '<th class="num">Retail</th>' +
+        '<th class="num">Vendita al dettaglio</th>' +
         '<th class="num">Sc.%</th>' +
         '<th class="num">Costo</th>' +
         '<th class="num">Listino</th>' +
         '<th class="num">IVA</th>' +
-        '<th>Top 3 MP</th>' +
+        '<th>I 3 migliori MP</th>' +
         '<th></th>' +
       '</tr></thead>' +
       '<tbody>' +
@@ -2504,11 +2611,11 @@ function renderBatch() {
         const top3 = p.calcoli.slice(0, 3);
         const top3Html = top3.map(c => {
           const cls = c.margine >= 0 ? 'margin-pos' : 'margin-neg';
-          const segno = c.margine >= 0 ? '+' : '';
+          const segno = c.margine >= 0 ? '+':'';
           return '<span style="display:inline-block; background:var(--gray-100); padding:2px 8px; border-radius:6px; font-size:0.75rem; margin:1px 2px;"><strong>' + c.mp_nome + '</strong> · <span class="' + cls + '">' + segno + '€' + c.margine.toFixed(0) + '</span> <span style="color:var(--gray-700);">(' + c.marginePerc.toFixed(1) + '%)</span></span>';
-        }).join(' ');
+        }).giuntura(' ');
         const isExpanded = batchExpanded === p.sku;
-        const sameRetailListino = Math.abs(p.retail - p.listino) < 0.5;
+        const sameRetailListino = Math.abs(p.retail - p.listino) < 0,5;
         const mainRow = '<tr style="cursor:pointer;" data-batch-sku="' + p.sku + '">' +
           '<td><strong style="font-family:monospace; font-size:0.8rem;">' + p.sku + '</strong></td>' +
           '<td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + (p.titolo || '—') + '</td>' +
@@ -2521,28 +2628,28 @@ function renderBatch() {
           '<td>' + top3Html + '</td>' +
           '<td class="num"><span style="color:var(--gray-500); font-size:0.75rem;">' + (isExpanded ? '▼' : '▶') + '</span></td>' +
         '</tr>';
-        let detailRow = '';
-        if (isExpanded) {
+        lascia detailRow = '';
+        se (è espanso) {
           const colspan = batchProducts.some(pp => pp.stock !== null) ? '10' : '9';
           const detTable = '<tr><td colspan="' + colspan + '" style="padding:0; background:var(--cream);">' +
             '<div style="padding:14px;">' +
             '<div style="margin-bottom:8px; font-size:0.78rem; color:var(--gray-700);"><strong>Retail di riferimento: €' + p.retail.toFixed(2) + '</strong> · sconto fornitore -' + p.scontoForn.toFixed(1) + '% (costo €' + p.costo.toFixed(2) + ')</div>' +
             '<table class="detail-table" style="font-size:0.78rem;">' +
-              '<thead><tr><th>Marketplace</th><th class="num">Prezzo netto MP</th><th class="num">Fees MP</th><th class="num">Margine €</th><th class="num">Margine %</th><th class="num">Break-even</th><th class="num">Per 20%</th><th class="num">Per 30%</th><th class="num" title="Sconto massimo che puoi fare dal retail e ancora avere 20% margine">Sc.Max 20%</th></tr></thead>' +
+              '<thead><tr><th>Mercato</th><th class="num">Prezzo netto MP</th><th class="num">Commissioni MP</th><th class="num">Margine €</th><th class="num">Margine %</th><th class="num">Pareggio</th><th class="num">Al 20%</th><th class="num">Al 30%</th><th class="num" title="Sconto massimo che puoi fare dal retail e ancora avere 20% margine">Sc.Max 20%</th></tr></thead>' +
               '<tbody>' +
               p.calcoli.map((c, ci) => {
                 const cls = c.margine >= 0 ? 'margin-pos' : 'margin-neg';
                 const isTop = ci < 3;
-                const bg = isTop ? 'background:rgba(0,128,96,0.06);' : '';
-                const segno = c.margine >= 0 ? '+' : '';
-                const medal = isTop ? ' 🏆' : '';
-                // Sconto max formattato
-                let scMaxFmt = '—';
-                if (c.scontoMax20 !== null && c.scontoMax20 !== undefined) {
+                const bg = èTop? 'sfondo:rgba(0,128,96,0.06);' :'';
+                const segno = c.margine >= 0 ? '+':'';
+                medaglia const = isTop? ' 🏆' : '';
+                // Rimozione max formato
+                lascia scMaxFmt = '—';
+                se (c.scontoMax20 !== null && c.scontoMax20 !== undefined) {
                   if (c.scontoMax20 < 0) scMaxFmt = '<span style="color:var(--red);" title="Impossibile fare 20%: devi vendere sopra retail">impossibile</span>';
-                  else scMaxFmt = '<span style="color:var(--green-dark); font-weight:600;">-' + c.scontoMax20.toFixed(1) + '%</span>';
+                  altrimenti scMaxFmt = '<span style="color:var(--green-dark); font-weight:600;">-' + c.scontoMax20.toFixed(1) + '%</span>';
                 }
-                return '<tr style="' + bg + '">' +
+                restituisci '<tr style="' + bg + '">' +
                   '<td><strong>' + c.mp_nome + medal + '</strong></td>' +
                   '<td class="num">€' + c.dopoSconto.toFixed(2) + '</td>' +
                   '<td class="num">€' + c.feesMp.toFixed(2) + '</td>' +
@@ -2555,15 +2662,15 @@ function renderBatch() {
                 '</tr>';
               }).join('') +
               '</tbody></table></div></td></tr>';
-          detailRow = detTable;
+          rigaDettaglio = TabellaDettaglio;
         }
-        return mainRow + detailRow;
+        restituisci rigaprincipale + rigadettaglio;
       }).join('') +
       '</tbody></table></div>';
   
   cont.innerHTML = summary + exportBtn + tableHtml;
   
-  // Click handlers
+  // Gestori di clic
   cont.querySelectorAll('tr[data-batch-sku]').forEach(tr => {
     tr.addEventListener('click', () => {
       const sku = tr.dataset.batchSku;
@@ -2581,8 +2688,8 @@ function renderBatch() {
   });
 }
 
-function exportBatchExcel() {
-  if (!batchProducts.length) return;
+funzione exportBatchExcel() {
+  se (!batchProducts.length) restituisci;
   loadSheetJS().then(() => {
     const wb = XLSX.utils.book_new();
     
@@ -2622,7 +2729,7 @@ function exportBatchExcel() {
           c.breakEven ? parseFloat(c.breakEven.toFixed(2)) : '',
           c.prezzo20 ? parseFloat(c.prezzo20.toFixed(2)) : '',
           c.prezzo30 ? parseFloat(c.prezzo30.toFixed(2)) : '',
-          c.scontoMax20 !== null && c.scontoMax20 !== undefined && c.scontoMax20 >= 0 ? parseFloat(c.scontoMax20.toFixed(2)) : 'N/D'
+          c.scontoMax20 !== null && c.scontoMax20 !== non definito && c.scontoMax20 >= 0 ? parseFloat(c.scontoMax20.toFixed(2)): 'N/D'
         ]);
       });
     });
@@ -2637,12 +2744,12 @@ function exportBatchExcel() {
       const row = [p.sku, p.titolo || '', p.listino];
       mpKeys.forEach(k => {
         const c = p.calcoli.find(x => x.mp_key === k);
-        row.push(c ? parseFloat(c.margine.toFixed(2)) : '');
+        riga.push(c ? parseFloat(c.margine.toFixed(2)) : '');
       });
       pivotRows.push(row);
     });
     const wsPivot = XLSX.utils.aoa_to_sheet(pivotRows);
-    XLSX.utils.book_append_sheet(wb, wsPivot, 'Matrice margini €');
+    XLSX.utils.book_append_sheet(wb, wsPivot, 'Margine matrice €');
     
     // Foglio 4: matrice pivot %
     const pivotHeaderPerc = ['SKU', 'Titolo', 'Listino'].concat(mpKeys.map(k => MARKETPLACES[k].nome + ' %'));
@@ -2651,19 +2758,19 @@ function exportBatchExcel() {
       const row = [p.sku, p.titolo || '', p.listino];
       mpKeys.forEach(k => {
         const c = p.calcoli.find(x => x.mp_key === k);
-        row.push(c ? parseFloat(c.marginePerc.toFixed(2)) : '');
+        riga.push(c ? parseFloat(c.marginePerc.toFixed(2)) : '');
       });
       pivotRowsPerc.push(row);
     });
     const wsPivotPerc = XLSX.utils.aoa_to_sheet(pivotRowsPerc);
-    XLSX.utils.book_append_sheet(wb, wsPivotPerc, 'Matrice margini %');
+    XLSX.utils.book_append_sheet(wb, wsPivotPerc, 'Margine matrice %');
     
     const date = new Date().toISOString().split('T')[0];
     XLSX.writeFile(wb, 'tluxy_calcolo_batch_' + date + '.xlsx');
-  }).catch(e => alert('Errore export: ' + e.message));
+  }).catch(e => alert('Errore durante l'esportazione: ' + e.message));
 }
 
-function downloadBatchTemplate() {
+funzione downloadBatchTemplate() {
   loadSheetJS().then(() => {
     const data = [
       ['SKU', 'Titolo', 'Stock', 'Retail', 'Sconto%', 'Costo', 'Listino', 'IVA'],
@@ -2674,7 +2781,7 @@ function downloadBatchTemplate() {
     ];
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(data);
-    // Set column widths per leggibilità
+    // Imposta la larghezza delle colonne in base alla leggibilità
     ws['!cols'] = [{wch:18}, {wch:32}, {wch:8}, {wch:10}, {wch:10}, {wch:10}, {wch:12}, {wch:6}];
     XLSX.utils.book_append_sheet(wb, ws, 'Prodotti');
     
@@ -2684,14 +2791,14 @@ function downloadBatchTemplate() {
       [''],
       ['COLONNE OBBLIGATORIE:'],
       ['• SKU - codice prodotto'],
-      ['• Retail (o Listino) - prezzo retail pieno RRP'],
+      ['• Retail (o Listino) - prezzo al dettaglio pieno RRP'],
       ['• Costo OPPURE Sconto% - almeno una delle due'],
       [''],
       ['COLONNE OPZIONALI:'],
       ['• Titolo - nome prodotto'],
       ['• Stock - pezzi disponibili'],
       ['• Listino - prezzo di vendita effettivo (default = Retail)'],
-      ['• IVA - aliquota IVA (default = 22%)'],
+      ['• IVA - aliquota IVA (impostazione predefinita = 22%)'],
       [''],
       ['LOGICA CALCOLO COSTO:'],
       ['• Se compili "Sconto%", il costo è calcolato: Retail × (1 - Sconto%/100)'],
@@ -2700,14 +2807,14 @@ function downloadBatchTemplate() {
       [''],
       ['ESEMPI:'],
       ['• Retail 500€ + Sconto% 50 = Costo 250€'],
-      ['• Retail 380€ + Costo 152€ = Sconto effettivo 60%'],
+      ['• Vendita al dettaglio 380€ + Costo 152€ = Sconto effettivo 60%'],
       [''],
-      ['NOMI COLONNE ACCETTATI (case-insensitive):'],
+      ['NOMI COLONNE ACCETTATI (senza distinzione tra maiuscole e minuscole):'],
       ['• SKU: sku, codice, codice prodotto'],
-      ['• Retail: retail, rrp, retail price, prezzo retail, prezzo pieno'],
-      ['• Sconto%: sconto, sconto%, sconto fornitore, discount%'],
+      ['• Vendita al dettaglio: retail, rrp, retail price, prezzo retail, prezzo pieno'],
+      ['• Sconto%: sconto, sconto%, sconto fornitore, sconto%'],
       ['• Costo: costo, cost, costo fornitore, costo acquisto'],
-      ['• Listino: listino, prezzo vendita, prezzo, price, sell price']
+      ['• Listino: listino, prezzo vendita, prezzo, prezzo, prezzo di vendita']
     ];
     const wsIstr = XLSX.utils.aoa_to_sheet(istr);
     wsIstr['!cols'] = [{wch:70}];
@@ -2717,48 +2824,48 @@ function downloadBatchTemplate() {
   }).catch(e => alert('Errore: ' + e.message));
 }
 
-// ============ CHAT AI ASSISTANT (v5.10) ============
-let chatHistory = []; // {role, content}
-let chatBusy = false;
+// ============ ASSISTENTE CHAT AI (v5.10) ============
+let chatHistory = []; // {ruolo, contenuto}
+lascia chatBusy = falso;
 
-async function checkChatStatus() {
+funzione asincrona checkChatStatus() {
   const bar = document.getElementById('chat-status-bar');
-  if (!bar) return;
-  try {
+  se (!bar) restituisci;
+  Tentativo {
     const data = await fetchNoCache('/api/chat-status');
-    if (data.enabled) {
+    se (dati abilitati) {
       bar.className = 'info-box';
       bar.style.cssText = 'background:var(--green-light); border-left-color:var(--green-primary); color:var(--green-dark);';
       bar.innerHTML = '✅ <strong>Assistente attivo</strong> · usa modello ' + (data.model || 'Claude') + ' · costo stimato per messaggio: ' + (data.cost_per_msg || '€0.01-0.05');
-    } else {
+    } altro {
       bar.className = 'warn-box';
-      bar.innerHTML = '⚠️ <strong>Assistente non configurato</strong>. Per attivarlo: Vercel → Settings → Environment Variables → aggiungi <code>ANTHROPIC_API_KEY</code> con la tua chiave da console.anthropic.com';
+      bar.innerHTML = '⚠️ <strong>Assistente non configurato</strong>. Per attivarlo: Vercel → Impostazioni → Variabili d'ambiente → aggiungi <code>ANTHROPIC_API_KEY</code> con la tua chiave da console.anthropic.com';
     }
   } catch(e) {
     bar.innerHTML = '❌ Errore verifica stato: ' + e.message;
   }
 }
 
-function chatRender() {
+funzione chatRender() {
   const container = document.getElementById('chat-messages');
-  if (!container) return;
-  if (chatHistory.length === 0) return; // mostra suggested
+  se (!container) restituisci;
+  if (chatHistory.length === 0) return; // mostra suggerito
   container.innerHTML = chatHistory.map(msg => {
     const isUser = msg.role === 'user';
     const align = isUser ? 'flex-end' : 'flex-start';
-    const bg = isUser ? 'var(--black)' : 'var(--white)';
+    const bg = isUser ? 'var(--nero)' : 'var(--bianco)';
     const color = isUser ? 'var(--white)' : 'var(--black)';
     const border = isUser ? 'none' : '1px solid var(--gray-200)';
     const radius = isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px';
     // Markdown molto basico: doppio asterisco per bold, newline per a-capo
-    let content = String(msg.content || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    content = content.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
-    content = content.replace(/\\n/g, '<br>');
-    return '<div style="display:flex; justify-content:' + align + '; margin-bottom:12px;">' +
+    let content = String(msg.content || '').replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>');
+    contenuto = contenuto.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
+    contenuto = contenuto.sostituisci(/\\n/g, '<br>');
+    restituisci '<div style="display:flex; justify-content:' + align + '; margin-bottom:12px;">' +
       '<div style="max-width:80%; padding:11px 16px; background:' + bg + '; color:' + color + '; border:' + border + '; border-radius:' + radius + '; font-size:0.92rem; line-height:1.5; white-space:pre-wrap; overflow-wrap:break-word;">' + content + '</div>' +
     '</div>';
-  }).join('');
-  if (chatBusy) {
+  }).giuntura('');
+  se (chatOccupata) {
     container.innerHTML += '<div style="display:flex; justify-content:flex-start; margin-bottom:12px;">' +
       '<div style="padding:11px 16px; background:var(--white); border:1px solid var(--gray-200); border-radius:14px 14px 14px 4px; font-size:0.9rem; color:var(--gray-700);">' +
       '<span style="display:inline-block; animation:pulse 1.4s infinite;">●</span><span style="display:inline-block; animation:pulse 1.4s infinite 0.2s; margin:0 4px;">●</span><span style="display:inline-block; animation:pulse 1.4s infinite 0.4s;">●</span></div></div>';
@@ -2766,29 +2873,29 @@ function chatRender() {
   container.scrollTop = container.scrollHeight;
 }
 
-async function chatSend(message) {
-  if (!message || chatBusy) return;
-  chatHistory.push({ role: 'user', content: message });
-  chatBusy = true;
+funzione asincrona chatSend(messaggio) {
+  se (!messaggio || chatOccupata) restituisci;
+  chatHistory.push({ ruolo: 'utente', contenuto: messaggio });
+  chatOccupato = vero;
   chatRender();
   document.getElementById('chat-input').value = '';
   
-  try {
+  Tentativo {
     const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: chatHistory })
+      metodo: 'POST',
+      intestazioni: { 'Content-Type': 'application/json' },
+      corpo: JSON.stringify({ messaggi: chatHistory })
     });
     const data = await res.json();
-    chatBusy = false;
-    if (data.success) {
-      chatHistory.push({ role: 'assistant', content: data.reply });
-    } else {
+    chatOccupato = falso;
+    se (dati di successo) {
+      chatHistory.push({ role: 'assistente', content: data.reply });
+    } altro {
       chatHistory.push({ role: 'assistant', content: '❌ Errore: ' + (data.error || 'sconosciuto') });
     }
     chatRender();
   } catch(e) {
-    chatBusy = false;
+    chatOccupato = falso;
     chatHistory.push({ role: 'assistant', content: '❌ Errore di rete: ' + e.message });
     chatRender();
   }
@@ -2801,8 +2908,8 @@ document.addEventListener('DOMContentLoaded', () => {
   ['date-from', 'bs-date-from'].forEach(id => { const el = document.getElementById(id); if (el) el.value = fmt(monthAgo); });
   ['date-to', 'bs-date-to'].forEach(id => { const el = document.getElementById(id); if (el) el.value = fmt(today); });
   document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => {
-    showTab(btn.dataset.tab);
-    if (btn.dataset.tab === 'duo') { checkKvStatus(); /* on-demand: niente auto-load, clicca Ricarica */ }
+    mostraTab(btn.dataset.tab);
+    if (btn.dataset.tab === 'duo') { checkKvStatus(); /* on-demand: niente auto-caricamento, clicca Ricarica */ }
     if (btn.dataset.tab === 'forecast') { if (!forecastData) loadForecast(); }
     if (btn.dataset.tab === 'inventory') { if (!inventoryData) loadInventory(false); }
     if (btn.dataset.tab === 'chat') { checkChatStatus(); }
@@ -2813,40 +2920,49 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('bs-apply').addEventListener('click', applyBsCustomRange);
   ['c-prezzo', 'c-iva', 'c-costo', 'c-spedizione'].forEach(id => { const el = document.getElementById(id); if (el) { el.addEventListener('input', confronta); if (el.tagName === 'SELECT') el.addEventListener('change', confronta); } });
   document.getElementById('calcola-btn').addEventListener('click', calcola);
-  // Batch Excel listeners
+  // Calcolatore: Retail + Sconti ascoltatori (sync bidirezionale)
+  ['calc-retail', 'calc-sconto-vendita', 'calc-sconto-costo'].forEach(id => {
+    const el = document.getElementById(id);
+    se (el) el.addEventListener('input', calcUpdateFromRetail);
+  });
+  ['prezzo', 'costo'].forEach(id => {
+    const el = document.getElementById(id);
+    se (el) el.addEventListener('input', calcUpdateFromPrezzoCosto);
+  });
+  // Listener di Batch Excel
   const batchFile = document.getElementById('batch-file');
   if (batchFile) batchFile.addEventListener('change', e => { if (e.target.files[0]) handleBatchFile(e.target.files[0]); });
   const batchTplBtn = document.getElementById('batch-template-btn');
-  if (batchTplBtn) batchTplBtn.addEventListener('click', downloadBatchTemplate);
+  se (batchTplBtn) batchTplBtn.addEventListener('click', downloadBatchTemplate);
   const batchIvaSel = document.getElementById('batch-iva-default');
-  if (batchIvaSel) batchIvaSel.addEventListener('change', () => {
-    // Ricalcola usando nuova IVA come default
-    if (batchProducts.length > 0) {
+  se (batchIvaSel) batchIvaSel.addEventListener('change', () => {
+    // Ricalcola utilizzando la nuova IVA come default
+    se (batchProducts.length > 0) {
       const newIva = parseFloat(batchIvaSel.value) || 22;
       batchProducts.forEach(p => {
         p.iva = newIva;
         p.calcoli = Object.entries(MARKETPLACES).map(([key, mp]) => {
           const r = batchCalcMargine(p.listino, p.costo, key, p.iva, p.retail);
-          return { mp_key: key, mp_nome: mp.nome, ...r };
+          return { mp_key: chiave, mp_nome: mp.nome, ...r };
         }).sort((a, b) => b.margine - a.margine);
       });
       renderBatch();
     }
   });
-  // DUO listeners
+  // Ascoltatori DUO
   document.getElementById('duo-reload').addEventListener('click', loadDuoProducts);
   const fcBtn = document.getElementById('forecast-reload');
-  if (fcBtn) fcBtn.addEventListener('click', () => loadForecast(false));
+  se (fcBtn) fcBtn.addEventListener('click', () => loadForecast(false));
   const fcRefresh = document.getElementById('forecast-refresh');
-  if (fcRefresh) fcRefresh.addEventListener('click', () => {
+  se (fcRefresh) fcRefresh.addEventListener('click', () => {
     if (confirm('Ricalcolare tutte le previsioni? Richiede 10-30 secondi.')) loadForecast(true);
   });
   
-  // Inventory listeners
+  // Listener di inventario
   const invBtn = document.getElementById('inventory-reload');
-  if (invBtn) invBtn.addEventListener('click', () => loadInventory(false));
+  se (invBtn) invBtn.addEventListener('click', () => loadInventory(false));
   const invRefresh = document.getElementById('inventory-refresh');
-  if (invRefresh) invRefresh.addEventListener('click', () => {
+  se (invRefresh) invRefresh.addEventListener('click', () => {
     if (confirm('Scaricare di nuovo tutto il catalogo da Shopify? Richiede 20-60 secondi.')) loadInventory(true);
   });
   document.querySelectorAll('.inv-filter').forEach(btn => {
@@ -2861,51 +2977,51 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.style.background = 'var(--white)';
       btn.style.color = 'var(--black)';
       btn.style.fontWeight = '600';
-      inventoryFilter = btn.dataset.filter;
-      if (inventoryData) renderInventory();
+      filtro_inventario = btn.dataset.filter;
+      se (inventoryData) renderInventory();
     });
   });
   document.getElementById('duo-csv-file').addEventListener('change', e => { if (e.target.files[0]) handleCsvImport(e.target.files[0]); });
   document.getElementById('duo-search').addEventListener('input', filterDuoProducts);
-  // Chat AI listeners
+  // Listener di Chat AI
   const chatInput = document.getElementById('chat-input');
   const chatSendBtn = document.getElementById('chat-send');
   const chatClearBtn = document.getElementById('chat-clear');
-  if (chatSendBtn) chatSendBtn.addEventListener('click', () => {
+  se (chatSendBtn) chatSendBtn.addEventListener('click', () => {
     const v = (chatInput.value || '').trim();
-    if (v) chatSend(v);
+    se (v) chatSend(v);
   });
-  if (chatInput) chatInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter') {
+  se (chatInput) chatInput.addEventListener('keydown', e => {
+    se (e.key === 'Invio') {
       const v = (chatInput.value || '').trim();
-      if (v) chatSend(v);
+      se (v) chatSend(v);
     }
   });
-  if (chatClearBtn) chatClearBtn.addEventListener('click', () => {
+  se (chatClearBtn) chatClearBtn.addEventListener('click', () => {
     chatHistory = [];
-    chatBusy = false;
+    chatOccupato = falso;
     chatRender();
     // Mostra schermata vuota con suggerimenti
-    document.getElementById('chat-messages').innerHTML = document.getElementById('chat-messages').innerHTML; // forza re-render iniziale
-    location.hash = '#chat-tab'; setTimeout(() => location.hash = '', 100); // reset visivo
+    document.getElementById('chat-messages').innerHTML = document.getElementById('chat-messages').innerHTML; // forza il re-render iniziale
+    location.hash = '#chat-tab'; setTimeout(() => location.hash = '', 100); // reset Visualizzazione
   });
-  // Bottoni suggested in chat
+  // Bottoni ha suggerito nella chat
   document.querySelectorAll('.chat-suggest').forEach(btn => {
     btn.addEventListener('click', () => {
       const text = btn.textContent.replace(/^[^a-zA-Z0-9]+\s*/, '').trim();
-      chatSend(text);
+      chatSend(testo);
     });
   });
-  // Logout handler
+  // Gestore del logout
   const logoutBtn = document.getElementById('logoutBtn');
-  if (logoutBtn) {
+  se (logoutBtn) {
     logoutBtn.addEventListener('click', async () => {
       if (!confirm('Vuoi uscire dalla dashboard?')) return;
       try { await fetch('/api/logout', { method: 'POST' }); } catch(_) {}
       window.location.href = '/login';
     });
   }
-  setTimeout(() => { calcola(); confronta(); const todayBtn = document.querySelector('[data-analytics-periods] .period-btn[data-period="today"]'); setPeriod('today', todayBtn); }, 300);
+  setTimeout(() => { confronta(); const todayBtn = document.querySelector('[data-analytics-periods] .period-btn[data-period="today"]'); setPeriod('today', todayBtn); }, 300);
 });
 </script>
 </body>
@@ -2921,282 +3037,282 @@ export default async function handler(req, res) {
   const path = req.url.split('?')[0];
   const query = new URLSearchParams(req.url.split('?')[1] || '');
 
-  try {
-    // ============ AUTH ENDPOINTS (MAGIC LINK) ============
+  Tentativo {
+    // ============ ENDPOINT DI AUTENTICAZIONE (LINK MAGICO) ============
     // Pagina login: GET /login (pubblica, sempre accessibile)
-    if (req.method === 'GET' && path === '/login') {
+    se (req.method === 'GET' && path === '/login') {
       res.setHeader('Content-Type', 'text/html');
       const sent = query.get('sent');
       const err = query.get('err');
       const expired = query.get('expired');
-      let msg = null, isErr = false;
-      if (sent === '1') msg = "✉️ Se l'email è autorizzata, riceverai il magic link a breve. Controlla la posta (anche spam).";
-      else if (err === 'invalid') { msg = 'Link non valido o già usato. Richiedine uno nuovo.'; isErr = true; }
-      else if (err === 'rate') { msg = "Troppi tentativi. Riprova tra un'ora."; isErr = true; }
-      else if (err === 'config') { msg = "Sistema auth non configurato. Contatta l'amministratore."; isErr = true; }
-      else if (expired === '1') { msg = 'Sessione scaduta, rifai login.'; isErr = true; }
-      return res.status(200).send(loginHTMLPage(msg, isErr));
+      lascia msg = null, isErr = false;
+      if (sent === '1') msg ​​= "✉️ Se l'email è autorizzata, riceverai il magic link in breve. Controlla la posta (anche spam).";
+      else if (err === 'invalid') { msg = 'Link non valido o già usato. Richiedine uno nuovo.'; isErr = vero; }
+      else if (err === 'rate') { msg = "Troppi tentativi. Ripova tra un'ora."; isErr = vero; }
+      else if (err === 'config') { msg = "Sistema auth non configurato. Contatta l'amministratore."; isErr = vero; }
+      else if (expired === '1') { msg = 'Sessione scaduta, rifai login.'; isErr = vero; }
+      restituisci res.status(200).send(loginHTMLPage(msg, isErr));
     }
     
-    // Request magic link: POST /api/request-magic-link { email }
-    if (req.method === 'POST' && path === '/api/request-magic-link') {
+    // Richiesta del link magico: POST /api/request-magic-link { email }
+    se (req.method === 'POST' && path === '/api/request-magic-link') {
       if (!AUTH_ENABLED) return res.status(503).json({ success: false, error: 'Auth non configurato (RESEND_API_KEY o ALLOWED_EMAILS mancanti)' });
-      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV non configurato — necessario per magic link' });
-      try {
-        let body = '';
+      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV non configurabile — necessario per magic link' });
+      Tentativo {
+        lascia corpo = '';
         await new Promise((resolve, reject) => { req.on('data', c => body += c); req.on('end', resolve); req.on('error', reject); });
         const data = JSON.parse(body || '{}');
         const email = (data.email || '').trim().toLowerCase();
         // Validazione base email
-        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-          return res.status(200).json({ success: true }); // no info leak
+        se (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          return res.status(200).json({ success: true }); // nessuna perdita di informazioni
         }
-        // Check whitelist (silente per evitare enumeration)
-        if (!ALLOWED_EMAILS.includes(email)) {
-          // Ritorna comunque success: true per non dare info su quali email sono autorizzate
-          return res.status(200).json({ success: true });
+        // Check whitelist (silenzioso per evitare enumeration)
+        se (!EMAIL_CONSENTITE.include(email)) {
+          // Ritorna comunque successo: vero per non dare info su quali email sono autorizzate
+          restituisci res.status(200).json({ success: true });
         }
-        // Rate limiting via KV
+        // Limitazione della velocità tramite KV
         const rateLimitKey = `auth_rate_${email}`;
         const currentCount = await kvGet(rateLimitKey);
-        if (currentCount && parseInt(currentCount, 10) >= MAGIC_LINK_RATE_LIMIT) {
-          return res.status(200).json({ success: true }); // no leak
+        se (currentCount && parseInt(currentCount, 10) >= MAGIC_LINK_RATE_LIMIT) {
+          return res.status(200).json({ success: true }); // nessuna perdita
         }
-        // Genera token magic link
+        // Genera il link magico del token
         const token = generateMagicLinkToken();
         const tokenKey = `magic_token_${token}`;
         const expiresAt = Date.now() + (MAGIC_LINK_MINUTES * 60 * 1000);
         // Salva in KV con payload email + expiresAt
         await kvSet(tokenKey, JSON.stringify({ email, expiresAt }));
-        // Imposta TTL via EXPIRE (Upstash supporta via URL path)
-        try {
+        // Imposta TTL tramite EXPIRE (Upstash supporta tramite percorso URL)
+        Tentativo {
           await fetch(`${KV_REST_API_URL}/expire/${encodeURIComponent(tokenKey)}/${MAGIC_LINK_MINUTES * 60}`, { headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` } });
-        } catch (_) {}
-        // Rate limit counter increment (TTL 1h)
-        try {
+        } presa (_) {}
+        // Incremento del contatore del limite di frequenza (TTL 1h)
+        Tentativo {
           const newCount = currentCount ? parseInt(currentCount, 10) + 1 : 1;
-          await kvSet(rateLimitKey, String(newCount));
+          attendi kvSet(rateLimitKey, String(newCount));
           await fetch(`${KV_REST_API_URL}/expire/${encodeURIComponent(rateLimitKey)}/3600`, { headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` } });
-        } catch (_) {}
+        } presa (_) {}
         // Costruisci magic link e invia email
         const magicLink = `${DASHBOARD_URL}/api/verify-magic-link?token=${token}`;
-        try {
-          await sendMagicLinkEmail(email, magicLink);
+        Tentativo {
+          attendi sendMagicLinkEmail(email, magicLink);
         } catch (sendErr) {
-          console.error('Send email error:', sendErr.message);
-          // Non leakare info sull'errore all'utente
+          console.error('Errore durante l'invio dell'e-mail:', sendErr.message);
+          // Non leakare informazioni sull'errore all'utente
         }
-        return res.status(200).json({ success: true });
-      } catch (error) {
-        console.error('Magic link request error:', error.message);
-        return res.status(200).json({ success: true }); // no leak
+        restituisci res.status(200).json({ success: true });
+      } catch (errore) {
+        console.error('Errore nella richiesta del collegamento magico:', error.message);
+        return res.status(200).json({ success: true }); // nessuna perdita
       }
     }
     
-    // Verify magic link: GET /api/verify-magic-link?token=XXX (click dal link email)
-    if (req.method === 'GET' && path === '/api/verify-magic-link') {
-      if (!AUTH_ENABLED) return res.redirect(302, '/login?err=config');
+    // Verifica il link magico: GET /api/verify-magic-link?token=XXX (clicca sul link nell'email)
+    se (req.method === 'GET' && path === '/api/verify-magic-link') {
+      se (!AUTH_ENABLED) restituisci res.redirect(302, '/login?err=config');
       const token = query.get('token');
-      if (!token) return res.redirect(302, '/login?err=invalid');
-      try {
+      se (!token) restituisci res.redirect(302, '/login?err=invalid');
+      Tentativo {
         const tokenKey = `magic_token_${token}`;
         const raw = await kvGet(tokenKey);
-        if (!raw) {
+        se (!raw) {
           res.writeHead(302, { Location: '/login?err=invalid' });
-          return res.end();
+          restituisci res.end();
         }
-        let payload;
-        try { payload = JSON.parse(raw); } catch (e) { 
+        consentire il carico utile;
+        try { payload = JSON.parse(raw); } catch (e) {
           res.writeHead(302, { Location: '/login?err=invalid' });
-          return res.end();
+          restituisci res.end();
         }
-        if (!payload.email || !payload.expiresAt || payload.expiresAt < Date.now()) {
+        se (!payload.email || !payload.expiresAt || payload.expiresAt < Date.now()) {
           res.writeHead(302, { Location: '/login?err=invalid' });
-          return res.end();
+          restituisci res.end();
         }
-        // Cancella token (single-use)
+        // Token di annullamento (monouso)
         try { await fetch(`${KV_REST_API_URL}/del/${encodeURIComponent(tokenKey)}`, { headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` } }); } catch (_) {}
-        // Verifica che email sia ancora autorizzata (la whitelist può essere cambiata)
-        if (!ALLOWED_EMAILS.includes(payload.email)) {
+        // Verifica che email sia ancora autorizzata (la whitelist può essere modificata)
+        se (!EMAIL_CONSENTITE.include(payload.email)) {
           res.writeHead(302, { Location: '/login?err=invalid' });
-          return res.end();
+          restituisci res.end();
         }
-        // Setta cookie sessione e redirect alla dashboard
+        // Setta cookie sessione e reindirizza alla dashboard
         setAuthCookie(res, payload.email);
         res.writeHead(302, { Location: '/' });
-        return res.end();
-      } catch (error) {
-        console.error('Verify magic link error:', error.message);
+        restituisci res.end();
+      } catch (errore) {
+        console.error('Errore durante la verifica del collegamento magico:', error.message);
         res.writeHead(302, { Location: '/login?err=invalid' });
-        return res.end();
+        restituisci res.end();
       }
     }
     
-    // Logout: cancella cookie e redirect login
-    if (req.method === 'POST' && path === '/api/logout') {
+    //Logout: cancella cookie e reindirizza il login
+    se (req.method === 'POST' && path === '/api/logout') {
       clearAuthCookie(res);
-      return res.status(200).json({ success: true });
+      restituisci res.status(200).json({ success: true });
     }
-    if (req.method === 'GET' && path === '/logout') {
+    se (req.method === 'GET' && path === '/logout') {
       clearAuthCookie(res);
       res.writeHead(302, { Location: '/login' });
-      return res.end();
+      restituisci res.end();
     }
 
-    // ============ AUTH GATE ============
+    // ============ GATE DI AUTORIZZAZIONE ============
     // Tutti gli altri endpoint richiedono autenticazione (se abilitata)
     const authUser = getAuthenticatedUser(req);
-    if (AUTH_ENABLED && !authUser) {
-      if (req.method === 'GET' && (path === '/' || path === '/dashboard')) {
+    se (AUTH_ENABLED && !authUser) {
+      se (req.method === 'GET' && (path === '/' || path === '/dashboard')) {
         res.writeHead(302, { Location: '/login?expired=1' });
-        return res.end();
+        restituisci res.end();
       }
       return res.status(401).json({ success: false, error: 'Non autorizzato. Effettua il login.', auth_required: true });
     }
 
-    if (req.method === 'GET' && (path === '/' || path === '/dashboard')) {
+    se (req.method === 'GET' && (path === '/' || path === '/dashboard')) {
       res.setHeader('Content-Type', 'text/html');
-      return res.status(200).send(DASHBOARD_HTML);
+      restituisci res.status(200).send(DASHBOARD_HTML);
     }
 
-    if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.11', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+    se (req.method === 'GET' && path === '/api') {
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.12', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧮 Calcolatore con Retail + 2 sconti (sync bidirezionale)', '📊 Excel batch con Retail + Sconto% fornito', '💡 Sconto Max corretto per 20% margine', '💬 Chat AI Assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
-    if (req.method === 'GET' && path === '/api/analytics') {
-      const periodo = query.get('periodo') || 'today';
+    se (req.method === 'GET' && path === '/api/analytics') {
+      const periodo = query.get('periodo') || 'oggi';
       const from = query.get('from'); const to = query.get('to');
-      try {
-        let ordini = await getShopifyOrders(periodo, from, to);
-        ordini = await processOrders(ordini);
+      Tentativo {
+        let ordini = await getShopifyOrders(periodo, da, a);
+        ordini = attendono processoOrdini(ordini);
         const variantIds = new Set();
         const productIds = new Set();
-        ordini.forEach(o => (o.line_items || []).forEach(item => { 
-          if (item.variant_id) variantIds.add(item.variant_id);
-          if (item.product_id) productIds.add(item.product_id);
+        ordini.forEach(o => (o.line_items || []).forEach(item => {
+          se (item.variant_id) variantIds.add(item.variant_id);
+          se (item.product_id) productIds.add(item.product_id);
         }));
         const fetchResult = await fetchVariantCosts([...variantIds], [...productIds]);
         const variantCosts = fetchResult.costs;
         const fetchStats = fetchResult.stats;
         
-        // Carica costi DUO salvati manualmente dall'utente (per gli ordini dove Shopify ha perso il cost)
+        // Carica costi DUO salvati manualmente dall'utente (per gli ordini dove Shopify ha perso il costo)
         const duoUserCosts = {};
-        if (KV_ENABLED) {
+        se (KV_ENABLED) {
           const duoSkuVariantIds = [];
           ordini.forEach(o => (o.line_items || []).forEach(item => {
             if (item.variant_id && isDuoSku(item.sku)) duoSkuVariantIds.push(item.variant_id);
           }));
           const uniqueDuoVids = [...new Set(duoSkuVariantIds)];
-          if (uniqueDuoVids.length > 0) {
+          se (uniqueDuoVids.length > 0) {
             const duoKeys = uniqueDuoVids.map(v => `duo_user_cost_${v}`);
             const duoResults = await kvMGet(duoKeys);
             uniqueDuoVids.forEach(v => {
               const key = `duo_user_cost_${v}`;
-              if (duoResults[key] !== undefined) {
+              se (duoResults[key] !== undefined) {
                 const parsed = parseFloat(duoResults[key]);
-                if (!isNaN(parsed)) duoUserCosts[v] = parsed;
+                se (!isNaN(parsed)) duoUserCosts[v] = parsed;
               }
             });
           }
         }
         
-        let lordo_iva_inclusa = 0, iva_totale = 0, costi_totali = 0, margine_netto = 0;
-        // Split costi per KPI "merce" vs "fees + spedizione + packaging"
-        let costi_merce_totali = 0, costi_fees_totali = 0;
-        // Aggregati refund (separati per analisi)
-        let resi_totale_eur = 0, resi_count = 0, resi_full_count = 0, resi_partial_count = 0;
-        let resi_articoli_qty = 0;
+        poniamo lordo_iva_inclusa = 0, iva_totale = 0, costi_totali = 0, margine_netto = 0;
+        // Ripartizione dei costi per KPI "merce" vs "commissioni + spedizione + imballaggio"
+        poniamo costi_merce_totali = 0, costi_commissioni_totali = 0;
+        // Rimborso aggregato (separati per analisi)
+        poniamo resi_totale_eur = 0, resi_count = 0, resi_full_count = 0, resi_partial_count = 0;
+        lascia resi_articoli_qty = 0;
         const breakdown_marketplace = {};
         const ordini_con_errori = [];
         const ordini_valuta_estera = [];
         const ordini_con_resi = []; // dettaglio resi per visualizzazione
         ordini.forEach(ordine => {
-          const { costo: costo_merce, errori } = calcolaCostoOrdine(ordine, variantCosts, duoUserCosts);
+          const { costo: costo_merce, errori } = calcolaCostoOrdine(ordine, variableCosts, duoUserCosts);
           const mp = riconosciMarketplace(ordine);
           const currencyInfo = getOrderCurrencyInfo(ordine);
           const refundInfo = getOrderRefundInfo(ordine);
-          if (errori.length > 0) {
-            ordini_con_errori.push({ id: ordine.id, order_number: ordine.order_number, name: ordine.name, total_price: ordine.total_price, total_price_eur: currencyInfo.eurTotal, currency: currencyInfo.originalCurrency, marketplace: mp.config.nome, prodotti_senza_costo: errori });
-            return;
+          se (errori.length > 0) {
+            ordini_con_errori.push({ id: ordine.id, order_number: ordine.order_number, name: ordine.name, total_price: ordine.total_price, total_price_eur: valutaInfo.eurTotal, valuta: valutaInfo.originalCurrency, marketplace: mp.config.nome, prodotti_senza_costo: errori });
+            ritorno;
           }
-          // PREZZO LORDO IN EUR (al netto refund)
-          const prezzo_lordo_originale = currencyInfo.eurTotal;
-          const prezzo_lordo = Math.max(0, prezzo_lordo_originale - refundInfo.totalRefundedEur); // sottrae i refund
+          // PREZZO LORDO IN EUR (rimborso al netto)
+          const prezzo_lordo_originale = valutaInfo.eurTotale;
+          const prezzo_lordo = Math.max(0, prezzo_lordo_originale - rimborsoInfo.totalRefundedEur); // sosterrò il rimborso
           const spedizione = (ordine.shipping_lines || []).reduce((sum, line) => sum + toEurAmount(line.price_set, line.price, currencyInfo.originalCurrency), 0);
-          const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
-          const ivaPerc = mp.key === 'POIZON' ? 22 : getIvaPerPaese(country);
+          const paese = ordine.indirizzo_spedizione?.codice_paese || ordine.indirizzo_fatturazione?.codice_paese;
+          const ivaPerc = mp.key === 'POIZON' ? 22 : getIvaPerPaese(paese);
           const shopifyTaxEur = toEurAmount(ordine.total_tax_set, ordine.total_tax, currencyInfo.originalCurrency);
-          const iva_scorporata = shopifyTaxEur > 0 ? shopifyTaxEur : (prezzo_lordo - prezzo_lordo / (1 + ivaPerc / 100));
+          const iva_scorporata = shopifyTaxEur > 0 ? shopifyTaxEur: (prezzo_lordo - prezzo_lordo/(1+ivaPerc/100));
           
           // Costo merce: se reso totale → 0 (la merce torna a magazzino), se reso parziale → proporzionale
-          let costo_merce_effettivo = costo_merce;
-          if (refundInfo.isFullRefund) {
+          poniamo costo_merce_effettivo = costo_merce;
+          se (refundInfo.isFullRefund) {
             costo_merce_effettivo = 0;
-          } else if (refundInfo.isPartialRefund && refundInfo.totalQuantity > 0) {
+          } altrimenti se (refundInfo.isPartialRefund && refundInfo.totalQuantity > 0) {
             // Sottrai costo della quantità rimborsata (proporzionale)
             const ratioReso = refundInfo.refundedQuantity / refundInfo.totalQuantity;
-            costo_merce_effettivo = costo_merce * (1 - ratioReso);
+            costo_merce_effettivo = costo_merce*(1 - ratioReso);
           }
           
           const ris = calcolaMarginalita(prezzo_lordo, iva_scorporata, costo_merce_effettivo, spedizione, mp.config, mp.key);
           
           // Se reso totale → conta come 0 fatturato/margine (ma traccialo a parte)
-          if (refundInfo.isFullRefund) {
+          se (refundInfo.isFullRefund) {
             // Non sommare nulla ai KPI principali, registra solo come reso
-            resi_totale_eur += refundInfo.totalRefundedEur;
+            resi_totale_eur += rimborsoInfo.totalRefundedEur;
             resi_count++;
             resi_full_count++;
-            resi_articoli_qty += refundInfo.refundedQuantity;
+            resi_articoli_qty += returnInfo.refundedQuantity;
             ordini_con_resi.push({
-              order_number: ordine.order_number,
-              name: ordine.name,
-              created_at: ordine.created_at,
-              marketplace: mp.config.nome,
+              numero_ordine: numero_ordine,
+              nome: ordine.name,
+              creato_al: ordine.creato_al,
+              mercato: mp.config.nome,
               tipo: 'totale',
               importo_originale_eur: prezzo_lordo_originale,
-              importo_rimborsato_eur: refundInfo.totalRefundedEur,
-              quantita_rimborsata: refundInfo.refundedQuantity,
-              quantita_totale: refundInfo.totalQuantity
+              importo_rimborsato_eur: rimborsoInfo.totalRefundedEur,
+              quantita_rimborsata: returnInfo.refundedQuantity,
+              quantità_totale: rimborsoInfo.totalQuantity
             });
-            return; // skip aggiunta breakdown
+            ritorno; // salta ulteriore scomposizione
           }
           
-          if (refundInfo.isPartialRefund) {
-            resi_totale_eur += refundInfo.totalRefundedEur;
+          se (refundInfo.isPartialRefund) {
+            resi_totale_eur += rimborsoInfo.totalRefundedEur;
             resi_count++;
             resi_partial_count++;
-            resi_articoli_qty += refundInfo.refundedQuantity;
+            resi_articoli_qty += returnInfo.refundedQuantity;
             ordini_con_resi.push({
-              order_number: ordine.order_number,
-              name: ordine.name,
-              created_at: ordine.created_at,
-              marketplace: mp.config.nome,
+              numero_ordine: numero_ordine,
+              nome: ordine.name,
+              creato_al: ordine.creato_al,
+              mercato: mp.config.nome,
               tipo: 'parziale',
               importo_originale_eur: prezzo_lordo_originale,
-              importo_rimborsato_eur: refundInfo.totalRefundedEur,
-              quantita_rimborsata: refundInfo.refundedQuantity,
-              quantita_totale: refundInfo.totalQuantity
+              importo_rimborsato_eur: rimborsoInfo.totalRefundedEur,
+              quantita_rimborsata: returnInfo.refundedQuantity,
+              quantità_totale: rimborsoInfo.totalQuantity
             });
           }
           
           lordo_iva_inclusa += ris.prezzo_lordo_iva_inclusa;
           iva_totale += ris.iva_scorporata;
           costi_totali += ris.costi_totali;
-          // Split: merce da una parte; fees + spedizione + packaging dall'altra
+          // Diviso: merce da una parte; spese + spedizione + imballo dall'altra
           // (costo_fees = fees_shopify + fees_marketplace + spedizione — packaging è incluso in fees_marketplace)
           costi_merce_totali += costo_merce_effettivo;
           costi_fees_totali += (ris.fees_shopify || 0) + (ris.fees_marketplace || 0) + (spedizione || 0);
           margine_netto += ris.margine_netto;
           
-          if (currencyInfo.isForeign) {
+          se (currencyInfo.isForeign) {
             ordini_valuta_estera.push({
-              order_number: ordine.order_number,
-              name: ordine.name,
-              currency: currencyInfo.originalCurrency,
+              numero_ordine: numero_ordine,
+              nome: ordine.name,
+              valuta: currencyInfo.originalCurrency,
               total_original: currencyInfo.originalTotal,
               total_eur: currencyInfo.eurTotal,
-              exchange_rate: currencyInfo.exchangeRate,
-              marketplace: mp.config.nome
+              tasso_di_cambio: currencyInfo.exchangeRate,
+              mercato: mp.config.nome
             });
           }
           
@@ -3206,170 +3322,170 @@ export default async function handler(req, res) {
           breakdown_marketplace[mp.key].iva += ris.iva_scorporata;
           breakdown_marketplace[mp.key].costo_merce += costo_merce_effettivo;
           breakdown_marketplace[mp.key].margine += ris.margine_netto;
-          if (refundInfo.hasRefund) {
+          se (refundInfo.hasRefund) {
             breakdown_marketplace[mp.key].resi_count += 1;
             breakdown_marketplace[mp.key].resi_eur += refundInfo.totalRefundedEur;
           }
           breakdown_marketplace[mp.key].dettaglio_ordini.push({
-            order_number: ordine.order_number,
-            name: ordine.name,
-            created_at: ordine.created_at,
-            country,
+            numero_ordine: numero_ordine,
+            nome: ordine.name,
+            creato_al: ordine.creato_al,
+            Paese,
             fatturato: ris.prezzo_lordo_iva_inclusa,
             iva: ris.iva_scorporata,
             costo_merce: costo_merce_effettivo,
-            fees_marketplace: ris.fees_marketplace,
-            fees_shopify: ris.fees_shopify,
+            mercato_delle_tariffe: mercato_delle_tariffe_del_ris,
+            commissioni_shopify: ris.commissioni_shopify,
             spedizione,
             margine_netto: ris.margine_netto,
             margine_percentuale: ris.margine_percentuale,
-            currency: currencyInfo.originalCurrency,
+            valuta: currencyInfo.originalCurrency,
             is_foreign_currency: currencyInfo.isForeign,
             total_original: currencyInfo.originalTotal,
-            exchange_rate: currencyInfo.exchangeRate,
-            // Info refund
-            refund_status: refundInfo.isFullRefund ? 'full' : (refundInfo.isPartialRefund ? 'partial' : 'none'),
-            refund_amount_eur: refundInfo.totalRefundedEur,
-            refund_quantity: refundInfo.refundedQuantity,
-            refund_total_quantity: refundInfo.totalQuantity,
+            tasso_di_cambio: currencyInfo.exchangeRate,
+            // Informazioni sul rimborso
+            stato_rimborso: refundInfo.isFullRefund ? 'full' : (refundInfo.isPartialRefund ? 'partial' : 'none'),
+            importo_rimborso_euro: informazioni_rimborso.totaleEur_rimborsati,
+            quantità_rimborso: informazioni_rimborso quantità_rimborsata,
+            quantità_totale_rimborso: informazioni_rimborso.totale,
             articoli: (ordine.line_items || []).map(item => ({
-              title: item.title,
+              titolo: titolo dell'articolo,
               sku: item.sku || '',
-              quantity: parseInt(item.quantity) || 0,
+              quantità: parseInt(item.quantity) || 0,
               prezzo_unit: toEurAmount(item.price_set, item.price, currencyInfo.originalCurrency),
-              cost_unit: (function() {
-                if (item.variant_id && variantCosts[item.variant_id] !== null && variantCosts[item.variant_id] !== undefined) return variantCosts[item.variant_id];
-                if (isDuoSku(item.sku) && item.variant_id && duoUserCosts[item.variant_id] !== undefined) return duoUserCosts[item.variant_id];
-                return 0;
+              costo_unità: (funzione() {
+                se (item.variant_id && variantCosts[item.variant_id] !== null && variantCosts[item.variant_id] !== undefined) restituisci variantCosts[item.variant_id];
+                se (isDuoSku(item.sku) && item.variant_id && duoUserCosts[item.variant_id] !== undefined) restituisci duoUserCosts[item.variant_id];
+                restituisci 0;
               })()
             }))
           });
         });
         const ordini_validi = ordini.length - ordini_con_errori.length - resi_full_count;
-        const margine_percentuale = lordo_iva_inclusa > 0 ? (margine_netto / lordo_iva_inclusa * 100) : 0;
+        const margine_percentuale = lordo_iva_inclusa > 0 ? (margine_netto/lordo_iva_inclusa*100): 0;
         // Ordina i resi più recenti prima
         ordini_con_resi.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        return res.json({
-          success: true,
-          periodo: from && to ? `${from} → ${to}` : periodo,
+        restituisci res.json({
+          successo: vero,
+          periodo: da && a ? `${da} → ${a}` : periodo,
           ordini_totali: ordini_validi,
           ordini_con_errori_count: ordini_con_errori.length,
           ordini_con_errori,
           lordo_iva_inclusa,
           iva_totale,
-          costi_totali,
-          costi_merce_totali,
-          costi_fees_totali,
+          costi_totale,
+          costi_merce_totale,
+          costi_commissioni_totale,
           margine_netto,
           margine_percentuale,
-          // Sezione resi
+          // Sezione reside
           resi: {
             totale_count: resi_count,
             totali_count: resi_full_count,
-            parziali_count: resi_partial_count,
-            articoli_resi_qty: resi_articoli_qty,
+            conteggio_parziale: conteggio_partiale_resi,
+            articoli_resi_qtà: resi_articoli_qtà,
             importo_totale_eur: resi_totale_eur,
             percentuale_su_lordo: lordo_iva_inclusa > 0 ? (resi_totale_eur / (lordo_iva_inclusa + resi_totale_eur) * 100) : 0,
             dettaglio: ordini_con_resi.slice(0, 100)
           },
-          breakdown_marketplace,
-          ordini_valuta_estera,
+          mercato di rottura,
+          messaggi_valuta_estera,
           fetch_stats: fetchStats,
           ultima_sincronizzazione: new Date().toISOString()
         });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
-    if (req.method === 'GET' && path === '/api/bestsellers') {
+    se (req.method === 'GET' && path === '/api/bestsellers') {
       const periodo = query.get('periodo') || 'month';
       const from = query.get('from'); const to = query.get('to');
-      try {
-        let ordini = await getShopifyOrders(periodo, from, to);
-        ordini = await processOrders(ordini);
+      Tentativo {
+        let ordini = await getShopifyOrders(periodo, da, a);
+        ordini = attendono processoOrdini(ordini);
         const variantIds = new Set();
         const productIds = new Set();
-        ordini.forEach(o => (o.line_items || []).forEach(item => { 
-          if (item.variant_id) variantIds.add(item.variant_id);
-          if (item.product_id) productIds.add(item.product_id);
+        ordini.forEach(o => (o.line_items || []).forEach(item => {
+          se (item.variant_id) variantIds.add(item.variant_id);
+          se (item.product_id) productIds.add(item.product_id);
         }));
         const variantCosts = (await fetchVariantCosts([...variantIds], [...productIds])).costs;
         let prodotti = calcolaBestSellers(ordini, 20, variantCosts);
-        prodotti = await arricchisciConImmagini(prodotti);
+        prodotti = attendono arricchisciConImmagini(prodotti);
         return res.json({ success: true, periodo: from && to ? `${from} → ${to}` : periodo, totale_prodotti_unici: prodotti.length, prodotti });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
-    if (req.method === 'GET' && path === '/api/debug-costs') {
-      try {
-        const periodo = query.get('periodo') || 'yesterday';
-        const ordini = await getShopifyOrders(periodo);
-        const processati = await processOrders(ordini);
+    se (req.method === 'GET' && path === '/api/debug-costs') {
+      Tentativo {
+        const periodo = query.get('periodo') || 'ieri';
+        const ordini = attendono getShopifyOrders(periodo);
+        const processati = attendono ordiniprocesso(ordini);
         const variantIds = new Set();
         const productIds = new Set();
-        processati.forEach(o => (o.line_items || []).forEach(item => { 
-          if (item.variant_id) variantIds.add(item.variant_id);
-          if (item.product_id) productIds.add(item.product_id);
+        processati.forEach(o => (o.line_items || []).forEach(item => {
+          se (item.variant_id) variantIds.add(item.variant_id);
+          se (item.product_id) productIds.add(item.product_id);
         }));
         const fetchResult = await fetchVariantCosts([...variantIds], [...productIds]);
         const variantCosts = fetchResult.costs;
         // Costi DUO manuali
         const duoUserCosts = {};
-        if (KV_ENABLED) {
+        se (KV_ENABLED) {
           const duoSkuVariantIds = [];
           processati.forEach(o => (o.line_items || []).forEach(item => {
             if (item.variant_id && isDuoSku(item.sku)) duoSkuVariantIds.push(item.variant_id);
           }));
           const uniqueDuoVids = [...new Set(duoSkuVariantIds)];
-          if (uniqueDuoVids.length > 0) {
+          se (uniqueDuoVids.length > 0) {
             const duoKeys = uniqueDuoVids.map(v => `duo_user_cost_${v}`);
             const duoResults = await kvMGet(duoKeys);
             uniqueDuoVids.forEach(v => {
               const key = `duo_user_cost_${v}`;
-              if (duoResults[key] !== undefined) {
+              se (duoResults[key] !== undefined) {
                 const parsed = parseFloat(duoResults[key]);
-                if (!isNaN(parsed)) duoUserCosts[v] = parsed;
+                se (!isNaN(parsed)) duoUserCosts[v] = parsed;
               }
             });
           }
         }
         const debug = processati.map(o => {
           const { costo, errori } = calcolaCostoOrdine(o, variantCosts, duoUserCosts);
-          return {
-            order_number: o.order_number, name: o.name, created_at: o.created_at,
-            total_price: o.total_price, country: o.shipping_address?.country_code || o.billing_address?.country_code,
+          ritorno {
+            numero_ordine: o.numero_ordine, nome: o.nome, creato_il: o.creato_il,
+            prezzo_totale: o.prezzo_totale, paese: o.indirizzo_spedizione?.codice_paese || o.indirizzo_fatturazione?.codice_paese,
             marketplace: riconosciMarketplace(o).config.nome, costo_merce_reale: costo.toFixed(2),
             line_items: (o.line_items || []).map(item => {
-              let cost_per_unit = 'MANCANTE';
-              let cost_source = null;
-              if (item.variant_id && variantCosts[item.variant_id] !== null && variantCosts[item.variant_id] !== undefined) {
-                cost_per_unit = variantCosts[item.variant_id]; cost_source = 'shopify';
+              poniamo costo_per_unità = 'MANCANTE';
+              lascia che la fonte di costo sia nulla;
+              se (item.variant_id && variantCosts[item.variant_id] !== null && variantCosts[item.variant_id] !== undefined) {
+                costo_per_unità = costi_variante[item.variant_id]; fonte_costo = 'shopify';
               } else if (isDuoSku(item.sku) && item.variant_id && duoUserCosts[item.variant_id] !== undefined) {
-                cost_per_unit = duoUserCosts[item.variant_id]; cost_source = 'duo_manual';
+                costo_per_unità = duoUserCosts[item.variant_id]; fonte_costo = 'duo_manual';
               }
-              return { title: item.title, sku: item.sku, variant_id: item.variant_id, quantity: item.quantity, price: item.price, cost_per_unit, cost_source };
+              restituisci { titolo: item.title, sku: item.sku, variant_id: item.variant_id, quantità: item.quantity, prezzo: item.price, costo_per_unità, costo_fonte };
             }),
-            errori
+            riscaldamento
           };
         });
         return res.json({ success: true, periodo, fetch_stats: fetchResult.stats, kv_enabled: KV_ENABLED, duo_costs_loaded: Object.keys(duoUserCosts).length, ordini: debug });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
-    if (req.method === 'GET' && path === '/api/debug-orders') {
-      try {
+    se (req.method === 'GET' && path === '/api/debug-orders') {
+      Tentativo {
         const ordini = await getShopifyOrders('month');
         const debug = ordini.slice(0, 50).map(o => {
-          const country = o.shipping_address?.country_code || o.billing_address?.country_code;
+          const paese = o.indirizzo_spedizione?.codice_paese || o.indirizzo_fatturazione?.codice_paese;
           return { order_number: o.order_number, name: o.name, created_at: o.created_at, source_name: o.source_name, email: o.email, tags: o.tags, total_price: o.total_price, total_tax_shopify: o.total_tax, country, iva_paese: getIvaPerPaese(country) + '%', marketplace: riconosciMarketplace(o).config.nome, num_line_items: (o.line_items || []).length };
         });
         return res.json({ success: true, ordini_totali: ordini.length, primi_50: debug });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
-    if (req.method === 'GET' && path === '/api/debug-jd') {
-      try {
+    se (req.method === 'GET' && path === '/api/debug-jd') {
+      Tentativo {
         const periodo = query.get('periodo') || 'month';
-        const ordini = await getShopifyOrders(periodo);
+        const ordini = attendono getShopifyOrders(periodo);
         const jdOrders = ordini.filter(o => riconosciMarketplace(o).key === 'JAMMY_DUDE');
         const productIds = new Set();
         jdOrders.forEach(o => (o.line_items || []).forEach(item => { if (item.product_id) productIds.add(item.product_id); }));
@@ -3380,34 +3496,34 @@ export default async function handler(req, res) {
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
-    // DIAGNOSTIC: traccia chiamate Shopify per singolo variant_id
+    // DIAGNOSTICA: traccia chiamate Shopify per singolo variante_id
     // ============ SIMULATORE DUO ============
-    // Lista tutti i prodotti DUO attivi (SKU che inizia con DUO-) con info utili per simulazione
-    if (req.method === 'GET' && path === '/api/duo-products') {
-      try {
+    // Lista tutti i prodotti DUO attivi (SKU che inizia con DUO-) con informazioni utili per simulazione
+    se (req.method === 'GET' && path === '/api/duo-products') {
+      Tentativo {
         const token = await getShopifyAccessToken();
-        const products = [];
-        // NB: aggiungiamo inventory_item_id per poter recuperare i cost in batch dopo
+        const prodotti = [];
+        // NB: aggiungiamo inventory_item_id per poter recuperare i costi in batch dopo
         let url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?limit=250&status=active&fields=id,title,variants`;
-        let pageCount = 0;
+        lascia pageCount = 0;
         const maxPages = 30;
-        while (url && pageCount < maxPages) {
+        mentre (url && pageCount < maxPages) {
           const response = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
-          if (!response.ok) break;
+          se (!risposta.ok) interrompi;
           const data = await response.json();
-          (data.products || []).forEach(p => {
-            (p.variants || []).forEach(v => {
-              if (isDuoSku(v.sku)) {
-                products.push({
+          (dati.prodotti || []).forEach(p => {
+            (p.varianti || []).forEach(v => {
+              se (èDuoSku(v.sku)) {
+                prodotti.spinta({
                   product_id: p.id,
                   variant_id: v.id,
-                  inventory_item_id: v.inventory_item_id, // serve per fetch cost batch
-                  title: p.title,
-                  variant_title: v.title,
+                  inventory_item_id: v.inventory_item_id, // servi per batch di costi di recupero
+                  titolo: p.title,
+                  titolo_variante: v.title,
                   sku: v.sku,
                   prezzo_listino: parseFloat(v.price) || 0,
                   compare_at_price: parseFloat(v.compare_at_price) || 0,
-                  inventory_quantity: v.inventory_quantity || 0
+                  quantità_inventario: v.quantità_inventario || 0
                 });
               }
             });
@@ -3419,130 +3535,130 @@ export default async function handler(req, res) {
         }
         
         // ============ FETCH COSTI DA SHOPIFY IN BATCH ============
-        // Shopify espone il cost via /inventory_items.json?ids=1,2,3 (max 100 per chiamata)
+        // Shopify espone il costo via /inventory_items.json?ids=1,2,3 (max 100 per chiamata)
         const inventoryItemIds = products.map(p => p.inventory_item_id).filter(Boolean);
         const costsByItemId = {};
         const BATCH_SIZE = 100;
-        for (let i = 0; i < inventoryItemIds.length; i += BATCH_SIZE) {
+        per (lascia i = 0; i < inventoryItemIds.length; i += BATCH_SIZE) {
           const batch = inventoryItemIds.slice(i, i + BATCH_SIZE);
           const batchUrl = `https://${SHOPIFY_STORE}/admin/api/2024-01/inventory_items.json?ids=${batch.join(',')}&limit=${BATCH_SIZE}`;
-          try {
+          Tentativo {
             const r = await fetch(batchUrl, { headers: { 'X-Shopify-Access-Token': token } });
-            if (!r.ok) continue;
+            se (!r.ok) continua;
             const data = await r.json();
             (data.inventory_items || []).forEach(item => {
-              const c = parseFloat(item.cost);
-              if (!isNaN(c)) costsByItemId[item.id] = c;
+              const c = parseFloat(articolo.costo);
+              se (!isNaN(c)) costsByItemId[item.id] = c;
             });
           } catch (e) { /* continua con batch successivo */ }
         }
         
-        // Applica cost Shopify a ciascun prodotto (senza KV, come richiesto)
+        // Applica costo Shopify a ciascun prodotto (senza KV, come richiesto)
         const enriched = products.map(p => ({
           product_id: p.product_id,
           variant_id: p.variant_id,
-          title: p.title,
-          variant_title: p.variant_title,
+          titolo: p.title,
+          titolo_variante: p.titolo_variante,
           sku: p.sku,
           prezzo_listino: p.prezzo_listino,
-          compare_at_price: p.compare_at_price,
-          inventory_quantity: p.inventory_quantity,
+          confronta_al_prezzo: p.compara_al_prezzo,
+          quantità_inventario: p.quantità_inventario,
           costo_fornitore: costsByItemId[p.inventory_item_id] !== undefined ? costsByItemId[p.inventory_item_id] : null,
           costo_source: costsByItemId[p.inventory_item_id] !== undefined ? 'shopify' : 'missing'
         }));
         
         // Ordina: prima quelli con costo, poi per titolo
         enriched.sort((a, b) => {
-          if ((a.costo_fornitore !== null) !== (b.costo_fornitore !== null)) return a.costo_fornitore !== null ? -1 : 1;
-          return a.title.localeCompare(b.title);
+          if ((a.costo_fornitore !== null) !== (b.costo_fornitore !== null)) return a.costo_fornitore !== null ? -1:1;
+          restituisci a.title.localeCompare(b.title);
         });
         
         const withCost = enriched.filter(p => p.costo_fornitore !== null).length;
-        return res.json({
-          success: true,
-          totale: enriched.length,
-          con_costo_shopify: withCost,
-          senza_costo: enriched.length - withCost,
-          prodotti: enriched
+        restituisci res.json({
+          successo: vero,
+          totale: lunghezza arricchita,
+          con_costo_shopify: conCosto,
+          senza_costo: lunghezza arricchita - conCosto,
+          prodotti: arricchiti
         });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
-    // Import costi DUO da CSV (payload JSON: {costs: {variant_id: cost}})
-    if (req.method === 'POST' && path === '/api/duo-costs-import') {
-      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV storage non configurato. Abilita Vercel KV.' });
-      try {
-        let body = '';
-        await new Promise((resolve, reject) => {
+    // Importa costi DUO da CSV (payload JSON: {costs: {variant_id: cost}})
+    se (req.method === 'POST' && path === '/api/duo-costs-import') {
+      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV storage non configurabile. Abilita Vercel KV.' });
+      Tentativo {
+        lascia corpo = '';
+        attendi nuova Promise((risolvi, rifiuta) => {
           req.on('data', chunk => body += chunk);
           req.on('end', resolve);
-          req.on('error', reject);
+          req.on('errore', rifiuta);
         });
         const data = JSON.parse(body);
-        const costs = data.costs || {};
+        const costi = dati.costi || {};
         const pairs = {};
-        let count = 0;
+        lascia count = 0;
         Object.entries(costs).forEach(([vid, cost]) => {
           const parsed = parseFloat(cost);
-          if (vid && !isNaN(parsed) && parsed >= 0) {
-            pairs[`duo_user_cost_${vid}`] = String(parsed);
-            count++;
+          se (vid && !isNaN(parsed) && parsed >= 0) {
+            coppie[`duo_user_cost_${vid}`] = Stringa(analizzata);
+            conteggio++;
           }
         });
         if (count === 0) return res.json({ success: false, error: 'Nessun costo valido nel CSV' });
-        await kvMSet(pairs);
-        return res.json({ success: true, salvati: count });
+        attendi kvMSet(coppie);
+        restituisci res.json({ success: true, salvati: count });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
-    // Save singolo costo DUO (per editing inline dal browser)
-    if (req.method === 'POST' && path === '/api/duo-cost-set') {
+    // Salva singolo costo DUO (per editing inline dal browser)
+    se (req.method === 'POST' && path === '/api/duo-cost-set') {
       if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV storage non configurato' });
-      try {
-        let body = '';
-        await new Promise((resolve, reject) => {
+      Tentativo {
+        lascia corpo = '';
+        attendi nuova Promise((risolvi, rifiuta) => {
           req.on('data', chunk => body += chunk);
           req.on('end', resolve);
-          req.on('error', reject);
+          req.on('errore', rifiuta);
         });
         const data = JSON.parse(body);
         const vid = data.variant_id;
         const cost = parseFloat(data.cost);
-        if (!vid || isNaN(cost) || cost < 0) return res.json({ success: false, error: 'Dati invalidi' });
+        if (!vid || isNaN(cost) || cost < 0) return res.json({ success: false, error: 'Dati non validi' });
         await kvSet(`duo_user_cost_${vid}`, String(cost));
-        return res.json({ success: true });
+        restituisci res.json({ success: true });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
-    // Health check KV
+    // Controllo sanitario KV
     // Debug Winkelstraat: mostra ordini riconosciuti come WINKELSTRAAT e il motivo
-    // ============ FORECAST INCASSI ============
+    // ============ PREVISIONE INCASSI ============
     // Calcola pagamenti previsti per il mese corrente + mese prossimo (default)
     // Cache KV 24h come /api/inventory-discovery. ?refresh=1 per forzare ricalcolo
-    if (req.method === 'GET' && path === '/api/forecast') {
-      try {
+    se (req.method === 'GET' && path === '/api/forecast') {
+      Tentativo {
         const forceRefresh = query.get('refresh') === '1';
         const FORECAST_CACHE_KEY = 'forecast_cache';
         const FORECAST_META_KEY = 'forecast_cache_meta';
-        const FORECAST_TTL_HOURS = 24;
+        const PREVISIONE_TTL_ORE = 24;
         
-        // 1) Prova cache KV (se non force refresh)
-        if (!forceRefresh && KV_ENABLED) {
-          try {
+        // 1) Prova cache KV (se non forza l'aggiornamento)
+        se (!forceRefresh && KV_ENABLED) {
+          Tentativo {
             const meta = await kvGet(FORECAST_META_KEY);
-            if (meta) {
+            se (meta) {
               const metaObj = JSON.parse(meta);
               const ageMs = Date.now() - (metaObj.generated_at || 0);
               const ageHours = ageMs / (1000 * 60 * 60);
-              if (ageHours < FORECAST_TTL_HOURS) {
+              se (etàOre < PREVISIONE_TTL_ORE) {
                 const cached = await kvGet(FORECAST_CACHE_KEY);
-                if (cached) {
+                se (memorizzato nella cache) {
                   const cachedObj = JSON.parse(cached);
-                  // RICALCOLA SOLO il Balardi wallet (rapido, legge solo le ricariche da KV)
+                  // RICALCOLA SOLO il portafoglio Balardi (rapido, legge solo le ricariche da KV)
                   // per averlo sempre aggiornato anche se si aggiunge una ricarica oggi
-                  try {
+                  Tentativo {
                     const rawRic = await kvGet('balardi_wallet_ricariche');
-                    if (rawRic) {
+                    se (rawRic) {
                       const ricariche = JSON.parse(rawRic);
                       const totRicaricato = (ricariche || []).reduce((s, r) => s + parseFloat(r.importo || 0), 0);
                       cachedObj.balardi_wallet = cachedObj.balardi_wallet || { consumo_periodo: { importo_eur: 0 } };
@@ -3550,144 +3666,144 @@ export default async function handler(req, res) {
                       cachedObj.balardi_wallet.credito_residuo = totRicaricato - (cachedObj.balardi_wallet.credito_consumato || 0);
                       cachedObj.balardi_wallet.ricariche = ricariche;
                     }
-                  } catch(e) { /* ignore */ }
+                  } catch(e) { /* ignora */ }
                   cachedObj.from_cache = true;
                   cachedObj.cache_age_hours = Math.round(ageHours * 10) / 10;
                   cachedObj.cache_generated_at = new Date(metaObj.generated_at).toISOString();
                   cachedObj.cache_expires_in_hours = Math.round((FORECAST_TTL_HOURS - ageHours) * 10) / 10;
-                  return res.json(cachedObj);
+                  restituisci res.json(cachedObj);
                 }
               }
             }
-          } catch (e) { /* ignore cache errors, fetch fresh */ }
+          } catch (e) { /* ignora gli errori della cache, recupera i dati aggiornati */ }
         }
         
-        // Periodo di LOOKUP ordini: ultimi 120 giorni (per coprire pagamenti futuri dei MP mensili)
+        // Periodo di LOOKUP ordini: ultimi 120 giorni (per coprire futuri pagamenti dei MP mensili)
         const daysBack = parseInt(query.get('days_back') || '120', 10);
         const monthsAhead = parseInt(query.get('months_ahead') || '2', 10);
         const dateTo = new Date();
         const dateFrom = new Date();
         dateFrom.setDate(dateFrom.getDate() - daysBack);
         
-        // Fetch ordini custom range
+        // Recupera intervalli personalizzati degli ordini
         let ordini = await getShopifyOrders(null, fmtDateISO(dateFrom), fmtDateISO(dateTo));
-        ordini = await processOrders(ordini);
+        ordini = attendono processoOrdini(ordini);
         
-        // Fetch costi (per calcolare netto incassato)
+        // Recupera costi (per calcolare netto incassato)
         const variantIds = new Set();
         const productIds = new Set();
-        ordini.forEach(o => (o.line_items || []).forEach(item => { 
-          if (item.variant_id) variantIds.add(item.variant_id);
-          if (item.product_id) productIds.add(item.product_id);
+        ordini.forEach(o => (o.line_items || []).forEach(item => {
+          se (item.variant_id) variantIds.add(item.variant_id);
+          se (item.product_id) productIds.add(item.product_id);
         }));
-        const { costs: variantCosts } = await fetchVariantCosts([...variantIds], [...productIds]);
+        const { costi: variantCosts } = await fetchVariantCosts([...variantIds], [...productIds]);
         
-        // Carica costi DUO user
+        // Carica costi utente DUO
         const duoUserCosts = {};
-        if (KV_ENABLED) {
+        se (KV_ENABLED) {
           const duoVids = [];
           ordini.forEach(o => (o.line_items || []).forEach(item => {
-            if (item.variant_id && isDuoSku(item.sku)) duoVids.push(item.variant_id);
+            se (item.variant_id && isDuoSku(item.sku)) duoVids.push(item.variant_id);
           }));
           const uniq = [...new Set(duoVids)];
-          if (uniq.length > 0) {
+          se (uniq.length > 0) {
             const keys = uniq.map(v => `duo_user_cost_${v}`);
-            const results = await kvMGet(keys);
+            const risultati = await kvMGet(chiavi);
             uniq.forEach(v => {
               const key = `duo_user_cost_${v}`;
-              if (results[key] !== undefined) {
+              se (risultati[chiave] !== indefinito) {
                 const parsed = parseFloat(results[key]);
-                if (!isNaN(parsed)) duoUserCosts[v] = parsed;
+                se (!isNaN(parsed)) duoUserCosts[v] = parsed;
               }
             });
           }
         }
         
-        // Calcola forecast per ogni ordine
+        // Calcola previsione per ogni ordine
         const paymentsByDate = {}; // YYYY-MM-DD → array pagamenti
-        const paymentsByMP = {};   // MP_KEY → aggregato
+        const paymentsByMP = {}; // MP_KEY → aggregato
         const paymentsByMonth = {}; // YYYY-MM → aggregato
         const balardiConsumo = { count: 0, importo_eur: 0, ordini: [] };
-        let ordiniForecast = 0;
-        let ordiniSkipped = 0;
+        lascia ordiniForecast = 0;
+        lascia ordiniSaltati = 0;
         
         ordini.forEach(ordine => {
           const mp = riconosciMarketplace(ordine);
           const policy = mp.config.payment_policy;
-          if (!policy) { ordiniSkipped++; return; }
+          se (!policy) { ordiniSkipped++; return; }
           
           const refundInfo = getOrderRefundInfo(ordine);
-          if (refundInfo.isFullRefund) { ordiniSkipped++; return; } // no forecast su resi totali
+          if (refundInfo.isFullRefund) { ordiniSkipped++; return; } // nessuna previsione su resi totali
           
           const currencyInfo = getOrderCurrencyInfo(ordine);
           const prezzoLordoOriginale = currencyInfo.eurTotal;
           const prezzoLordo = Math.max(0, prezzoLordoOriginale - refundInfo.totalRefundedEur);
           
-          // Calcola costo merce (fallback cost DUO)
-          const { costo: costoMerce } = calcolaCostoOrdine(ordine, variantCosts, duoUserCosts);
-          let costoMerceEffettivo = costoMerce;
-          if (refundInfo.isPartialRefund && refundInfo.totalQuantity > 0) {
+          // Calcola costo merce (costo fallback DUO)
+          const { costo: costoMerce } = costoCostoOrdine(ordine, variantCosts, duoUserCosts);
+          poniamo costoMerceEffettivo = costoMerce;
+          se (refundInfo.isPartialRefund && refundInfo.totalQuantity > 0) {
             const ratio = refundInfo.refundedQuantity / refundInfo.totalQuantity;
-            costoMerceEffettivo = costoMerce * (1 - ratio);
+            costoMerceEffettivo = costoMerce* (1 - rapporto);
           }
           
-          // Spedizione EUR
+          // Banda EUR
           const spedizione = (ordine.shipping_lines || []).reduce((s, line) => s + toEurAmount(line.price_set, line.price, currencyInfo.originalCurrency), 0);
           
-          // Calcola netto per il venditore (prezzo_netto - fees - sped - packaging, MA netto merce rimane)
+          // Calcola netto per il venditore (prezzo_netto - fee - sped - packaging, MA netto merce rimanente)
           // Il "netto da incassare dal MP" = prezzo_lordo - sconto - fee_mp - fee_accessoria (NON include costo merce: quello è tuo)
           const cfg = mp.config;
-          const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
-          const ivaPerc = mp.key === 'POIZON' ? 22 : getIvaPerPaese(country);
-          const prezzoNettoIva = prezzoLordo / (1 + ivaPerc / 100);
+          const paese = ordine.indirizzo_spedizione?.codice_paese || ordine.indirizzo_fatturazione?.codice_paese;
+          const ivaPerc = mp.key === 'POIZON' ? 22 : getIvaPerPaese(paese);
+          const prezzoNettoIva = prezzoLordo/(1+ivaPerc/100);
           const prezzoDopoSconto = prezzoNettoIva * (1 - (cfg.sconto_percentuale || 0) / 100);
-          const feesMP = prezzoDopoSconto * ((cfg.fee_principale || 0) / 100)
+          commissioni constMP = prezzoDopoSconto * ((cfg.fee_principale || 0) / 100)
                        + prezzoDopoSconto * ((cfg.fee_secondaria || 0) / 100)
-                       + prezzoDopoSconto * ((cfg.fee_accessoria || 0) / 100);
+                       +prezzoDopoSconto* ((cfg.fee_accessoria || 0)/100);
           const nettoFromMP = Math.max(0, prezzoDopoSconto - feesMP - (cfg.fee_fissa_trasporto === 'GLS' ? 15 : (cfg.fee_fissa_trasporto || 0)) - (cfg.fee_fissa_packaging || 0));
           
           const pagamenti = calcolaPagamentiPrevisti(ordine.created_at, policy, nettoFromMP);
           if (pagamenti.length === 0) { ordiniSkipped++; return; }
-          ordiniForecast++;
+          orologiForecast++;
           
           // Se è Balardi, traccia come consumo wallet (non genera incasso)
-          if (policy.type === 'prepaid_balance') {
+          se (policy.type === 'prepaid_balance') {
             balardiConsumo.count++;
             balardiConsumo.importo_eur += nettoFromMP;
             balardiConsumo.ordini.push({
-              order_number: ordine.order_number,
-              name: ordine.name,
-              created_at: ordine.created_at,
+              numero_ordine: numero_ordine,
+              nome: ordine.name,
+              creato_al: ordine.creato_al,
               importo_consumato: nettoFromMP,
-              prezzo_lordo: prezzoLordo
+              prezzo_lordo: prezzoLardo
             });
-            return;
+            ritorno;
           }
           
-          pagamenti.forEach(pg => {
+          controlli.forEach(pg => {
             const dateKey = fmtDateISO(pg.data);
             const monthKey = fmtMonthKey(pg.data);
-            if (!paymentsByDate[dateKey]) paymentsByDate[dateKey] = [];
-            paymentsByDate[dateKey].push({
-              order_number: ordine.order_number,
-              name: ordine.name,
-              created_at: ordine.created_at,
-              marketplace: mp.config.nome,
+            se (!pagamentiPerData[chiavedata]) pagamentiPerData[chiavedata] = [];
+            pagamentiPerData[chiaveData].push({
+              numero_ordine: numero_ordine,
+              nome: ordine.name,
+              creato_al: ordine.creato_al,
+              mercato: mp.config.nome,
               mp_key: mp.key,
-              importo_eur: pg.importo_eur,
+              importo_eur: pag. importo_eur,
               nota: pg.nota,
               parte: pg.parte
             });
-            if (!paymentsByMP[mp.key]) paymentsByMP[mp.key] = { nome: mp.config.nome, pagamento_desc: mp.config.pagamento, ordini: 0, importo_totale: 0, prossimo_bonifico: null, pagamenti: [] };
-            paymentsByMP[mp.key].ordini++;
+            if (!paymentsByMP[mp.key]) PaymentsByMP[mp.key] = { nome: mp.config.nome, pagamento_desc: mp.config.pagamento, ordini: 0, importo_totale: 0, prossimo_bonifico: null, pagamenti: [] };
+            pagamentiByMP[mp.key].ordini++;
             paymentsByMP[mp.key].importo_totale += pg.importo_eur;
             paymentsByMP[mp.key].pagamenti.push({ data: dateKey, order_number: ordine.order_number, importo_eur: pg.importo_eur, nota: pg.nota });
-            if (!paymentsByMonth[monthKey]) paymentsByMonth[monthKey] = { mese: monthKey, importo_totale: 0, ordini_count: 0, per_mp: {} };
-            paymentsByMonth[monthKey].importo_totale += pg.importo_eur;
-            paymentsByMonth[monthKey].ordini_count++;
-            if (!paymentsByMonth[monthKey].per_mp[mp.key]) paymentsByMonth[monthKey].per_mp[mp.key] = { nome: mp.config.nome, importo: 0, count: 0 };
-            paymentsByMonth[monthKey].per_mp[mp.key].importo += pg.importo_eur;
-            paymentsByMonth[monthKey].per_mp[mp.key].count++;
+            se (!pagamentiPerMese[ChiaveMese]) pagamentiPerMese[ChiaveMese] = { mese: ChiaveMese, importo_totale: 0, ordini_count: 0, per_mp: {} };
+            pagamentiPerMese[chiaveMese].importo_totale += pg.importo_eur;
+            pagamentiPerMese[ChiaveMese].Conteggio_ordini++;
+            se (!paymentsByMonth[monthKey].per_mp[mp.key]) paymentsByMonth[monthKey].per_mp[mp.key] = { nome: mp.config.nome, importo: 0, count: 0 };
+            pagamentiPerMese[chiaveMese].per_mp[chiavemp].importo += pg.importo_eur;
+            pagamentiPerMese[chiaveMese].per_mp[chiavemp].conteggio++;
           });
         });
         
@@ -3695,7 +3811,7 @@ export default async function handler(req, res) {
         const todayStr = fmtDateISO(new Date());
         Object.keys(paymentsByMP).forEach(k => {
           const futuri = paymentsByMP[k].pagamenti.filter(p => p.data >= todayStr).sort((a, b) => a.data.localeCompare(b.data));
-          paymentsByMP[k].prossimo_bonifico = futuri.length > 0 ? { data: futuri[0].data, importo_parziale: futuri.filter(f => f.data === futuri[0].data).reduce((s, f) => s + f.importo_eur, 0) } : null;
+          pagamentiByMP[k].prossimo_bonifico = futuri.length > 0 ? { data: futuri[0].data, importo_parziale: futuri.filter(f => f.data === futuri[0].data).reduce((s, f) => s + f.importo_eur, 0) } : null;
         });
         
         // Mesi correnti e futuri
@@ -3704,22 +3820,22 @@ export default async function handler(req, res) {
         const meseProssimo = fmtMonthKey(new Date(oggi.getFullYear(), oggi.getMonth() + 1, 1));
         const mesiSecondoProssimo = fmtMonthKey(new Date(oggi.getFullYear(), oggi.getMonth() + 2, 1));
         
-        const incassoMeseCorrente = paymentsByMonth[meseCorrente] || { importo_totale: 0, ordini_count: 0 };
-        const incassoMeseProssimo = paymentsByMonth[meseProssimo] || { importo_totale: 0, ordini_count: 0 };
-        const incassoMeseSecondoProssimo = paymentsByMonth[mesiSecondoProssimo] || { importo_totale: 0, ordini_count: 0 };
+        const incassoMeseCorrente = pagamentiPerMese[meseCorrente] || {importo_totale: 0, ordini_count: 0 };
+        const incassoMeseProssimo = pagamentiPerMese[meseProssimo] || {importo_totale: 0, ordini_count: 0 };
+        const incassoMeseSecondoProssimo = pagamentiPerMese[mesiSecondoProssimo] || {importo_totale: 0, ordini_count: 0 };
         
-        // Pending totale (da oggi in avanti)
-        let pendingTotale = 0, pendingCount = 0;
+        // Totale in attesa (da oggi in avanti)
+        lascia pendingTotale = 0, pendingCount = 0;
         Object.entries(paymentsByDate).forEach(([date, arr]) => {
           if (date >= todayStr) { arr.forEach(p => { pendingTotale += p.importo_eur; pendingCount++; }); }
         });
         
-        // Balardi wallet: leggi ricariche da KV
+        // Portafoglio Balardi: leggi ricariche da KV
         let balardiWallet = { credito_ricaricato: 0, credito_consumato: balardiConsumo.importo_eur, credito_residuo: -balardiConsumo.importo_eur, ricariche: [], consumo_periodo: balardiConsumo };
-        if (KV_ENABLED) {
-          try {
+        se (KV_ENABLED) {
+          Tentativo {
             const raw = await kvGet('balardi_wallet_ricariche');
-            if (raw) {
+            se (grezzo) {
               const ricariche = JSON.parse(raw);
               const totRicaricato = (ricariche || []).reduce((s, r) => s + parseFloat(r.importo || 0), 0);
               balardiWallet.credito_ricaricato = totRicaricato;
@@ -3729,7 +3845,7 @@ export default async function handler(req, res) {
           } catch (e) {}
         }
         
-        // Ordina breakdown MP per prossimo bonifico
+        // Ripartizione ordina MP per prossimo bont
         const breakdownMP = Object.values(paymentsByMP).sort((a, b) => {
           if (!a.prossimo_bonifico) return 1;
           if (!b.prossimo_bonifico) return -1;
@@ -3737,194 +3853,194 @@ export default async function handler(req, res) {
         });
         
         const forecastResult = {
-          success: true,
-          periodo_analisi: { from: fmtDateISO(dateFrom), to: fmtDateISO(dateTo), days_back: daysBack },
+          successo: vero,
+          periodo_analisi: { da: fmtDateISO(dateFrom), a: fmtDateISO(dateTo), giorni_indietro: giorni_indietro },
           ordini_analizzati: ordini.length,
           ordini_con_forecast: ordiniForecast,
-          ordini_skipped: ordiniSkipped,
+          ordini_skipped: ordiniSaltati,
           kpi: {
             incasso_mese_corrente: { mese: meseCorrente, importo: incassoMeseCorrente.importo_totale, ordini: incassoMeseCorrente.ordini_count },
             incasso_mese_prossimo: { mese: meseProssimo, importo: incassoMeseProssimo.importo_totale, ordini: incassoMeseProssimo.ordini_count },
             incasso_mese_dopo: { mese: mesiSecondoProssimo, importo: incassoMeseSecondoProssimo.importo_totale, ordini: incassoMeseSecondoProssimo.ordini_count },
             pending_totale: pendingTotale,
-            pending_count: pendingCount
+            in sospeso: numero_in sospeso
           },
-          breakdown_marketplace: breakdownMP,
+          mercato_di_sintesi: breakdownMP,
           timeline_mensile: Object.values(paymentsByMonth).sort((a, b) => a.mese.localeCompare(b.mese)),
           balardi_wallet: balardiWallet,
           from_cache: false,
           ultima_sincronizzazione: new Date().toISOString()
         };
         
-        // Salva in cache KV (24h)
-        if (KV_ENABLED) {
-          try {
+        // Salva nella cache KV (24h)
+        se (KV_ENABLED) {
+          Tentativo {
             await kvSet(FORECAST_CACHE_KEY, JSON.stringify(forecastResult));
             await kvSet(FORECAST_META_KEY, JSON.stringify({ generated_at: Date.now(), ordini_count: ordini.length }));
             forecastResult.cached_to_kv = true;
-            forecastResult.cache_valid_for_hours = FORECAST_TTL_HOURS;
+            forecastResult.cache_valid_for_hours = PREECAST_TTL_HOURS;
           } catch (e) { forecastResult.cache_error = e.message; }
         }
         
-        return res.json(forecastResult);
+        restituisci res.json(risultatoprevisto);
       } catch (error) { return res.status(500).json({ success: false, error: error.message, stack: error.stack }); }
     }
     
-    // Balardi wallet: aggiungi ricarica
-    if (req.method === 'POST' && path === '/api/balardi-ricarica') {
-      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV non configurato' });
-      try {
-        let body = '';
+    // Portafoglio Balardi: aggiungi ricarica
+    if (req.method === 'POST' && percorso === '/api/balardi-ricarica') {
+      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV non configurabile' });
+      Tentativo {
+        lascia corpo = '';
         await new Promise((resolve, reject) => { req.on('data', c => body += c); req.on('end', resolve); req.on('error', reject); });
         const data = JSON.parse(body || '{}');
         const importo = parseFloat(data.importo);
         const nota = (data.nota || '').substring(0, 200);
-        const data_ricarica = data.data_ricarica || fmtDateISO(new Date());
+        const data_ricarica = data.data_ricarica || fmtDateISO(nuova data());
         if (isNaN(importo) || importo <= 0) return res.status(400).json({ success: false, error: 'Importo non valido' });
         const raw = await kvGet('balardi_wallet_ricariche');
-        const ricariche = raw ? JSON.parse(raw) : [];
+        const ricariche = grezzo ? JSON.parse(raw): [];
         ricariche.push({ id: Date.now(), data_ricarica, importo, nota, creato: new Date().toISOString() });
-        await kvSet('balardi_wallet_ricariche', JSON.stringify(ricariche));
-        return res.json({ success: true, ricariche });
+        attendono kvSet('balardi_wallet_ricariche', JSON.stringify(ricariche));
+        restituisci res.json({ success: true, ricariche });
       } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
     }
     
-    // Balardi wallet: rimuovi ricarica
-    if (req.method === 'POST' && path === '/api/balardi-ricarica-delete') {
-      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV non configurato' });
-      try {
-        let body = '';
+    // Portafoglio Balardi: rimuovi ricarica
+    if (req.method === 'POST' && percorso === '/api/balardi-ricarica-delete') {
+      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV non configurabile' });
+      Tentativo {
+        lascia corpo = '';
         await new Promise((resolve, reject) => { req.on('data', c => body += c); req.on('end', resolve); req.on('error', reject); });
         const data = JSON.parse(body || '{}');
         const id = parseInt(data.id);
         if (isNaN(id)) return res.status(400).json({ success: false, error: 'ID non valido' });
         const raw = await kvGet('balardi_wallet_ricariche');
-        const ricariche = raw ? JSON.parse(raw) : [];
+        const ricariche = grezzo ? JSON.parse(raw): [];
         const filtered = ricariche.filter(r => r.id !== id);
         await kvSet('balardi_wallet_ricariche', JSON.stringify(filtered));
-        return res.json({ success: true, ricariche: filtered });
+        restituisci res.json({ success: true, ricariche: filtered });
       } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
     }
 
-    // ============ INVENTORY DISCOVERY (temporaneo per v5.9) ============
-    // Analizza i prodotti Shopify per capire come sono classificati product_type + tags
+    // ============ SCOPERTA INVENTARIO (temporaneo per v5.9) ============
+    // Analizza i prodotti Shopify per capire come sono classificazione product_type + tags
     // INVENTORY DISCOVERY: analizza TUTTO il catalogo con paginazione cursor + cache 24h
-    if (req.method === 'GET' && path === '/api/inventory-discovery') {
-      try {
+    se (req.method === 'GET' && path === '/api/inventory-discovery') {
+      Tentativo {
         const forceRefresh = query.get('refresh') === '1';
         const cacheKey = 'inventory_discovery_cache_v1';
         const CACHE_TTL_SEC = 24 * 60 * 60; // 24 ore
         
-        // Prova cache prima (se KV disponibile e non forced)
-        if (!forceRefresh && KV_ENABLED) {
-          try {
+        // Prova cache prima (se KV disponibile e non forzata)
+        se (!forceRefresh && KV_ENABLED) {
+          Tentativo {
             const cached = await kvGet(cacheKey);
-            if (cached) {
+            se (memorizzato nella cache) {
               const data = JSON.parse(cached);
               const ageMin = Math.floor((Date.now() - new Date(data.generated_at).getTime()) / 60000);
               data.dalla_cache = true;
               data.cache_age_minutes = ageMin;
-              data.cache_age_human = ageMin < 60 ? `${ageMin} minuti fa` : `${Math.floor(ageMin / 60)} ore fa`;
-              return res.json(data);
+              data.cache_age_human = etàMin < 60 ? `${ageMin} minuti fa` : `${Math.floor(ageMin / 60)} ore fa`;
+              restituisci res.json(dati);
             }
           } catch (e) { /* procedi col fetch */ }
         }
         
-        // Fetch completo con paginazione cursor-based
+        // Recupero completo con impaginazione basata sul cursore
         const token = await getShopifyAccessToken();
         const fields = 'id,title,handle,product_type,vendor,tags,status,published_at,variants';
-        let allProducts = [];
-        let pageInfo = null;
-        let pagesDone = 0;
-        const MAX_PAGES = 60; // safety: 60 × 250 = 15.000 prodotti
+        lascia tutti i prodotti = [];
+        lascia pageInfo = null;
+        lascia pagesDone = 0;
+        const MAX_PAGES = 60; // sicurezza: 60 × 250 = 15.000 prodotti
         
-        while (pagesDone < MAX_PAGES) {
-          let url;
-          if (pageInfo) {
+        mentre (pagineCompletate < MAX_PAGES) {
+          lascia url;
+          se (pageInfo) {
             url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?limit=250&page_info=${encodeURIComponent(pageInfo)}`;
-          } else {
+          } altro {
             url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?status=active&limit=250&fields=${fields}`;
           }
           const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' } });
-          if (!r.ok) {
+          se (!r.ok) {
             const t = await r.text();
-            return res.status(500).json({ success: false, error: `Shopify page ${pagesDone + 1} ${r.status}: ${t.substring(0, 200)}`, pages_done: pagesDone, partial_products: allProducts.length });
+            return res.status(500).json({ success: false, error: `Pagina Shopify ${pagesDone + 1} ${r.status}: ${t.substring(0, 200)}`, pages_done: pagesDone, partial_products: allProducts.length });
           }
           const data = await r.json();
           const batch = data.products || [];
-          allProducts = allProducts.concat(batch);
-          pagesDone++;
+          tutti iProdotti = tutti iProdotti.concat(batch);
+          pagineCompletate++;
           
-          // Parse Link header per cursor paginazione
+          // Analizza l'intestazione del collegamento per paginazione del cursore
           const linkHeader = r.headers.get('Link') || r.headers.get('link');
           pageInfo = null;
-          if (linkHeader) {
+          se (linkHeader) {
             const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
-            if (nextMatch) {
-              try {
+            se (nextMatch) {
+              Tentativo {
                 const nextUrl = new URL(nextMatch[1]);
                 pageInfo = nextUrl.searchParams.get('page_info');
               } catch (e) { pageInfo = null; }
             }
           }
           
-          if (!pageInfo || batch.length < 250) break;
+          se (!pageInfo || batch.length < 250) interrompi;
         }
         
         // Analizza l'intero catalogo
         const productTypes = {};
         const vendors = {};
         const tagsAll = {};
-        let prodottiAttivi = 0;
-        let prodottiConStock = 0;
-        let prodottiZeroStock = 0;
-        let totalePezzi = 0;
-        let totaleVarianti = 0;
-        let duoProdotti = 0;
-        let duoPezzi = 0;
+        lascia che i prodottiAttivi siano 0;
+        lascia che prodottiConStock = 0;
+        lascia che prodottiZeroStock = 0;
+        lascia totalePezzi = 0;
+        lascia totaleVarianti = 0;
+        lascia duoProdotti = 0;
+        lascia duoPezzi = 0;
         const sampleProducts = [];
         
-        allProducts.forEach(p => {
-          if (p.status !== 'active') return;
+        tutti i prodotti.perogni(p => {
+          se (p.status !== 'active') restituisci;
           prodottiAttivi++;
           const pt = (p.product_type || '(vuoto)').trim();
           productTypes[pt] = (productTypes[pt] || 0) + 1;
-          const v = (p.vendor || '(vuoto)').trim();
-          vendors[v] = (vendors[v] || 0) + 1;
+          const v = (p.venditore || '(vuoto)').trim();
+          venditori[v] = (venditori[v] || 0) + 1;
           (p.tags || '').split(',').map(t => t.trim()).filter(t => t).forEach(tag => {
             tagsAll[tag] = (tagsAll[tag] || 0) + 1;
           });
-          const variants = p.variants || [];
+          const varianti = p.varianti || [];
           const qty = variants.reduce((s, v) => s + Math.max(0, parseInt(v.inventory_quantity) || 0), 0);
-          totalePezzi += qty;
-          totaleVarianti += variants.length;
-          if (qty > 0) prodottiConStock++; else prodottiZeroStock++;
+          TotalePezzi += qty;
+          totaleVarianti += varianti.lunghezza;
+          se (qty > 0) prodottiConStock++; altrimenti prodottiZeroStock++;
           
-          // Detect DUO: tag TLX_PRODUCT:DUO oppure SKU pattern
+          // Rileva DUO: tag TLX_PRODUCT:DUO oppure modello SKU
           const tagsLower = (p.tags || '').toLowerCase();
           const hasDuoTag = tagsLower.includes('tlx_product:duo') || /(^|,)\s*duo(\s*,|$)/.test(tagsLower);
           const firstSku = variants[0] ? (variants[0].sku || '') : '';
           const isDuo = hasDuoTag || (firstSku && isDuoSku(firstSku));
-          if (isDuo) { duoProdotti++; duoPezzi += qty; }
+          se (èDuo) { duoProdotti++; duoPezzi += qty; }
           
-          if (sampleProducts.length < 10) {
+          se (sampleProducts.length < 10) {
             sampleProducts.push({
-              id: p.id, title: (p.title || '').substring(0, 60), handle: p.handle,
-              product_type: p.product_type, vendor: p.vendor, tags: p.tags,
-              stock: qty, varianti: variants.length,
-              prima_variante_sku: firstSku, is_duo: isDuo
+              id: p.id, titolo: (p.title || '').substring(0, 60), handle: p.handle,
+              tipo_prodotto: p.tipo_prodotto, fornitore: p.fornitore, tag: p.tag,
+              stock: qty, varianti: varianti.lunghezza,
+              prima_variante_sku: primoSku, is_duo: isDuo
             });
           }
         });
         
         const sortByCount = obj => Object.entries(obj).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ valore: k, count: v }));
         
-        const result = {
-          success: true,
+        risultato costante = {
+          successo: vero,
           generated_at: new Date().toISOString(),
           dalla_cache: false,
           cache_age_minutes: 0,
-          cache_age_human: 'appena generato',
+          cache_age_human: 'appena generata',
           ttl_hours: 24,
           pagine_scaricate: pagesDone,
           prodotti_totali_scaricati: allProducts.length,
@@ -3935,72 +4051,72 @@ export default async function handler(req, res) {
           totale_pezzi: totalePezzi,
           duo_prodotti: duoProdotti,
           duo_pezzi: duoPezzi,
-          own_prodotti: prodottiAttivi - duoProdotti,
-          own_pezzi: totalePezzi - duoPezzi,
+          propri_prodotti: prodottiAttivi - duoProdotti,
+          proprio_pezzi: totalePezzi - duoPezzi,
           product_types_distinti: Object.keys(productTypes).length,
-          product_types: sortByCount(productTypes),
+          tipi_prodotto: sortByCount(tipi_prodotto),
           vendors_distinti: Object.keys(vendors).length,
-          vendors: sortByCount(vendors).slice(0, 50),
+          fornitori: sortByCount(fornitori).slice(0, 50),
           tags_distinti: Object.keys(tagsAll).length,
           tags_top_80: sortByCount(tagsAll).slice(0, 80),
-          sample_prodotti: sampleProducts
+          sample_prodotti: sampleProdotti
         };
         
-        // Salva in cache 24h
-        if (KV_ENABLED) {
-          try { 
-            await kvSetEx(cacheKey, CACHE_TTL_SEC, JSON.stringify(result)); 
+        // Salva nella cache 24h
+        se (KV_ENABLED) {
+          Tentativo {
+            await kvSetEx(cacheKey, CACHE_TTL_SEC, JSON.stringify(result));
           } catch (e) { /* cache best-effort, continua */ }
         }
         
-        return res.json(result);
+        restituisci res.json(risultato);
       } catch (e) { return res.status(500).json({ success: false, error: e.message, stack: e.stack }); }
     }
     
-    // Reset cache inventory discovery (per forzare refresh)
-    if (req.method === 'POST' && path === '/api/inventory-discovery-reset') {
-      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV non configurato' });
-      try {
+    // Reimposta il rilevamento dell'inventario della cache (per aggiornamento forzato)
+    se (req.method === 'POST' && path === '/api/inventory-discovery-reset') {
+      if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV non configurabile' });
+      Tentativo {
         await kvDel('inventory_discovery_cache_v1');
         return res.json({ success: true, message: 'Cache resettata. Prossima chiamata farà fetch fresco.' });
       } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
     }
 
-    // ============ INVENTORY SNAPSHOT ============
-    // Snapshot categorizzato (bag/shoes/accessori/clothing × donna/uomo/unisex)
-    // Usa la stessa cache discovery (raw products già scaricati)
-    if (req.method === 'GET' && path === '/api/inventory') {
-      try {
+    // ============ RIEPILOGO DELL'INVENTARIO ============
+    // Istantanea categorizzata (bag/shoes/accessori/clothing × donna/uomo/unisex)
+    // Usa la stessa cache discovery (prodotti grezzi già scaricati)
+    se (req.method === 'GET' && path === '/api/inventory') {
+      Tentativo {
         const forceRefresh = query.get('refresh') === '1';
         const cacheKey = 'inventory_discovery_cache_v1';
-        let discoveryData = null;
+        lascia discoveryData = null;
         
-        // Prova a prendere dalla cache discovery (che contiene già i products raw)
-        if (!forceRefresh && KV_ENABLED) {
-          try {
+        // Prova a prendere dalla cache discovery (che contiene già i prodotti raw)
+        se (!forceRefresh && KV_ENABLED) {
+          Tentativo {
             const cached = await kvGet(cacheKey);
-            if (cached) {
+            se (memorizzato nella cache) {
               discoveryData = JSON.parse(cached);
             }
-          } catch (e) { /* ignore */ }
+          } catch (e) { /* ignora */ }
         }
         
         // Se niente cache, chiama lo stesso endpoint discovery per popolarla
         // (ma noi abbiamo bisogno di più dati: product_type + tags + stock per ogni prodotto, non solo aggregati)
         // Scarichiamo da zero con gli stessi parametri
-        if (!discoveryData || !discoveryData._raw_products) {
+        se (!discoveryData || !discoveryData._raw_products) {
           // Full fetch: scarica tutti i prodotti
           const token = await getShopifyAccessToken();
           const allProducts = [];
-          let nextPageInfo = null;
-          let pagesDone = 0;
+          lascia nextPageInfo = null;
+          lascia pagesDone = 0;
           const MAX_PAGES = 60;
           
-          while (pagesDone < MAX_PAGES) {
-            let url;
-            if (nextPageInfo) {
+          mentre (pagineCompletate < MAX_PAGES) {
+            lascia url;
+            se (nextPageInfo) {
               url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?limit=250&page_info=${encodeURIComponent(nextPageInfo)}`;
-            } else {
+            } altro {
               url = `https://${SHOPIFY_STORE}/admin/api/2024-01/products.json?status=active&limit=250&fields=id,title,handle,product_type,vendor,tags,status,variants`;
             }
             const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' } });
@@ -4008,108 +4124,108 @@ export default async function handler(req, res) {
             const data = await r.json();
             const batch = data.products || [];
             allProducts.push(...batch);
-            pagesDone++;
+            pagineCompletate++;
             const linkHeader = r.headers.get('link') || r.headers.get('Link') || '';
             const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
-            if (nextMatch && batch.length === 250) {
+            se (nextMatch && batch.length === 250) {
               const piMatch = nextMatch[1].match(/page_info=([^&>]+)/);
-              if (piMatch) nextPageInfo = decodeURIComponent(piMatch[1]);
-              else break;
-            } else break;
+              se (piMatch) nextPageInfo = decodeURIComponent(piMatch[1]);
+              altrimenti interrompi;
+            } altrimenti interrompi;
           }
           
           discoveryData = { _raw_products: allProducts, pagine_scaricate: pagesDone, generated_at: Date.now() };
-          if (KV_ENABLED) {
-            try {
-              // Salva cache per riuso (24h). Salviamo i raw products per il categorizer
+          se (KV_ENABLED) {
+            Tentativo {
+              // Salva cache per riuso (24h). Salviamo i prodotti crudi per il categorizzatore
               const cacheable = { ...discoveryData, cached_at: new Date().toISOString() };
               await kvSetEx(cacheKey, 86400, JSON.stringify(cacheable));
-            } catch (e) { /* ignore */ }
+            } catch (e) { /* ignora */ }
           }
         }
         
         const products = discoveryData._raw_products || [];
         
-        // ============ CATEGORIZER ============
+        // ============ CATEGORIZZATORE ============
         // Parole chiave per categoria (priorità: più specifica vince)
-        // Match case-insensitive su: product_type, tags, title
-        const CATEGORIE = {
-          bag: { 
-            label: 'Bag',
-            keywords: ['bag', 'handbag', 'shoulder', 'crossbody', 'tote', 'clutch', 'pochette', 'borsa', 'borse', 'zaino', 'backpack', 'sacca', 'shopper', 'hobo', 'bauletto', 'marsupio', 'belt bag']
+        // Corrispondenza senza distinzione tra maiuscole e minuscole su: product_type, tags, title
+        const CATEGORIA = {
+          borsa: {
+            etichetta: 'Borsa',
+            parole chiave: ['bag', 'handbag', 'shoulder', 'crossbody', 'tote', 'clutch', 'pochette', 'borsa', 'borse', 'zaino', 'backpack', 'sacca', 'shopper', 'hobo', 'bauletto', 'marsupio', 'belt bag']
           },
-          shoes: {
-            label: 'Shoes',
-            keywords: ['shoe', 'shoes', 'sneaker', 'sneakers', 'boot', 'boots', 'stivale', 'stivali', 'decolleté', 'décolleté', 'sandalo', 'sandali', 'sandal', 'mocassino', 'loafer', 'heel', 'heels', 'tacco', 'ballerina', 'flat', 'scarpa', 'scarpe', 'espadrilla', 'stringata', 'ankle boot', 'slipper']
+          scarpe: {
+            etichetta: 'Scarpe',
+            parole chiave: ['shoe', 'shoes', 'sneaker', 'sneakers', 'boot', 'boots', 'stivale', 'stivali', 'decolleté', 'décolleté', 'sandalo', 'sandali', 'sandalo', 'mocassino', 'mocassino', 'tacco', 'tacchi', 'tacco', 'ballerina', 'flat', 'scarpa', 'scarpe', 'espadrilla', 'stringata', 'ankle boot', 'slipper']
           },
           accessori: {
-            label: 'Accessori',
-            keywords: ['accessor', 'cintura', 'cinture', 'belt', 'portafoglio', 'portafogli', 'wallet', 'cappello', 'hat', 'cap', 'occhiali', 'sunglasses', 'eyewear', 'bijoux', 'jewel', 'gioiello', 'collana', 'necklace', 'bracciale', 'bracelet', 'anello', 'ring', 'orecchino', 'earring', 'sciarpa', 'scarf', 'foulard', 'guanti', 'gloves', 'cravatta', 'tie', 'papillon', 'card holder', 'porta carte', 'key', 'chiave']
+            etichetta: 'Accessorio',
+            parole chiave: ['accessor', 'cintura', 'cinture', 'belt', 'portafoglio', 'portafogli', 'wallet', 'cappello', 'hat', 'cap', 'occhiali', 'sunglasses', 'eyewear', 'bijoux', 'jewel', 'gioiello', 'collana', 'necklace', 'bracciale', 'bracelet', 'anello', 'ring', 'orecchino', 'earring', 'sciarpa', 'scarf', 'foulard', 'guanti', 'guanti', 'cravatta', 'cravatta', 'papillon', 'porta carte', 'porta carte', 'key', 'chiave']
           },
-          clothing: {
-            label: 'Clothing',
-            keywords: ['jacket', 'giacca', 'coat', 'cappotto', 'parka', 'piumino', 'blazer', 'giubbotto', 'bomber', 'shirt', 'camicia', 't-shirt', 'tshirt', 'polo', 'maglia', 'sweater', 'felpa', 'hoodie', 'sweatshirt', 'maglione', 'cardigan', 'pant', 'pants', 'pantalone', 'pantaloni', 'jeans', 'leggings', 'shorts', 'bermuda', 'skirt', 'gonna', 'dress', 'abito', 'vestito', 'top', 'tank', 'body', 'bodysuit', 'tuta', 'jumpsuit', 'blouse', 'camicetta', 'knit', 'intimo', 'underwear', 'costume', 'swimsuit', 'bikini', 'trench', 'gilet', 'vest', 'pigiama', 'pajama']
+          vestiario: {
+            etichetta: 'Abbigliamento',
+            parole chiave: ['giacca', 'giacca', 'cappotto', 'cappotto', 'parka', 'piumino', 'blazer', 'giubbotto', 'bomber', 'shirt', 'camicia', 't-shirt', 'tshirt', 'polo', 'maglia', 'sweater', 'felpa', 'hoodie', 'sweatshirt', 'maglione', 'cardigan', 'pant', 'pants', 'pantalone', 'pantaloni', 'jeans', 'leggings', 'shorts', 'bermuda', 'skirt', 'gonna', 'dress', 'abito', 'vestito', 'top', 'tank', 'body', 'body', 'tuta', 'jumpsuit', 'blouse', 'camicetta', 'knit', 'intimo', 'underwear', 'costume', 'swimsuit', 'bikini', 'trench', 'gilet', 'vest', 'pigiama', 'pyjama']
           }
         };
         
-        // Keyword gender (con regex word-boundary per evitare match errato "man" dentro "woman")
+        // Genere della parola chiave (con regex word-boundary per evitare match errato "man" dentro "woman")
         const KW_WOMAN = ['woman', 'women', 'ladies', 'donna', 'donne', 'female', 'femme', 'mujer', 'femminile'];
         const KW_MAN = ['man', 'men', 'uomo', 'uomini', 'male', 'homme', 'hombre', 'maschile'];
         const KW_UNISEX = ['unisex', 'bambino', 'bambini', 'kid', 'kids', 'child', 'children', 'junior', 'baby'];
         
-        function wordMatch(text, kw) {
+        funzione wordMatch(testo, kw) {
           // Matcher case-insensitive con word boundary: non matcha "man" dentro "woman"
           const re = new RegExp('(^|[^a-zàèéìòù])' + kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([^a-zàèéìòù]|$)', 'i');
-          return re.test(text);
+          restituisci re.test(testo);
         }
         
-        function detectCategoria(searchText) {
-          if (!searchText) return null;
+        funzione rilevaCategoria(testo_ricerca) {
+          se (!searchText) restituisce null;
           // Check più specifico per primo (ordine categorie è già dal più specifico)
-          for (const [key, cfg] of Object.entries(CATEGORIE)) {
-            for (const kw of cfg.keywords) {
-              if (wordMatch(searchText, kw)) return key;
+          per (costante [chiave, cfg] di Object.entries(CATEGORIE)) {
+            per (costante kw di cfg.keywords) {
+              se (parolaCorrispondenza(testoricercato, kw)) restituisce la chiave;
             }
           }
-          return null;
+          restituisci null;
         }
         
-        function detectGender(searchText) {
-          if (!searchText) return null;
-          // Priorità: woman PRIMA di man (altrimenti "woman bags" matcha "man")
-          // Word boundary evita match di substring
-          // 1) Woman check (con word boundary)
+        funzione rilevaGenere(testo_ricerca) {
+          se (!searchText) restituisce null;
+          // Priorità: donna PRIMA di uomo (altrimenti "borse da donna" matcha "uomo")
+          // Il confine della parola evita la corrispondenza della sottostringa
+          // 1) Controllo donna (con limite di parola)
           const isW = KW_WOMAN.some(kw => wordMatch(searchText, kw));
-          if (isW) return 'donna'; // se c'è woman/donna, è donna (anche se appare anche man da qualche parte)
-          // 2) Man check
+          se (isW) restituisce 'donna'; // se c'è donna/donna, è donna (anche se appare anche man da qualche parte)
+          // 2) Controllo dell'uomo
           const isM = KW_MAN.some(kw => wordMatch(searchText, kw));
-          if (isM) return 'uomo';
-          // 3) Unisex/kids check
-          for (const kw of KW_UNISEX) if (wordMatch(searchText, kw)) return 'unisex';
-          return null;
+          se (isM) restituisci 'uomo';
+          // 3) Controllo unisex/bambini
+          per (costante kw di KW_UNISEX) se (parolaMatch(testoricercato, kw)) restituisci 'unisex';
+          restituisci null;
         }
         
-        function isDuoProduct(product) {
-          // DUO: se lo SKU della prima variante matcha il pattern isDuoSku
+        funzione isDuoProduct(prodotto) {
+          // DUO: se lo SKU della prima variante matcha il pattern èDuoSku
           const firstVariantSku = (product.variants && product.variants[0]) ? product.variants[0].sku : null;
-          if (firstVariantSku && isDuoSku(firstVariantSku)) return true;
+          se (firstVariantSku && isDuoSku(firstVariantSku)) restituisce vero;
           // Oppure se ha un tag DUO esplicito
           const tags = (product.tags || '').toLowerCase();
-          if (tags.includes('tlx_product:duo') || tags.includes('duo')) return true;
-          return false;
+          se (tags.includes('tlx_product:duo') || tags.includes('duo')) restituisce true;
+          restituire falso;
         }
         
         // ============ CLASSIFICAZIONE ============
         const snapshot = {
-          tutto: { bag: {}, shoes: {}, accessori: {}, clothing: {} },
-          own:   { bag: {}, shoes: {}, accessori: {}, clothing: {} },
-          duo:   { bag: {}, shoes: {}, accessori: {}, clothing: {} }
+          tutto: { borsa: {}, scarpe: {}, accessori: {}, abbigliamento: {} },
+          proprio: { borsa: {}, scarpe: {}, accessori: {}, abbigliamento: {} },
+          duo: { borsa: {}, scarpe: {}, accessori: {}, abbigliamento: {} }
         };
         
-        // Inizializza struttura
-        for (const group of ['tutto', 'own', 'duo']) {
-          for (const cat of ['bag', 'shoes', 'accessori', 'clothing']) {
-            snapshot[group][cat] = {
+        // Inizializzazione struttura
+        per (gruppo costante di ['tutto', 'proprio', 'duo']) {
+          per (const cat di ['borsa', 'scarpe', 'accessori', 'abbigliamento']) {
+            snapshot[gruppo][gatto] = {
               donna: { prodotti: 0, pezzi: 0 },
               uomo: { prodotti: 0, pezzi: 0 },
               unisex: { prodotti: 0, pezzi: 0 }
@@ -4118,26 +4234,26 @@ export default async function handler(req, res) {
         }
         
         const nonClassificati = { prodotti: 0, pezzi: 0, product_types_orfani: {}, sample_orfani: [] };
-        let totPezzi = 0, totProdotti = 0, totDuoProdotti = 0, totDuoPezzi = 0;
+        poniamo totPezzi = 0, totProdotti = 0, totDuoProdotti = 0, totDuoPezzi = 0;
         
-        products.forEach(p => {
-          if (p.status !== 'active') return;
+        prodotti.perogni(p => {
+          se (p.status !== 'active') restituisci;
           
           const qty = (p.variants || []).reduce((s, v) => s + Math.max(0, parseInt(v.inventory_quantity) || 0), 0);
-          if (qty <= 0) return; // Esclude qty = 0 (come da requisito utente)
+          if (qtà <= 0) ritorno; // Esclude qty = 0 (come da requisito utente)
           
           totProdotti++;
           totPezzi += qty;
           
           const isDuo = isDuoProduct(p);
-          if (isDuo) { totDuoProdotti++; totDuoPezzi += qty; }
+          se (isDuo) { totDuoProdotti++; totDuoPezzi += qty; }
           
           // Cerca categoria e gender in product_type + tags + title
           const searchText = [p.product_type || '', p.tags || '', p.title || ''].join(' ');
           const cat = detectCategoria(searchText);
           const gender = detectGender(searchText) || 'unisex'; // fallback unisex
           
-          if (!cat) {
+          se (!gatto) {
             nonClassificati.prodotti++;
             nonClassificati.pezzi += qty;
             const pt = (p.product_type || '(vuoto)').trim();
@@ -4145,29 +4261,29 @@ export default async function handler(req, res) {
             if (nonClassificati.sample_orfani.length < 10) {
               nonClassificati.sample_orfani.push({ id: p.id, title: p.title, product_type: p.product_type, tags: p.tags, stock: qty });
             }
-            return;
+            ritorno;
           }
           
           // Aggrega in tutto/own/duo
           snapshot.tutto[cat][gender].prodotti++;
-          snapshot.tutto[cat][gender].pezzi += qty;
+          snapshot.tutto[cat][gender].pezzi += qtà;
           
-          if (isDuo) {
+          se (èDuo) {
             snapshot.duo[cat][gender].prodotti++;
             snapshot.duo[cat][gender].pezzi += qty;
-          } else {
+          } altro {
             snapshot.own[cat][gender].prodotti++;
             snapshot.own[cat][gender].pezzi += qty;
           }
         });
         
-        // Converti sample orfani in array ordinato
+        // Converti sample orfani nell'array ordinato
         nonClassificati.product_types_orfani = Object.entries(nonClassificati.product_types_orfani)
           .sort((a, b) => b[1] - a[1])
           .map(([pt, count]) => ({ product_type: pt, count }));
         
-        return res.json({
-          success: true,
+        restituisci res.json({
+          successo: vero,
           generated_at: new Date().toISOString(),
           dalla_cache_discovery: !forceRefresh && discoveryData && discoveryData.cached_at ? true : false,
           cached_at: discoveryData?.cached_at || null,
@@ -4175,69 +4291,69 @@ export default async function handler(req, res) {
           totale_pezzi: totPezzi,
           duo_prodotti: totDuoProdotti,
           duo_pezzi: totDuoPezzi,
-          own_prodotti: totProdotti - totDuoProdotti,
-          own_pezzi: totPezzi - totDuoPezzi,
-          snapshot,
+          propri_prodotti: totProdotti - totDuoProdotti,
+          proprio_pezzi: totPezzi - totDuoPezzi,
+          istantanea,
           non_classificati: nonClassificati
         });
       } catch (e) { return res.status(500).json({ success: false, error: e.message, stack: e.stack }); }
     }
 
-    if (req.method === 'GET' && path === '/api/debug-winkelstraat') {
-      try {
+    if (req.method === 'GET' && percorso === '/api/debug-winkelstraat') {
+      Tentativo {
         const periodo = query.get('periodo') || 'month';
-        const ordini = await getShopifyOrders(periodo);
+        const ordini = attendono getShopifyOrders(periodo);
         const winkelstraatOrders = [];
         const fallbackDefaultOrders = []; // ordini che non hanno matchato e finiscono in TLUXY_SITE (candidati mancati?)
-        ordini.forEach(o => {
+        ordini. forEach(o => {
           const match = isWinkelstraatOrder(o);
           const mp = riconosciMarketplace(o);
           const email = (o.email || o.customer?.email || '').toLowerCase();
           const ship = o.shipping_address || {};
           const info = {
-            order_number: o.order_number,
-            name: o.name,
-            created_at: o.created_at,
-            source_name: o.source_name,
-            email,
-            tags: o.tags,
-            note: o.note,
-            shipping_address1: ship.address1,
-            shipping_company: ship.company,
+            numero_ordine: o.order_number,
+            nome: o.name,
+            creato_al: o.creato_al,
+            nome_fonte: o.source_name,
+            e-mail,
+            tag: o.tags,
+            nota: o.nota,
+            indirizzo_spedizione1: indirizzo_spedizione1,
+            compagnia_di_spedizione: compagnia_di_spedizione,
             shipping_name: [ship.first_name, ship.last_name].filter(Boolean).join(' '),
             marketplace_assegnato: mp.config.nome,
             winkelstraat_match: match // null oppure il campo che ha matchato
           };
-          if (match) winkelstraatOrders.push(info);
-          else if (mp.key === 'TLUXY_SITE') fallbackDefaultOrders.push(info);
+          if (corrispondenza) winkelstraatOrders.push(info);
+          altrimenti se (mp.key === 'TLUXY_SITE') fallbackDefaultOrders.push(info);
         });
-        return res.json({
-          success: true,
+        restituisci res.json({
+          successo: vero,
           periodo,
-          totale_ordini: ordini.length,
+          totale_ordini: ordini.lunghezza,
           winkelstraat_riconosciuti: winkelstraatOrders.length,
-          ordini_winkelstraat: winkelstraatOrders,
+          ordini_winkelstraat: winkelstraatOrdini,
           ordini_tluxy_site_campione: fallbackDefaultOrders.slice(0, 20) // per capire se qualcuno è sfuggito
         });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
-    // Auth diagnostic
-    if (req.method === 'GET' && path === '/api/auth-status') {
-      return res.json({
-        auth_enabled: AUTH_ENABLED,
+    // Diagnostica di autenticazione
+    se (req.method === 'GET' && path === '/api/auth-status') {
+      restituisci res.json({
+        auth_enabled: AUT_ENABLED,
         auth_type: 'magic_link_resend',
-        resend_configured: !!RESEND_API_KEY,
+        reinvia_configurato: !!CHIAVE_API_INVIA,
         mail_from: MAIL_FROM,
-        allowed_emails_count: ALLOWED_EMAILS.length,
-        session_days: AUTH_SESSION_DAYS,
+        numero_di_email_consentite: ALLOWED_EMAILS.length,
+        giorni_sessione: GIORNI_SESSIONE_AUTORIZZAZIONE,
         magic_link_minutes: MAGIC_LINK_MINUTES,
-        authenticated: !!authUser,
+        autenticato: !!authUser,
         user_email: authUser?.email || null
       });
     }
 
-    if (req.method === 'GET' && path === '/api/kv-status') {
+    se (req.method === 'GET' && path === '/api/kv-status') {
       const envVarsDetected = {
         KV_REST_API_URL: !!process.env.KV_REST_API_URL,
         KV_REST_API_TOKEN: !!process.env.KV_REST_API_TOKEN,
@@ -4246,35 +4362,35 @@ export default async function handler(req, res) {
         KV_REDIS_URL: !!process.env.KV_REDIS_URL,
         REDIS_URL: !!process.env.REDIS_URL
       };
-      if (!KV_ENABLED) {
-        return res.json({
+      se (!KV_ENABLED) {
+        restituisci res.json({
           kv_enabled: false,
           kv_source: null,
           env_vars_detected: envVarsDetected,
-          message: 'Nessuna credenziale KV trovata. Verifica che Vercel abbia creato le env vars.'
+          messaggio: 'Nessuna credenziale KV trovata. Verifica che Vercel abbia creato le env vars.'
         });
       }
-      try {
+      Tentativo {
         const testKey = '__kv_test__';
         const testVal = String(Date.now());
         const writeOk = await kvSet(testKey, testVal);
         const read = await kvGet(testKey);
-        return res.json({
+        restituisci res.json({
           kv_enabled: true,
           kv_source: KV_SOURCE,
           kv_url_host: KV_REST_API_URL.replace(/^https?:\/\//, '').split('/')[0],
           env_vars_detected: envVarsDetected,
           write_ok: !!writeOk,
           read_ok: read === testVal,
-          read_value: read
+          valore_letto: letto
         });
       } catch (error) { return res.json({ kv_enabled: true, kv_source: KV_SOURCE, error: error.message }); }
     }
 
     // Diagnostica: verifica perché un ordine specifico potrebbe mancare dall'analytics
-    // Usa: /api/debug-order?name=13027   oppure   /api/debug-order?id=5783212343468
-    if (req.method === 'GET' && path === '/api/debug-order') {
-      try {
+    // Usa: /api/debug-order?name=13027 oppure /api/debug-order?id=5783212343468
+    se (req.method === 'GET' && path === '/api/debug-order') {
+      Tentativo {
         const orderName = query.get('name');
         const orderId = query.get('id');
         if (!orderName && !orderId) return res.status(400).json({ success: false, error: 'Passa ?name=13027 oppure ?id=5783212343468' });
@@ -4282,55 +4398,55 @@ export default async function handler(req, res) {
         const diag = { checks: {}, warnings: [], orderFound: null };
         
         // Step 1: cerca l'ordine su Shopify (by name o by id)
-        let ordine = null;
-        if (orderId) {
+        lascia ordine = null;
+        se (orderId) {
           const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/orders/${orderId}.json`;
           const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
           diag.checks.fetch_by_id = { url, status: r.status };
           if (r.ok) { const d = await r.json(); ordine = d.order; }
-        } else {
-          // Cerca by name (serve scorrere gli ordini recenti)
+        } altro {
+          // Cerca per nome (serve scorrere gli ordini recenti)
           const cleaned = String(orderName).replace('#', '').trim();
           const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/orders.json?status=any&name=%23${cleaned}&limit=10`;
           const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': token } });
           diag.checks.fetch_by_name = { url, status: r.status };
-          if (r.ok) {
+          se (r.ok) {
             const d = await r.json();
             ordine = (d.orders || []).find(o => String(o.order_number) === cleaned || o.name === '#' + cleaned || o.name === cleaned);
-            if (!ordine && (d.orders || []).length > 0) ordine = d.orders[0];
+            se (!ordine && (d.orders || []).length > 0) ordine = d.orders[0];
           }
         }
         
-        if (!ordine) {
+        se (!ordine) {
           diag.checks.exists_on_shopify = false;
           diag.warnings.push('Ordine NON trovato su Shopify. Controlla il numero esatto.');
-          return res.json({ success: true, diagnostica: diag });
+          restituisci res.json({ success: true, diagnostica: diag });
         }
         
         diag.checks.exists_on_shopify = true;
         diag.orderFound = {
           id: ordine.id,
-          order_number: ordine.order_number,
-          name: ordine.name,
-          created_at: ordine.created_at,
-          updated_at: ordine.updated_at,
-          financial_status: ordine.financial_status,
-          fulfillment_status: ordine.fulfillment_status,
-          cancelled_at: ordine.cancelled_at,
-          total_price: ordine.total_price,
-          currency: ordine.currency,
-          source_name: ordine.source_name,
-          tags: ordine.tags,
-          customer_email: ordine.customer?.email,
-          shipping_country: ordine.shipping_address?.country_code,
+          numero_ordine: numero_ordine,
+          nome: ordine.name,
+          creato_al: ordine.creato_al,
+          aggiornato_alle: ordine.aggiornato_alle,
+          stato_finanziario: ordine stato_finanziario,
+          stato_di_adempimento: ordine.stato_di_adempimento,
+          canceled_at: ordinecancelled_at,
+          prezzo_totale: ordine.prezzo_totale,
+          valuta: ordinecurrency,
+          nome_fonte: ordine.nome_fonte,
+          tag: ordine.tags,
+          email_cliente: ordine.cliente?.email,
+          paese_spedizione: ordine.indirizzo_spedizione?.codice_paese,
           line_items_count: (ordine.line_items || []).length,
-          refunds_count: (ordine.refunds || []).length
+          numero_rimborsi: (ordine.rimborsi || []).lunghezza
         };
         
-        // Step 2: verifica status (cancellato?)
+        // Passo 2: verifica stato (cancellato?)
         if (ordine.cancelled_at) diag.warnings.push('Ordine CANCELLATO il ' + ordine.cancelled_at);
         
-        // Step 3: verifica periodo "month" (che probabilmente è quello selezionato in dashboard)
+        // Passo 3: verifica periodo "mese" (che probabilmente è quello selezionato nella dashboard)
         const now = new Date();
         const romeOffset = new Date().toLocaleString('en-US', { timeZone: 'Europe/Rome' });
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
@@ -4339,220 +4455,220 @@ export default async function handler(req, res) {
         diag.checks.created_at = ordine.created_at;
         diag.checks.mese_corrente_start = monthStart.toISOString();
         diag.checks.dentro_mese_corrente = inMeseCorrente;
-        if (!inMeseCorrente) diag.warnings.push('Ordine NON dentro il mese corrente (periodo=month). Created ' + ordine.created_at);
+        if (!inMeseCorrente) diag.warnings.push('Ordine NON dentro il mese corrente (periodo=mese). Created ' + ordine.created_at);
         
-        // Step 4: verifica marketplace
+        // Passaggio 4: verifica il marketplace
         const mp = riconosciMarketplace(ordine);
-        diag.checks.marketplace_riconosciuto = { key: mp.key, nome: mp.config.nome };
+        diag.checks.marketplace_riconosciuto = { chiave: mp.key, nome: mp.config.nome };
         if (mp.key === 'TLUXY_SITE' && ordine.source_name && !['web', 'pos', 'shopify_draft_order'].includes(ordine.source_name)) {
-          diag.warnings.push('⚠️ Marketplace defaultato a TLUXY_SITE ma source_name è "' + ordine.source_name + '". Controllare mapping.');
+          diag.warnings.push('⚠️ Marketplace defaultato a TLUXY_SITE ma source_name è "' + ordine.source_name + '". Controllare mappatura.');
         }
         
-        // Step 5: verifica refund (totale?)
+        // Passo 5: verifica il rimborso (totale?)
         const refundInfo = getOrderRefundInfo(ordine);
         diag.checks.refund_info = refundInfo;
-        if (refundInfo.isFullRefund) diag.warnings.push('Ordine con REFUND TOTALE → escluso dai conteggi analytics.');
+        if (refundInfo.isFullRefund) diag.warnings.push('Ordine con RIMBORSO TOTALE → escluso dai conteggi analytics.');
         
-        // Step 6: verifica costi merce (errori?)
+        // Passo 6: verifica costi merce (errore?)
         const variantIds = [...new Set((ordine.line_items || []).map(li => li.variant_id).filter(Boolean))];
         const productIds = [...new Set((ordine.line_items || []).map(li => li.product_id).filter(Boolean))];
-        const { costs: variantCosts } = await fetchVariantCosts(variantIds, productIds);
+        const { costi: variantCosts } = await fetchVariantCosts(variantIds, productIds);
         const duoUserCosts = {};
-        if (KV_ENABLED) {
+        se (KV_ENABLED) {
           const duoVids = (ordine.line_items || []).filter(li => isDuoSku(li.sku)).map(li => li.variant_id).filter(Boolean);
-          if (duoVids.length) {
+          se (duoVids.length) {
             const keys = duoVids.map(v => `duo_user_cost_${v}`);
-            const results = await kvMGet(keys);
+            const risultati = await kvMGet(chiavi);
             duoVids.forEach(v => {
               const key = `duo_user_cost_${v}`;
-              if (results[key] !== undefined) {
+              se (risultati[chiave] !== indefinito) {
                 const parsed = parseFloat(results[key]);
-                if (!isNaN(parsed)) duoUserCosts[v] = parsed;
+                se (!isNaN(parsed)) duoUserCosts[v] = parsed;
               }
             });
           }
         }
-        const { costo, errori } = calcolaCostoOrdine(ordine, variantCosts, duoUserCosts);
+        const { costo, errori } = calcolaCostoOrdine(ordine, variableCosts, duoUserCosts);
         diag.checks.costo_totale_calcolato = costo;
         diag.checks.errori_costi = errori;
         if (errori.length > 0) diag.warnings.push('⚠️ Errori costi: ' + errori.length + ' varianti senza costo → ordine va in "Ordini con errori"');
         
-        // Step 7: verifica che fetchShopifyOrders lo includerebbe (periodo=month)
+        // Passaggio 7: verifica che fetchShopifyOrders lo includerebbe (periodo=mese)
         const ordiniPeriodo = await getShopifyOrders('month');
         const trovatoNelPeriodo = (ordiniPeriodo || []).some(o => String(o.id) === String(ordine.id));
         diag.checks.trovato_in_getShopifyOrders_month = trovatoNelPeriodo;
         diag.checks.totale_ordini_fetchati_mese = (ordiniPeriodo || []).length;
-        if (!trovatoNelPeriodo) diag.warnings.push('❌ CRITICO: getShopifyOrders(month) NON include questo ordine. Controllare filtri created_at_min/max.');
+        if (!trovatoNelPeriodo) diag.warnings.push('❌ CRITICO: getShopifyOrders(month) NON include questo ordine. Controllare filtri create_at_min/max.');
         
         // Riepilogo finale
         diag.verdict = errori.length > 0 ? 'ESCLUSO per costi mancanti (visibile in "Ordini con errori")'
-          : (refundInfo.isFullRefund ? 'ESCLUSO per refund totale'
+          : (refundInfo.isFullRefund ? 'ESCLUSO per rimborso totale'
           : (!trovatoNelPeriodo ? 'NON FETCHATO nel periodo selezionato'
           : (ordine.cancelled_at ? 'CANCELLATO' : 'DOVREBBE ESSERE INCLUSO nei conteggi')));
         
-        return res.json({ success: true, diagnostica: diag });
+        restituisci res.json({ success: true, diagnostica: diag });
       } catch (error) { return res.status(500).json({ success: false, error: error.message, stack: error.stack }); }
     }
 
-    if (req.method === 'GET' && path === '/api/debug-single-cost') {
-      try {
+    se (req.method === 'GET' && path === '/api/debug-single-cost') {
+      Tentativo {
         const variantId = query.get('variant_id') || '47254190325972';
         const token = await getShopifyAccessToken();
         const v1url = `https://${SHOPIFY_STORE}/admin/api/2024-01/variants/${variantId}.json`;
         const v1res = await fetch(v1url, { headers: { 'X-Shopify-Access-Token': token } });
         const v1body = await v1res.text();
-        let inventoryItemId = null, v1parsed = null;
+        lascia inventoryItemId = null, v1parsed = null;
         try { v1parsed = JSON.parse(v1body); inventoryItemId = v1parsed?.variant?.inventory_item_id; } catch(e) {}
-        let step2 = null;
-        if (inventoryItemId) {
+        lascia che step2 sia nullo;
+        se (inventoryItemId) {
           const i1url = `https://${SHOPIFY_STORE}/admin/api/2024-01/inventory_items/${inventoryItemId}.json`;
           const i1res = await fetch(i1url, { headers: { 'X-Shopify-Access-Token': token } });
           const i1body = await i1res.text();
           let i1parsed = null; try { i1parsed = JSON.parse(i1body); } catch(e) {}
           step2 = { url: i1url, status: i1res.status, response: i1parsed || i1body.substring(0, 500) };
         }
-        let step3 = null;
-        if (inventoryItemId) {
+        lascia che step3 sia nullo;
+        se (inventoryItemId) {
           const i2url = `https://${SHOPIFY_STORE}/admin/api/2024-01/inventory_items.json?ids=${inventoryItemId}`;
           const i2res = await fetch(i2url, { headers: { 'X-Shopify-Access-Token': token } });
           const i2body = await i2res.text();
           let i2parsed = null; try { i2parsed = JSON.parse(i2body); } catch(e) {}
           step3 = { url: i2url, status: i2res.status, response: i2parsed || i2body.substring(0, 500) };
         }
-        return res.json({
-          success: true,
-          variant_id_testato: variantId,
+        restituisci res.json({
+          successo: vero,
+          variante_id_testato: varianteId,
           step1_variant: { url: v1url, status: v1res.status, response: v1parsed || v1body.substring(0, 500) },
-          inventory_item_id_estratto: inventoryItemId,
-          step2_inventory_item_singolo: step2,
+          inventory_item_id_Intro: inventoryItemId,
+          step2_inventory_item_singolo: passaggio2,
           step3_inventory_items_con_ids: step3
         });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
-    if (req.method === 'GET' && path === '/api/test-shopify') {
-      try {
+    se (req.method === 'GET' && path === '/api/test-shopify') {
+      Tentativo {
         const token = await getShopifyAccessToken();
         const response = await fetch(`https://${SHOPIFY_STORE}/admin/api/2024-01/shop.json`, { headers: { 'X-Shopify-Access-Token': token } });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        se (!response.ok) genera un nuovo Errore(`HTTP ${response.status}`);
         const data = await response.json();
         return res.json({ success: true, shop_name: data.shop.name, message: 'Shopify connesso' });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
-    // ============ CHAT AI ASSISTANT (v5.10) ============
-    if (req.method === 'GET' && path === '/api/chat-status') {
+    // ============ ASSISTENTE CHAT AI (v5.10) ============
+    se (req.method === 'GET' && path === '/api/chat-status') {
       const apiKey = process.env.ANTHROPIC_API_KEY || '';
-      return res.json({
-        enabled: !!apiKey,
-        configured: !!apiKey,
-        model: 'claude-haiku-4-5',
-        cost_per_msg: '€0.005-0.02 per messaggio',
+      restituisci res.json({
+        abilitato: !!apiKey,
+        configurato: !!apiKey,
+        modello: 'claude-haiku-4-5',
+        cost_per_msg: '€0,005-0,02 per messaggio',
         configure_hint: apiKey ? null : 'Aggiungi env var ANTHROPIC_API_KEY su Vercel (chiave da console.anthropic.com)'
       });
     }
     
-    if (req.method === 'POST' && path === '/api/chat') {
+    se (req.method === 'POST' && path === '/api/chat') {
       const apiKey = process.env.ANTHROPIC_API_KEY;
-      if (!apiKey) return res.status(503).json({ success: false, error: 'ANTHROPIC_API_KEY non configurato. Aggiungi su Vercel → Settings → Environment Variables.' });
-      try {
-        let body = '';
+      if (!apiKey) return res.status(503).json({ success: false, error: 'ANTHROPIC_API_KEY non configurabile. Aggiungi su Vercel → Impostazioni → Variabili d'ambiente.' });
+      Tentativo {
+        lascia corpo = '';
         await new Promise((resolve, reject) => { req.on('data', c => body += c); req.on('end', resolve); req.on('error', reject); });
         const data = JSON.parse(body || '{}');
         const userMessages = data.messages || [];
-        if (userMessages.length === 0) return res.status(400).json({ success: false, error: 'Nessun messaggio' });
+        if (userMessages.length === 0) return res.status(400).json({ success: false, error: ' Nessun messaggio' });
         
-        // System prompt: dice a Claude che è l'assistente del tuo ERP
-        const systemPrompt = `Sei l'assistente AI di T. Luxy ERP, una dashboard di Business Intelligence per un negozio luxury off-price gestito da Alessio. Hai accesso a strumenti per leggere dati Shopify in tempo reale: ordini, marginalità, marketplace, inventario, previsioni incassi.
+        // Prompt del sistema: dice a Claude che è l'assistente del tuo ERP
+        const systemPrompt = `Sei l'assistente AI di T. Luxy ERP, una dashboard di Business Intelligence per un negozio di lusso off-price gestito da Alessio. Hai accesso a strumenti per leggere dati Shopify in tempo reale: ordini, marginalità, marketplace, inventario, previsioni incassi.
 
-Marketplace gestiti: Miinto, The Bradery, Italist, Secret Sales, Fashion Tamers, Intra Mirror, Balardi, Boutique Mall, Archivist, Winkelstraat, Jammy Dude, Poizon, Brandsgateway, T. Luxy sito proprio, Mark Foy, GIGLIO.COM.
+Marketplace manager: Miinto, The Bradery, Italist, Secret Sales, Fashion Tamers, Intra Mirror, Balardi, Boutique Mall, Archivist, Winkelstraat, Jammy Dude, Poizon, Brandsgateway, T. Luxy sito proprio, Mark Foy, GIGLIO.COM.
 
-Regole:
+Requisiti:
 - Rispondi sempre in italiano
-- Quando ti chiedono dati specifici (fatturato, ordini, ecc.), usa i tool per leggere i dati REALI, non inventarli
+- Quando ti chiedono dati specifici (fatturato, ordini, ecc.), usa lo strumento per leggere i dati REALI, non inventarli
 - Sii conciso: rispondi al punto, evita preamboli
-- Usa formatting markdown leggero (**bold** per evidenziare numeri chiave)
+- Usa formattazione markdown leggero (**bold** per evidenziare numeri chiave)
 - Se non puoi rispondere a una domanda, dillo onestamente
 - Per il contesto: oggi è ${new Date().toLocaleDateString('it-IT')}, fuso orario Europa/Roma`;
         
-        // Tool definitions: gli endpoint del nostro ERP esposti come strumenti per Claude
-        const tools = [
+        // Definizioni degli strumenti: gli endpoint del nostro ERP esposti come strumenti per Claude
+        strumenti const = [
           {
-            name: 'get_analytics',
-            description: 'Ottieni analytics completi (fatturato, IVA, margine, breakdown per marketplace, errori) per un periodo. Utilizzalo per domande su KPI, fatturato, marginalità, MP migliori/peggiori.',
-            input_schema: {
-              type: 'object',
-              properties: {
+            nome: 'get_analytics',
+            descrizione: 'Ottieni analytics completi (fatturato, IVA, margine, breakdown per marketplace, errori) per un periodo. Utilizzalo per domande su KPI, fatturato, marginalità, MP migliori/peggiori.',
+            schema_di_input: {
+              tipo: 'oggetto',
+              proprietà: {
                 periodo: { type: 'string', enum: ['today', 'yesterday', 'week', 'month', 'quarter', 'year'], description: 'Periodo di analisi' }
               },
-              required: ['periodo']
+              richiesto: ['punto']
             }
           },
           {
-            name: 'get_bestsellers',
-            description: 'Ottieni i top 20 prodotti più venduti per fatturato in un periodo.',
-            input_schema: {
-              type: 'object',
-              properties: {
-                periodo: { type: 'string', enum: ['today', 'week', 'month', 'quarter', 'year'] }
+            nome: 'get_bestsellers',
+            descrizione: 'Ottieni i top 20 prodotti più venduti per fatturato in un periodo.',
+            schema_di_input: {
+              tipo: 'oggetto',
+              proprietà: {
+                periodo: { tipo: 'stringa', enum: ['oggi', 'settimana', 'mese', 'trimestre', 'anno'] }
               },
-              required: ['periodo']
+              richiesto: ['punto']
             }
           },
           {
-            name: 'get_forecast',
-            description: 'Ottieni le previsioni di incasso (bonifici futuri da marketplace) per i prossimi 2 mesi, con scadenziario per MP.',
+            nome: 'get_forecast',
+            descrizione: 'Ottieni le previsioni di incasso (bonifici futuri da marketplace) per i prossimi 2 mesi, con scadenziario per MP.',
             input_schema: { type: 'object', properties: {} }
           },
           {
-            name: 'get_inventory',
-            description: "Ottieni snapshot dell'inventario corrente: prodotti per categoria (bag/shoes/accessori/clothing) × gender.",
+            nome: 'get_inventory',
+            descrizione: "Ottieni snapshot dell'inventario corrente: prodotti per categoria (bag/shoes/accessori/clothing) × genere.",
             input_schema: { type: 'object', properties: {} }
           },
           {
-            name: 'get_marketplaces_config',
-            description: 'Ottieni la configurazione dei marketplace (commissioni, sconti, modalità pagamento).',
+            nome: 'get_marketplaces_config',
+            descrizione: 'Ottieni la configurazione dei marketplace (commissioni, sconti, modalità pagamento).',
             input_schema: { type: 'object', properties: {} }
           }
         ];
         
-        // Funzione che esegue un tool e restituisce il risultato
-        async function executeTool(toolName, toolInput) {
+        // Funzione che esegue uno strumento e restituisce il risultato
+        funzione asincrona executeTool(toolName, toolInput) {
           const baseUrl = `https://${req.headers.host || 'erp-marginalita-last.vercel.app'}`;
           const cookie = req.headers.cookie || '';
           const headers = cookie ? { 'Cookie': cookie } : {};
-          try {
-            let url;
-            switch (toolName) {
-              case 'get_analytics':
+          Tentativo {
+            lascia url;
+            interruttore (nomestrumento) {
+              caso 'get_analytics':
                 url = `${baseUrl}/api/analytics?periodo=${encodeURIComponent(toolInput.periodo)}`;
-                break;
-              case 'get_bestsellers':
+                rottura;
+              caso 'get_bestsellers':
                 url = `${baseUrl}/api/bestsellers?periodo=${encodeURIComponent(toolInput.periodo)}`;
-                break;
-              case 'get_forecast':
+                rottura;
+              caso 'get_forecast':
                 url = `${baseUrl}/api/forecast`;
-                break;
-              case 'get_inventory':
+                rottura;
+              caso 'get_inventory':
                 url = `${baseUrl}/api/inventory`;
-                break;
-              case 'get_marketplaces_config':
+                rottura;
+              caso 'get_marketplaces_config':
                 url = `${baseUrl}/api/marketplaces`;
-                break;
-              default:
-                return { error: 'Tool sconosciuto: ' + toolName };
+                rottura;
+              predefinito:
+                restituisci { errore: 'Strumento sconosciuto: ' + toolName };
             }
             const r = await fetch(url, { headers });
             const d = await r.json();
-            // Comprime l'output per non saturare il context (rimuove campi inutili)
-            if (toolName === 'get_analytics' && d.success) {
-              return {
+            // Comprime l'output per non saturare il contesto (rimuove campi inutili)
+            se (toolName === 'get_analytics' && d.success) {
+              ritorno {
                 periodo: d.periodo,
                 ordini_totali: d.ordini_totali,
                 lordo_iva_inclusa: Math.round(d.lordo_iva_inclusa),
                 iva_totale: Math.round(d.iva_totale),
                 costi_merce: Math.round(d.costi_merce_totali || 0),
-                costi_fees: Math.round(d.costi_fees_totali || 0),
+                costi_commissioni: Math.round(d.costi_commissioni_totale || 0),
                 margine_netto: Math.round(d.margine_netto),
                 margine_percentuale: parseFloat(d.margine_percentuale.toFixed(2)),
                 errori_count: d.ordini_con_errori_count,
@@ -4566,13 +4682,13 @@ Regole:
                 }))
               };
             }
-            if (toolName === 'get_bestsellers' && d.success) {
+            se (toolName === 'get_bestsellers' && d.success) {
               return { totale: d.totale_prodotti_unici, prodotti: (d.prodotti || []).slice(0, 10).map(p => ({ titolo: p.titolo, sku: p.sku, fatturato: Math.round(p.fatturato_lordo), pezzi: p.quantita_venduta, ricavo: Math.round(p.ricavo_stimato) })) };
             }
-            if (toolName === 'get_forecast' && d.success) {
-              return {
+            se (toolName === 'get_forecast' && d.success) {
+              ritorno {
                 kpi: d.kpi,
-                breakdown: (d.breakdown_marketplace || []).slice(0, 10).map(mp => ({
+                scomposizione: (d.breakdown_marketplace || []).slice(0, 10).map(mp => ({
                   nome: mp.nome,
                   prossimo_bonifico: mp.prossimo_bonifico,
                   importo_totale: Math.round(mp.importo_totale)
@@ -4580,89 +4696,89 @@ Regole:
                 balardi_residuo: d.balardi_wallet ? Math.round(d.balardi_wallet.credito_residuo * 100) / 100 : null
               };
             }
-            if (toolName === 'get_inventory' && d.success) {
-              return {
+            se (toolName === 'get_inventory' && d.success) {
+              ritorno {
                 totale_prodotti: d.totale_prodotti_attivi_con_stock,
                 totale_pezzi: d.totale_pezzi,
                 duo: { prodotti: d.duo_prodotti, pezzi: d.duo_pezzi },
-                own: { prodotti: d.own_prodotti, pezzi: d.own_pezzi },
-                snapshot: d.snapshot.tutto,
+                proprio: { prodotti: d.own_prodotti, pezzi: d.own_pezzi },
+                istantanea: d.snapshot.tutto,
                 non_classificati: d.non_classificati ? { prodotti: d.non_classificati.prodotti, pezzi: d.non_classificati.pezzi } : null
               };
             }
-            if (toolName === 'get_marketplaces_config') {
+            se (toolName === 'get_marketplaces_config') {
               return { marketplace: Object.entries(d.marketplace_disponibili || {}).map(([k, mp]) => ({ key: k, nome: mp.nome, sconto: mp.sconto_percentuale, fee_principale: mp.fee_principale, fee_secondaria: mp.fee_secondaria || 0, sped: mp.fee_fissa_trasporto, pack: mp.fee_fissa_packaging, pagamento: mp.pagamento })) };
             }
-            return d;
+            restituisci d;
           } catch(e) { return { error: e.message }; }
         }
         
-        // Chiama Claude API con loop tool calling (max 10 iterazioni)
+        // Chiama Claude API con chiamata loop tool (max 10 iterazioni)
         const claudeMessages = userMessages.map(m => ({ role: m.role, content: m.content }));
-        let finalReply = '';
-        let iteration = 0;
+        lascia finalReply = '';
+        sia l'iterazione = 0;
         const MAX_ITERATIONS = 8;
         
-        while (iteration < MAX_ITERATIONS) {
-          iteration++;
+        mentre (iterazione < MAX_ITERATIONS) {
+          iterazione++;
           const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
+            metodo: 'POST',
+            intestazioni: {
               'Content-Type': 'application/json',
               'x-api-key': apiKey,
               'anthropic-version': '2023-06-01'
             },
-            body: JSON.stringify({
-              model: 'claude-haiku-4-5-20251001',
+            corpo: JSON.stringify({
+              modello: 'claude-haiku-4-5-20251001',
               max_tokens: 2048,
-              system: systemPrompt,
-              tools,
-              messages: claudeMessages
+              sistema: systemPrompt,
+              utensili,
+              messaggi: claudeMessages
             })
           });
           
-          if (!claudeRes.ok) {
+          se (!claudeRes.ok) {
             const errBody = await claudeRes.text();
-            return res.status(500).json({ success: false, error: `Claude API error ${claudeRes.status}: ${errBody.substring(0, 300)}` });
+            return res.status(500).json({ success: false, error: `Errore API Claude ${claudeRes.status}: ${errBody.substring(0, 300)}` });
           }
           
           const claudeData = await claudeRes.json();
           
           // Aggiunge la risposta dell'assistente all'history
-          claudeMessages.push({ role: 'assistant', content: claudeData.content });
+          claudeMessages.push({ role: 'assistente', content: claudeData.content });
           
           // Se è un tool_use, esegui e itera
           const toolUses = (claudeData.content || []).filter(b => b.type === 'tool_use');
-          if (toolUses.length > 0 && claudeData.stop_reason === 'tool_use') {
+          se (toolUses.length > 0 e claudeData.stop_reason === 'tool_use') {
             const toolResults = [];
-            for (const toolUse of toolUses) {
-              const result = await executeTool(toolUse.name, toolUse.input);
+            per (const toolUse di toolUses) {
+              const risultato = await executeTool(toolUse.name, toolUse.input);
               toolResults.push({
-                type: 'tool_result',
+                tipo: 'risultato_strumento',
                 tool_use_id: toolUse.id,
-                content: JSON.stringify(result).substring(0, 8000) // limit context
+                contenuto: JSON.stringify(risultato).substring(0, 8000) // limita il contesto
               });
             }
             claudeMessages.push({ role: 'user', content: toolResults });
-            continue;
+            continuare;
           }
           
           // Altrimenti raccogli risposta testuale finale
           const textBlocks = (claudeData.content || []).filter(b => b.type === 'text');
           finalReply = textBlocks.map(b => b.text).join('\n');
-          break;
+          rottura;
         }
         
-        if (!finalReply) finalReply = '⚠️ Non sono riuscito a completare la richiesta dopo ' + MAX_ITERATIONS + ' iterazioni.';
+        if (!finalReply) finalReply = '⚠️ Non sono riuscito a completare la richiesta dopo ' + MAX_ITERAZIONI + ' iterazioni.';
         
-        return res.json({ success: true, reply: finalReply, iterations: iteration });
+        restituisci res.json({ success: true, reply: finalReply, iterations: iteration });
       } catch(e) { return res.status(500).json({ success: false, error: e.message, stack: e.stack }); }
     }
     
-    if (req.method === 'GET' && path === '/api/marketplaces') {
+    se (req.method === 'GET' && path === '/api/marketplaces') {
       return res.json({ marketplace_disponibili: MARKETPLACE_CONFIGS, source_name_map: SOURCE_NAME_MAP, iva_per_paese: IVA_PER_PAESE });
     }
 
-    return res.status(404).json({ error: 'Endpoint non trovato' });
+    restituisci res.status(404).json({ error: 'Endpoint non trovato' });
   } catch (error) { return res.status(500).json({ error: 'Errore interno', dettagli: error.message }); }
 }
