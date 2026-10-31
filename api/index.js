@@ -338,11 +338,17 @@ async function kvSetBody(key, value) {
 // kvSetEx: set con TTL (seconds)
 async function kvSetEx(key, ttlSec, value) {
   if (!KV_ENABLED) return false;
+  const auth = { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` };
   try {
-    // v5.21.1: comando Upstash in formato JSON (["SET", key, value, "EX", ttl]) — affidabile anche con valori lunghi
-    const res = await fetch(KV_REST_API_URL, { method: 'POST', headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(['SET', key, String(value), 'EX', String(ttlSec)]) });
-    return res.ok;
-  } catch (e) { return false; }
+    const r1 = await fetch(KV_REST_API_URL.replace(/\/$/, ''), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(['SET', key, String(value), 'EX', String(ttlSec)]) });
+    if (r1.ok) return true;
+    console.log('[kv] setex POST fallito', r1.status, (await r1.text()).slice(0, 200));
+  } catch (e) { console.log('[kv] setex POST errore', e.message); }
+  try {
+    const r2 = await fetch(`${KV_REST_API_URL.replace(/\/$/, '')}/set/${encodeURIComponent(key)}/${encodeURIComponent(String(value))}/EX/${ttlSec}`, { headers: auth });
+    if (!r2.ok) console.log('[kv] setex GET fallito', r2.status, (await r2.text()).slice(0, 200));
+    return r2.ok;
+  } catch (e) { console.log('[kv] setex GET errore', e.message); return false; }
 }
 // kvDel: elimina chiave
 async function kvDel(key) {
