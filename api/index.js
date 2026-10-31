@@ -1107,6 +1107,7 @@ async function processOrders(ordini) {
 // Strategia: per ogni product_id unico, 1 chiamata a /products/{id}.json che ritorna
 // tutte le varianti del prodotto con i loro inventory_item_id. Poi batch /inventory_items.json
 // Aggiunge logging dettagliato delle chiamate fallite.
+const MEM_VARIANT_COST = new Map(); // cache in memoria (istanza calda) — utile se il KV non risponde
 async function fetchVariantCosts(variantIds, orderProductIds = []) {
   const stats = { products_tentati: 0, products_ok: 0, products_falliti: [], variants_mappati: 0, inventory_tentati: 0, inventory_ok: 0, inventory_falliti: [], kv_hit: 0, kv_miss: 0, kv_new_saved: 0 };
   if (variantIds.length === 0) return { costs: {}, stats };
@@ -1128,6 +1129,7 @@ async function fetchVariantCosts(variantIds, orderProductIds = []) {
     });
   }
   
+  uniqueVariantIds.forEach(v => { if (!(v in costsFromKV) && MEM_VARIANT_COST.has(v)) costsFromKV[v] = MEM_VARIANT_COST.get(v); });
   // Solo variant_id che NON abbiamo già nel KV vanno chiamati su Shopify
   const variantsToFetch = uniqueVariantIds.filter(v => !(v in costsFromKV));
   const uniqueProductIds = [...new Set(orderProductIds.filter(Boolean))];
@@ -1278,6 +1280,7 @@ async function fetchVariantCosts(variantIds, orderProductIds = []) {
   
   // Merge: costi da KV (già persistenti) + costi nuovi letti da Shopify
   const costs = { ...costsFromKV, ...newCostsFromShopify };
+  Object.entries(costs).forEach(([v, c]) => { if (c !== null && c !== undefined) MEM_VARIANT_COST.set(v, c); });
   // Aggiungo null per i variant che Shopify non ha restituito e che non erano in KV
   uniqueVariantIds.forEach(v => { if (!(v in costs)) costs[v] = null; });
   
@@ -1743,7 +1746,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     .header-divider { display: none; }
     .header-info h1 { font-size: 0.85rem; margin-bottom: 0; white-space: nowrap; }
     .header-info { min-width: 0; }
-    .header-info p { display: none; }
+    .header-info p { display: block; font-size: 0.68rem; letter-spacing: 0.08em; margin-top: 1px; opacity: 0.75; }
+    .header-info p .hide-m { display: none; }
     .header-info h1 { overflow: hidden; text-overflow: ellipsis; }
     .header-right { gap: 6px; flex-wrap: nowrap; }
     .status-pill { padding: 5px 10px; font-size: 0.64rem; }
@@ -1789,7 +1793,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p>Business Intelligence Dashboard · v5.23</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.24</p>
       </div>
     </div>
     <div class="header-right">
@@ -3574,11 +3578,20 @@ function caricaMeseStrip() {
   var inizioPrec = new Date(oggi.getFullYear(), oggi.getMonth() - 1, 1);
   var ultimoPrec = new Date(oggi.getFullYear(), oggi.getMonth(), 0).getDate();
   var finePrec = new Date(oggi.getFullYear(), oggi.getMonth() - 1, Math.min(g, ultimoPrec));
-  var mesi = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
-  function get(da, a) { return fetch('/api/analytics?from=' + ymd(da) + '&to=' + ymd(a)).then(function (r) { return r.json(); }); }
-  Promise.all([get(inizio, oggi), get(inizioPrec, finePrec)]).then(function (r) {
+  var mesi = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+  function get(da, a) {
+    var ctl = window.AbortController ? new AbortController() : null;
+    var t = setTimeout(function () { if (ctl) ctl.abort(); }, 120000);
+    return fetch('/api/analytics?from=' + ymd(da) + '&to=' + ymd(a), ctl ? { signal: ctl.signal } : {}).then(function (r) { clearTimeout(t); return r.json(); }).catch(function () { clearTimeout(t); return null; });
+  }
+  var nonDisp = '<span class="ch-lab">Totale mese non disponibile · <a href="#" onclick="caricaMeseStrip();return false;">riprova</a></span>';
+  get(inizio, oggi).then(function (c) {
+    if (!c || !c.success) { el.innerHTML = nonDisp; return null; }
+    el.innerHTML = '<span class="ch-lab">' + mesi[oggi.getMonth()] + ' 1–' + g + ': ' + eur0(c.lordo_iva_inclusa) + ' · margine ' + eur0(c.margine_netto) + ' — calcolo mese scorso…</span>';
+    return get(inizioPrec, finePrec).then(function (p) { return [c, p]; });
+  }).then(function (r) {
+    if (!r) return;
     var c = r[0], p = r[1];
-    if (!c || !c.success) { el.innerHTML = ''; return; }
     function riga(nome, x, conf) {
       var v = (conf && conf.success && conf.lordo_iva_inclusa > 0) ? Math.round((x.lordo_iva_inclusa - conf.lordo_iva_inclusa) / conf.lordo_iva_inclusa * 100) : null;
       return '<div class="mese-row"><span class="mese-nome">' + nome + '</span><span class="mese-num">' + eur0(x.lordo_iva_inclusa) + '</span><span class="mese-num pos">' + eur0(x.margine_netto) + ' <small>' + (x.margine_percentuale || 0).toFixed(1) + '%</small></span>' + (conf ? pillVar(v) : '<span></span>') + '</div>';
@@ -3586,7 +3599,7 @@ function caricaMeseStrip() {
     el.innerHTML = '<div class="mese-row mese-head"><span></span><span>Incassato</span><span>Margine</span><span></span></div>'
       + riga(mesi[oggi.getMonth()] + ' 1–' + g, c, p)
       + ((p && p.success) ? riga(mesi[inizioPrec.getMonth()] + ' 1–' + finePrec.getDate(), p, null) : '');
-  }).catch(function () { el.innerHTML = ''; });
+  }).catch(function () { el.innerHTML = nonDisp; });
 }
 setTimeout(caricaOggiBox, 200);
 </script>
@@ -3845,7 +3858,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.23', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.24', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
