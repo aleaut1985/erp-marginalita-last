@@ -1017,7 +1017,7 @@ function calcolaPannelloCanali(ordini) {
   const wk = settimana('WINKELSTRAAT');
   const wkStato = wk.precedente.ordini >= 3 && wk.corrente.ordini === 0 ? 'critico' : (wk.variazione_pct !== null && wk.variazione_pct <= -40 && wk.precedente.ordini >= 3 ? 'attenzione' : 'ok');
   if (wkStato !== 'ok') alerts.push({ livello: wkStato, nome: 'Winkelstraat', messaggio: `ultimi 7 giorni €${wk.corrente.fatturato} (${wk.corrente.ordini} ordini) contro €${wk.precedente.fatturato} (${wk.precedente.ordini})` });
-  sezioni.push({ key: 'WINKELSTRAAT', nome: 'Winkelstraat', confronto: 'Ultimi 7 giorni vs 7 precedenti', stato: wkStato, ...wk });
+  sezioni.push({ key: 'WINKELSTRAAT', nome: 'Winkelstraat', confronto: 'Ultimi 7 giorni vs 7 precedenti', stato: wkStato, ...wk, giorno: giorno('WINKELSTRAAT') });
 
   // 4) The Bradery — private sale vs private sale (una vendita = ordini senza pause > 4 giorni)
   const br = righe.filter(r => r.key === 'THE_BRADERY').sort((a, b) => a.t - b.t);
@@ -1033,7 +1033,7 @@ function calcolaPannelloCanali(ordini) {
     brConfronto = { giorni: giorniTrascorsi, corrente: somma(ultima.righe), precedente_stessi_giorni: precStessiGiorni, variazione_pct: varPct(somma(ultima.righe).fatturato, precStessiGiorni.fatturato) };
     if (brConfronto.variazione_pct !== null && brConfronto.variazione_pct <= -30) { brStato = 'attenzione'; alerts.push({ livello: 'attenzione', nome: 'The Bradery', messaggio: `private sale in corso: primi ${giorniTrascorsi} giorni €${brConfronto.corrente.fatturato} contro €${precStessiGiorni.fatturato} della vendita precedente negli stessi giorni` }); }
   }
-  sezioni.push({ key: 'THE_BRADERY', nome: 'The Bradery', confronto: 'Private sale vs private sale precedente', stato: inCorso ? brStato : 'pausa', in_corso: inCorso, ultima_vendita: descr(ultima), vendita_precedente: descr(precedente), confronto_in_corso: brConfronto });
+  sezioni.push({ key: 'THE_BRADERY', nome: 'The Bradery', confronto: 'Private sale vs private sale precedente', stato: inCorso ? brStato : 'pausa', in_corso: inCorso, ultima_vendita: descr(ultima), vendita_precedente: descr(precedente), confronto_in_corso: brConfronto, giorno: giorno('THE_BRADERY') });
 
   // 5) Altri canali — sett/sett, compatti
   const principali = new Set(['MIINTO', 'TLUXY_SITE', 'WINKELSTRAAT', 'THE_BRADERY']);
@@ -1691,11 +1691,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .ch-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
   .ch-name { font-family: 'Bodoni Moda', Georgia, serif; font-size: 1.05rem; font-weight: 500; }
   .ch-sub { font-size: 0.68rem; color: var(--gray-500); }
-  .ch-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end; padding: 6px 0; border-top: 1px solid var(--gray-100); }
+  .ch-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 66px; gap: 8px 12px; align-items: end; padding: 6px 0; border-top: 1px solid var(--gray-100); }
   .ch-row:first-of-type { border-top: none; }
   .ch-lab { font-size: 0.66rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em; }
-  .ch-val { font-size: 1rem; font-weight: 500; white-space: nowrap; } .ch-val small { font-size: 0.7rem; color: var(--gray-500); font-weight: 400; } .ch-val.muted { color: var(--gray-700); }
+  .ch-val { font-size: 1rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: clip; } .ch-val small { font-size: 0.66rem; color: var(--gray-500); font-weight: 400; } .ch-val.muted { color: var(--gray-700); }
   .ch-pill { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 0.72rem; font-weight: 500; background: var(--gray-100); color: var(--gray-700); white-space: nowrap; }
+  .ch-row > div:last-child { text-align: right; }
   .ch-pill.up { background: var(--green-light); color: var(--green-dark); } .ch-pill.down { background: var(--red-light); color: var(--red); }
   .ch-note { font-size: 0.82rem; color: var(--gray-700); line-height: 1.5; }
   .src-row { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 0; font-size: 0.78rem; }
@@ -1805,7 +1806,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.25</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.26</p>
       </div>
     </div>
     <div class="header-right">
@@ -3509,20 +3510,21 @@ function caricaAlertCanali(refresh) {
         if (s.in_corso && s.confronto_in_corso) main = rigaConfronto('Vendita in corso (' + s.confronto_in_corso.giorni + ' gg)', s.confronto_in_corso.corrente, 'Precedente, stessi gg', s.confronto_in_corso.precedente_stessi_giorni, s.confronto_in_corso.variazione_pct);
         else if (s.ultima_vendita) main = '<div class="ch-note">Nessuna private sale in corso · ultima ' + dataBreve(s.ultima_vendita.dal) + '–' + dataBreve(s.ultima_vendita.al) + ' · ' + eur0(s.ultima_vendita.fatturato) + '</div>';
         else main = '<div class="ch-note">Nessuna private sale negli ultimi 100 giorni.</div>';
+        if (s.giorno && (s.giorno.oggi.ordini || s.giorno.ieri_stessa_ora.ordini)) main = rigaConfronto('Oggi finora', s.giorno.oggi, 'Ieri stessa ora', s.giorno.ieri_stessa_ora, s.giorno.variazione_oggi_pct) + main;
         if (s.ultima_vendita) det = '<div class="ch-note">Ultima: ' + dataBreve(s.ultima_vendita.dal) + '–' + dataBreve(s.ultima_vendita.al) + ' · ' + eur0(s.ultima_vendita.fatturato) + ' (' + s.ultima_vendita.ordini + ' ordini)' + (s.vendita_precedente ? '<br>Precedente: ' + dataBreve(s.vendita_precedente.dal) + '–' + dataBreve(s.vendita_precedente.al) + ' · ' + eur0(s.vendita_precedente.fatturato) + ' (' + s.vendita_precedente.ordini + ' ordini)' : '') + '</div>';
       } else if (s.key === 'TLUXY_SITE') {
-        main = rigaConfronto('Ultimi 7 giorni', s.settimana.corrente, '7 precedenti', s.settimana.precedente, s.settimana.variazione_pct);
-        det = rigaConfronto('Oggi finora', s.oggi, 'Ieri stessa ora', s.ieri_stessa_ora, s.variazione_pct) + rigaConfronto('Ieri', s.ieri, 'L’altro ieri', s.altro_ieri, s.variazione_ieri_pct);
+        main = rigaConfronto('Oggi finora', s.oggi, 'Ieri stessa ora', s.ieri_stessa_ora, s.variazione_pct) + rigaConfronto('Ultimi 7 giorni', s.settimana.corrente, '7 precedenti', s.settimana.precedente, s.settimana.variazione_pct);
+        det = rigaConfronto('Ieri', s.ieri, 'L’altro ieri', s.altro_ieri, s.variazione_ieri_pct);
         if (s.fonti_7gg && s.fonti_7gg.length) {
           var maxF = Math.max.apply(null, s.fonti_7gg.map(function (f) { return f.fatturato; })) || 1;
           det += '<div class="ch-lab" style="margin-top:10px">Da dove arrivano gli ordini (7 giorni)</div>' + s.fonti_7gg.map(function (f) { return '<div class="src-row"><span class="src-name">' + escAlert(f.fonte) + '</span><span class="src-bar"><i style="width:' + Math.max(4, Math.round(f.fatturato / maxF * 100)) + '%"></i></span><span class="src-num">' + f.ordini + ' · ' + eur0(f.fatturato) + '</span></div>'; }).join('');
         }
       } else {
-        main = rigaConfronto('Ultimi 7 giorni', s.corrente, '7 precedenti', s.precedente, s.variazione_pct);
-        if (s.giorno) det = rigaConfronto('Oggi finora', s.giorno.oggi, 'Ieri stessa ora', s.giorno.ieri_stessa_ora, s.giorno.variazione_oggi_pct) + rigaConfronto('Ieri', s.giorno.ieri, 'L’altro ieri', s.giorno.altro_ieri, s.giorno.variazione_ieri_pct);
+        main = (s.giorno ? rigaConfronto('Oggi finora', s.giorno.oggi, 'Ieri stessa ora', s.giorno.ieri_stessa_ora, s.giorno.variazione_oggi_pct) : '') + rigaConfronto('Ultimi 7 giorni', s.corrente, '7 precedenti', s.precedente, s.variazione_pct);
+        if (s.giorno) det = rigaConfronto('Ieri', s.giorno.ieri, 'L’altro ieri', s.giorno.altro_ieri, s.giorno.variazione_ieri_pct);
       }
       html += '<div class="ch-card ' + escAlert(s.stato) + '"><div class="ch-head"><span class="ch-name">' + escAlert(s.nome) + '</span></div>' + main
-        + (det ? '<details class="ch-det"><summary>' + (s.key === 'TLUXY_SITE' ? 'Giorno su giorno e fonti ordini' : (s.key === 'THE_BRADERY' ? 'Dettaglio vendite' : 'Giorno su giorno')) + '</summary>' + det + '</details>' : '') + '</div>';
+        + (det ? '<details class="ch-det"><summary>' + (s.key === 'TLUXY_SITE' ? 'Ieri e fonti ordini' : (s.key === 'THE_BRADERY' ? 'Dettaglio vendite' : 'Ieri vs l’altro ieri')) + '</summary>' + det + '</details>' : '') + '</div>';
     });
     if (d.altri && d.altri.length) {
       html += '<details class="ch-altri"><summary>Altri canali (' + d.altri.length + ')</summary>' + d.altri.map(function (a) { return '<div class="src-row"><span class="src-name">' + escAlert(a.nome) + '</span><span class="src-num">' + eur0(a.corrente.fatturato) + ' vs ' + eur0(a.precedente.fatturato) + '</span>' + pillVar(a.variazione_pct) + '</div>'; }).join('') + '</details>';
@@ -3875,7 +3877,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.25', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.26', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -4374,7 +4376,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && path === '/api/alerts') {
       try {
         const refresh = query.get('refresh') === '1';
-        const cacheKey = 'pannello_canali_v517';
+        const cacheKey = 'pannello_canali_v526';
         if (!refresh && KV_ENABLED) {
           try { const c = await kvGet(cacheKey); if (c) { const obj = JSON.parse(c); if (Date.now() - new Date(obj.generato_il).getTime() < 15 * 60000) return res.json({ success: true, cached: true, ...obj }); } } catch (e) {}
         }
