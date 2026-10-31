@@ -1,4 +1,4 @@
-// ERP Marginalità v5.12 - Nuova commissione Miinto 21,5% dal 01/11/2026 + The Bradery anticipo 90/10 (regole con data di validità)
+// ERP Marginalità v5.13 - Restyle grafico mobile-first (Bodoni Moda + Jost) · v5.12: Nuova commissione Miinto 21,5% dal 01/11/2026 + The Bradery anticipo 90/10 (regole con data di validità)
 
 import * as crypto from 'node:crypto';
 
@@ -1106,6 +1106,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#F4F1EB">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,500;6..96,600&family=Jost:wght@400;500;600&display=swap" rel="stylesheet">
 <title>T. Luxy ERP — Dashboard Marginalità</title>
 <style>
   :root {
@@ -1284,7 +1287,62 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .summary-label { font-size: 0.68rem; color: var(--gray-700); text-transform: uppercase; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 8px; }
   .summary-value { font-family: var(--font-main); font-size: 1.2rem; font-weight: 700; color: var(--black); letter-spacing: 0.02em; text-transform: uppercase; }
   .summary-detail { margin-top: 6px; font-size: 0.82rem; color: var(--gray-700); }
-  @media (max-width: 768px) { .container { padding: 16px; } .header { padding: 24px; } .logo { font-size: 1.9rem; } .section { padding: 24px; } .tabs { flex-direction: column; } .tab { min-width: auto; } .header-divider { display: none; } .kpi-value { font-size: 1.5rem; } .filter-bar { flex-direction: column; align-items: stretch; } .custom-range { flex-wrap: wrap; } }
+  /* ===== v5.13 restyle: tipografia sito (Bodoni Moda + Jost), oro come accento, mobile-first ===== */
+  :root { --font-main: 'Jost', -apple-system, 'Segoe UI', Roboto, sans-serif; --font-display: 'Bodoni Moda', 'Didot', Georgia, serif; --gold: #B8935A; --gold-light: #F6EFE2; }
+  body { font-weight: 400; letter-spacing: 0; }
+  .logo { font-family: var(--font-display); font-weight: 500; letter-spacing: 0.06em; }
+  .section-title, .header-info h1 { font-family: var(--font-display); font-weight: 500; text-transform: none; letter-spacing: 0.01em; }
+  .header-info h1 { font-size: 1.15rem; }
+  .kpi-value, .result-value, .summary-value { font-family: var(--font-main); font-weight: 500; letter-spacing: -0.01em; }
+  .tab, .period-btn, .btn-primary, .status-pill, .kpi-label, .form-group label, .breakdown-title { font-weight: 500; }
+  .tab.active { background: var(--black); }
+  .tab:hover:not(.active) { background: var(--gold-light); }
+  .section, .header, .tabs-wrap { box-shadow: none; border: 1px solid #ECE6DA; }
+  .kpi { border-color: #ECE6DA; }
+  .kpi:hover { transform: none; box-shadow: none; border-color: var(--gold); }
+  .kpi.gold { background: var(--gold-light); border-color: var(--gold); }
+  .breakdown-table thead, .compare-table thead { background: #1A1A1A; }
+  .tabs::-webkit-scrollbar, .period-selector::-webkit-scrollbar { display: none; }
+  @media (max-width: 768px) {
+    .container { padding: 12px; }
+    .header { padding: 12px 14px; border-radius: 14px; margin-bottom: 10px; flex-wrap: nowrap; gap: 10px; }
+    .header-left { gap: 10px; min-width: 0; }
+    .logo { font-size: 1.45rem; white-space: nowrap; }
+    .header-divider { display: none; }
+    .header-info h1 { font-size: 0.85rem; margin-bottom: 0; white-space: nowrap; }
+    .header-info { min-width: 0; }
+    .header-info p { display: none; }
+    .header-right { gap: 6px; flex-wrap: nowrap; }
+    .status-pill { padding: 5px 10px; font-size: 0.64rem; }
+    #logoutBtn { margin-left: 0 !important; padding: 6px 10px !important; font-size: 0.64rem !important; }
+    .tabs-wrap { position: sticky; top: 0; z-index: 20; padding: 6px; border-radius: 14px; margin-bottom: 12px; background: rgba(255,255,255,0.96); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+    .tabs { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; gap: 6px; scroll-snap-type: x proximity; }
+    .tab { flex: 0 0 auto; min-width: 0; padding: 9px 15px; border-radius: 999px; font-size: 0.72rem; letter-spacing: 0.04em; scroll-snap-align: start; white-space: nowrap; }
+    .section { padding: 18px 16px; border-radius: 14px; margin-bottom: 12px; }
+    .section-header { margin-bottom: 16px; gap: 10px; }
+    .section-title { font-size: 1.45rem; }
+    .section-subtitle { font-size: 0.78rem; }
+    .info-box, .warn-box { padding: 10px 12px; font-size: 0.78rem; margin-bottom: 14px; }
+    .filter-bar { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 16px; }
+    .period-selector { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .period-btn { flex: 0 0 auto; padding: 8px 14px; font-size: 0.7rem; }
+    .period-selector { max-width: 100%; }
+    .custom-range { flex-wrap: wrap; border-radius: 14px; max-width: 100%; padding: 8px 10px; gap: 4px; }
+    .custom-range input[type="date"] { flex: 1 1 110px; min-width: 0; font-size: 0.8rem; padding: 4px; }
+    .custom-range .apply-btn { flex: 1 0 100%; padding: 9px; }
+    .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
+    .kpi { padding: 14px; }
+    .kpi-label { font-size: 0.62rem; margin-bottom: 8px; }
+    .kpi-value { font-size: 1.3rem; word-break: break-word; }
+    .kpi-sub { font-size: 0.66rem; }
+    .breakdown-table th, .breakdown-table td, .compare-table th, .compare-table td { padding: 10px 8px; font-size: 0.78rem; }
+    .breakdown-table th:first-child, .breakdown-table td:first-child { position: sticky; left: 0; background: inherit; z-index: 1; }
+    .breakdown-table tbody td:first-child { background: var(--white); }
+    .breakdown-table thead th:first-child { background: #1A1A1A; }
+    .results, .mp-grid, .duo-grid, .form-grid { grid-template-columns: 1fr; }
+    .results { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .btn-primary { padding: 14px 20px; }
+  }
 </style>
 </head>
 <body>
@@ -1295,12 +1353,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.12</p>
+        <p>Business Intelligence Dashboard · v5.13</p>
       </div>
     </div>
     <div class="header-right">
-      <div class="status-pill"><div class="status-dot"></div>Sistema Live</div>
-      <button id="logoutBtn" style="background:transparent; border:1px solid rgba(0,0,0,0.15); padding:8px 14px; border-radius:50px; cursor:pointer; font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--gray-700); margin-left:12px; font-family:var(--font-main); transition:all 0.2s;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='transparent'">🚪 Esci</button>
+      <div class="status-pill"><div class="status-dot"></div>Live</div>
+      <button id="logoutBtn" style="background:transparent; border:1px solid rgba(0,0,0,0.15); padding:8px 14px; border-radius:50px; cursor:pointer; font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--gray-700); margin-left:12px; font-family:var(--font-main); transition:all 0.2s;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='transparent'">Esci</button>
     </div>
   </div>
   <div class="tabs-wrap">
@@ -3122,7 +3180,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.12', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.13', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
