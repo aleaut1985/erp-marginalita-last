@@ -1,4 +1,4 @@
-// TLuxy Business Manager v5.21 - Accesso con Face ID (passkey) · v5.20: Nome app + icona bianco/nero · v5.19: Icona app Home (T. oro) + manifest · v5.18: Box Oggi (incasso + margine) in cima, card canali compatte espandibili · v5.17: Miinto anche giorno su giorno · v5.16: Pannello canali (Miinto, TLuxy fonti, Winkelstraat, Bradery private sale) · v5.15.1: Dashboard senza cache browser · v5.15: Controllo margini DUOMO nell'ERP · v5.14: Alert canali lenti (banner + /api/alerts) · v5.13: Restyle grafico mobile-first (Bodoni Moda + Jost) · v5.12: Nuova commissione Miinto 21,5% dal 01/11/2026 + The Bradery anticipo 90/10 (regole con data di validità)
+// TLuxy Business Manager v5.21.1 - Fix salvataggio KV con scadenza · v5.21: Accesso con Face ID (passkey) · v5.20: Nome app + icona bianco/nero · v5.19: Icona app Home (T. oro) + manifest · v5.18: Box Oggi (incasso + margine) in cima, card canali compatte espandibili · v5.17: Miinto anche giorno su giorno · v5.16: Pannello canali (Miinto, TLuxy fonti, Winkelstraat, Bradery private sale) · v5.15.1: Dashboard senza cache browser · v5.15: Controllo margini DUOMO nell'ERP · v5.14: Alert canali lenti (banner + /api/alerts) · v5.13: Restyle grafico mobile-first (Bodoni Moda + Jost) · v5.12: Nuova commissione Miinto 21,5% dal 01/11/2026 + The Bradery anticipo 90/10 (regole con data di validità)
 
 import * as crypto from 'node:crypto';
 import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
@@ -330,7 +330,7 @@ async function kvSet(key, value) {
 async function kvSetBody(key, value) {
   if (!KV_ENABLED) return false;
   try {
-    const res = await fetch(`${KV_REST_API_URL}/set/${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` }, body: value });
+    const res = await fetch(KV_REST_API_URL, { method: 'POST', headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(['SET', key, String(value)]) });
     return res.ok;
   } catch (e) { return false; }
 }
@@ -338,9 +338,8 @@ async function kvSetBody(key, value) {
 async function kvSetEx(key, ttlSec, value) {
   if (!KV_ENABLED) return false;
   try {
-    // Upstash Redis REST: SET key value EX ttl → /set/{key}/{value}?EX={ttl}
-    const url = `${KV_REST_API_URL}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}?EX=${ttlSec}`;
-    const res = await fetch(url, { headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` } });
+    // v5.21.1: comando Upstash in formato JSON (["SET", key, value, "EX", ttl]) — affidabile anche con valori lunghi
+    const res = await fetch(KV_REST_API_URL, { method: 'POST', headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(['SET', key, String(value), 'EX', String(ttlSec)]) });
     return res.ok;
   } catch (e) { return false; }
 }
@@ -1730,7 +1729,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p>Business Intelligence Dashboard · v5.21</p>
+        <p>Business Intelligence Dashboard · v5.21.1</p>
       </div>
     </div>
     <div class="header-right">
@@ -3727,7 +3726,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.21', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.21.1', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
