@@ -1,4 +1,4 @@
-// ERP Marginalità v5.14 - Alert canali lenti (banner + /api/alerts) · v5.13: Restyle grafico mobile-first (Bodoni Moda + Jost) · v5.12: Nuova commissione Miinto 21,5% dal 01/11/2026 + The Bradery anticipo 90/10 (regole con data di validità)
+// ERP Marginalità v5.15 - Controllo margini DUOMO nell'ERP · v5.14: Alert canali lenti (banner + /api/alerts) · v5.13: Restyle grafico mobile-first (Bodoni Moda + Jost) · v5.12: Nuova commissione Miinto 21,5% dal 01/11/2026 + The Bradery anticipo 90/10 (regole con data di validità)
 
 import * as crypto from 'node:crypto';
 
@@ -227,6 +227,14 @@ async function kvSet(key, value) {
     const res = await fetch(`${KV_REST_API_URL}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}`, {
       headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` }
     });
+    return res.ok;
+  } catch (e) { return false; }
+}
+// kvSetBody: set con valore nel body (per valori grandi, Upstash REST POST /set/{key})
+async function kvSetBody(key, value) {
+  if (!KV_ENABLED) return false;
+  try {
+    const res = await fetch(`${KV_REST_API_URL}/set/${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Authorization': `Bearer ${KV_REST_API_TOKEN}` }, body: value });
     return res.ok;
   } catch (e) { return false; }
 }
@@ -716,6 +724,77 @@ async function applyJDFilter(ordini) {
     const filteredItems = (o.line_items || []).filter(item => hasJDTag(tagsCache[item.product_id]));
     return { ...o, line_items: filteredItems, _jd_excluded: filteredItems.length === 0 };
   }).filter(o => !o._jd_excluded);
+}
+
+// ============ CONTROLLO MARGINI DUOMO (v5.15) ============
+// Catalogo DUOMO attivo letto con una bulk operation Shopify (asincrona) e analizzato con le regole del controllo mattutino.
+const DUO_RULES = {
+  iva: 1.22,
+  soglia_mp: 0.07,
+  miinto_sped: 16.5,
+  miinto_campagna_pct: 0.035,
+  // dal 01/11/2026 commissione unica 21,5% sul prezzo senza IVA (include transaction fee); prima 21,66% senza IVA + 2,25% con IVA
+  miintoFee(prezzoLordo, giornoISO) {
+    const netto = prezzoLordo / 1.22;
+    if (giornoISO >= '2026-11-01') return netto * 0.215;
+    return netto * 0.2166 + prezzoLordo * 0.0225;
+  },
+  campagneMiinto: [['2026-10-25','2026-11-01'],['2026-11-08','2026-11-09'],['2026-11-15','2026-11-17'],['2026-11-22','2026-11-30'],['2026-12-26','2026-12-30']]
+};
+function isCampagnaMiinto(giornoISO) { return DUO_RULES.campagneMiinto.some(([a, b]) => giornoISO >= a && giornoISO <= b); }
+
+async function shopifyGraphQL(query, variables = {}) {
+  const token = await getShopifyAccessToken();
+  const r = await fetch(`https://${SHOPIFY_STORE}/admin/api/2024-01/graphql.json`, { method: 'POST', headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' }, body: JSON.stringify({ query, variables }) });
+  if (!r.ok) throw new Error(`Shopify GraphQL HTTP ${r.status}`);
+  const j = await r.json();
+  if (j.errors) throw new Error('Shopify GraphQL: ' + JSON.stringify(j.errors).slice(0, 300));
+  return j.data;
+}
+
+const DUO_BULK_QUERY = `{ products(query: "tag:'TLX_PRODUCT:DUO' AND status:active") { edges { node { id handle title vendor productType tags metafield(namespace: "custom", key: "prezzo_miinto") { value } variants { edges { node { id sku price compareAtPrice inventoryQuantity inventoryItem { unitCost { amount } } } } } } } } }`;
+
+function analizzaCatalogoDuo(jsonl, giornoISO) {
+  const prodotti = new Map();
+  for (const line of jsonl.split('\n')) {
+    if (!line.trim()) continue;
+    const o = JSON.parse(line);
+    if (o.__parentId) { const p = prodotti.get(o.__parentId); if (p) p.varianti.push(o); }
+    else prodotti.set(o.id, { ...o, varianti: [] });
+  }
+  const campagna = isCampagnaMiinto(giornoISO);
+  const out = { prodotti_attivi: prodotti.size, senza_costo: 0, sito_negativi: [], sito_extra_sconto_negativi: [], miinto_sotto_soglia: [], miinto_prezzo_fuori_regola: [] };
+  for (const p of prodotti.values()) {
+    const prezzi = p.varianti.map(v => parseFloat(v.price)).filter(x => x > 0);
+    const rrps = p.varianti.map(v => parseFloat(v.compareAtPrice)).filter(x => x > 0);
+    const costi = p.varianti.map(v => parseFloat(v.inventoryItem?.unitCost?.amount)).filter(x => x > 0);
+    if (!prezzi.length || !costi.length) { out.senza_costo++; continue; }
+    const prezzo = Math.min(...prezzi), costo = Math.max(...costi), rrp = rrps.length ? Math.max(...rrps) : prezzo;
+    const tags = (p.tags || []).map(t => String(t).toLowerCase());
+    const stock = p.varianti.reduce((s, v) => s + Math.max(0, v.inventoryQuantity || 0), 0);
+    const base = { handle: p.handle, titolo: p.title, brand: p.vendor, categoria: p.productType, stock, costo: Math.round(costo * 100) / 100, rrp };
+    const netto = prezzo / DUO_RULES.iva;
+    const margSito = netto - costo;
+    if (margSito < 0) out.sito_negativi.push({ ...base, prezzo, margine: Math.round(margSito), margine_pct: Math.round(margSito / netto * 1000) / 10 });
+    const extra = tags.includes('discount_20') ? 0.20 : tags.includes('discount_15') ? 0.15 : tags.includes('discount_10') ? 0.10 : 0;
+    if (extra) {
+      const nettoEx = prezzo * (1 - extra) / DUO_RULES.iva; const m = nettoEx - costo;
+      if (m < 0) out.sito_extra_sconto_negativi.push({ ...base, prezzo: Math.round(prezzo * (1 - extra) * 100) / 100, sconto_extra: extra * 100, margine: Math.round(m), margine_pct: Math.round(m / nettoEx * 1000) / 10 });
+    }
+    if (tags.includes('miinto meta price set')) {
+      const pm = parseFloat(p.metafield?.value) || rrp;
+      const nettoM = pm / DUO_RULES.iva;
+      const fee = DUO_RULES.miintoFee(pm, giornoISO) + (campagna ? pm * DUO_RULES.miinto_campagna_pct : 0);
+      const m = nettoM - fee - DUO_RULES.miinto_sped - costo;
+      const mp = m / nettoM;
+      if (mp < DUO_RULES.soglia_mp) out.miinto_sotto_soglia.push({ ...base, prezzo_miinto: pm, margine: Math.round(m), margine_pct: Math.round(mp * 1000) / 10 });
+      const atteso = campagna ? Math.round(rrp * 1.0599) : rrp;
+      if (Math.abs(pm - atteso) > 1) out.miinto_prezzo_fuori_regola.push({ ...base, prezzo_miinto: pm, atteso });
+    }
+  }
+  const byM = (a, b) => a.margine - b.margine;
+  out.sito_negativi.sort(byM); out.sito_extra_sconto_negativi.sort(byM); out.miinto_sotto_soglia.sort(byM);
+  return { generato_il: new Date().toISOString(), giorno: giornoISO, campagna_miinto_oggi: campagna, regole: { iva: '22%', miinto: giornoISO >= '2026-11-01' ? 'commissione unica 21,5% + sped. 16,50€' : '21,66% + 2,25% + sped. 16,50€', soglia_marketplace: '7%' }, ...out };
 }
 
 // ============ ALERT CANALI LENTI (v5.14) ============
@@ -1414,7 +1493,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.14</p>
+        <p>Business Intelligence Dashboard · v5.15</p>
       </div>
     </div>
     <div class="header-right">
@@ -1437,6 +1516,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   </div>
   <div id="analytics-tab" class="tab-content active">
     <div id="alerts-banner" class="alerts-banner"></div>
+    <div id="duo-alerts" class="alerts-banner"></div>
     <div class="section">
       <div class="section-header"><div><div class="section-title">Performance</div><div class="section-subtitle">Analisi vendite e marginalità in tempo reale</div></div></div>
       <div class="info-box">Fuso orario Europa/Roma reale. Costo merce letto da Shopify. Ordini senza "Cost per item" segnalati sotto.</div>
@@ -3105,6 +3185,45 @@ function caricaAlertCanali(refresh) {
   }).catch(function () { box.innerHTML = ''; });
 }
 setTimeout(function () { caricaAlertCanali(false); }, 400);
+
+// ===== v5.15 Controllo margini DUOMO =====
+var duoPollN = 0;
+function duoRiga(x, extra) { return '<div class="alert-item critico"><span class="alert-dot"></span><div><strong>' + escAlert(x.brand) + '</strong> · ' + escAlert(x.titolo) + '<br><span style="color:var(--gray-500);font-size:0.78rem;">' + extra + ' · costo €' + Math.round(x.costo) + ' · stock ' + x.stock + '</span></div></div>'; }
+function duoSezione(titolo, arr, fmt) { if (!arr || !arr.length) return ''; return '<div class="breakdown-title" style="margin:14px 0 4px;font-size:0.78rem;">' + titolo + ' (' + arr.length + ')</div>' + arr.slice(0, 10).map(function (x) { return duoRiga(x, fmt(x)); }).join('') + (arr.length > 10 ? '<div class="alerts-meta">…e altri ' + (arr.length - 10) + '</div>' : ''); }
+function caricaDuoAlerts(refresh) {
+  var box = document.getElementById('duo-alerts'); if (!box) return;
+  var head = '<div class="alerts-head"><div class="alerts-title">Margini DUOMO</div><button class="alerts-refresh" onclick="duoPollN=0;caricaDuoAlerts(true)">Aggiorna</button></div>';
+  if (refresh) box.innerHTML = head + '<div class="alerts-meta">Leggo il catalogo DUOMO da Shopify…</div>';
+  fetch('/api/duo-alerts' + (refresh ? '?refresh=1' : '')).then(function (r) { return r.json(); }).then(function (d) {
+    if (d.status === 'running' || d.status === 'busy') {
+      box.innerHTML = head + '<div class="alerts-meta">' + (d.status === 'busy' ? 'Shopify è occupato con un altro export, riprovo…' : 'Analisi del catalogo in corso' + (d.oggetti ? ' (' + d.oggetti + ' righe lette)' : '') + '…') + '</div>';
+      if (duoPollN++ < 40) setTimeout(function () { caricaDuoAlerts(false); }, 6000);
+      return;
+    }
+    if (!d.success) { box.innerHTML = head + '<div class="alerts-meta">Controllo non disponibile: ' + escAlert(d.error || '') + '</div>'; return; }
+    var tot = d.sito_negativi.length + d.sito_extra_sconto_negativi.length + d.miinto_sotto_soglia.length + d.miinto_prezzo_fuori_regola.length;
+    var ora = new Date(d.generato_il).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    var sint = '<div class="' + (tot ? 'alerts-meta' : 'alerts-ok') + '" style="font-size:0.82rem;color:' + (tot ? 'var(--gray-900)' : '') + '">' + d.prodotti_attivi + ' prodotti DUOMO attivi · ' + (tot ? (d.sito_negativi.length + ' in perdita sul sito, ' + d.sito_extra_sconto_negativi.length + ' in perdita con extra sconto, ' + d.miinto_sotto_soglia.length + ' Miinto sotto 7%, ' + d.miinto_prezzo_fuori_regola.length + ' prezzo Miinto fuori regola') : 'nessun problema di margine') + (d.campagna_miinto_oggi ? ' · <strong>oggi campagna Miinto</strong> (prezzo RRP +6%)' : '') + '</div>';
+    var body = duoSezione('In perdita sul sito', d.sito_negativi, function (x) { return 'vendita €' + x.prezzo + ' · margine €' + x.margine + ' (' + x.margine_pct + '%)'; })
+      + duoSezione('In perdita con extra sconto', d.sito_extra_sconto_negativi, function (x) { return '-' + x.sconto_extra + '% → €' + x.prezzo + ' · margine €' + x.margine; })
+      + duoSezione('Miinto sotto soglia 7%', d.miinto_sotto_soglia, function (x) { return 'Miinto €' + x.prezzo_miinto + ' · margine €' + x.margine + ' (' + x.margine_pct + '%)'; })
+      + duoSezione('Prezzo Miinto fuori regola', d.miinto_prezzo_fuori_regola, function (x) { return 'ora €' + x.prezzo_miinto + ' · atteso €' + x.atteso; });
+    box.innerHTML = head + sint + body + '<div id="duo-ieri"></div><div class="alerts-meta">Regole: IVA ' + d.regole.iva + ', Miinto ' + d.regole.miinto + ', soglia ' + d.regole.soglia_marketplace + ' · aggiornato ' + ora + '</div>';
+    caricaOrdiniIeriInPerdita();
+  }).catch(function () { box.innerHTML = head + '<div class="alerts-meta">Controllo non disponibile.</div>'; });
+}
+function caricaOrdiniIeriInPerdita() {
+  var el = document.getElementById('duo-ieri'); if (!el) return;
+  fetch('/api/analytics?periodo=yesterday').then(function (r) { return r.json(); }).then(function (d) {
+    if (!d || !d.success) return;
+    var righe = []; var bm = d.breakdown_marketplace || {};
+    Object.keys(bm).forEach(function (k) { (bm[k].dettaglio_ordini || []).forEach(function (o) { if (o.margine_netto < 0 && !o.is_foreign_currency) righe.push({ mp: bm[k].nome, o: o }); }); });
+    var head = '<div class="breakdown-title" style="margin:14px 0 4px;font-size:0.78rem;">Ordini di ieri in perdita (' + righe.length + ')</div>';
+    if (!righe.length) { el.innerHTML = head + '<div class="alerts-ok">Nessun ordine in perdita ieri · margine netto totale €' + Math.round(d.margine_netto || 0).toLocaleString('it-IT') + '</div>'; return; }
+    el.innerHTML = head + righe.map(function (x) { return '<div class="alert-item critico"><span class="alert-dot"></span><div><strong>' + escAlert(x.o.name || ('#' + x.o.order_number)) + '</strong> · ' + escAlert(x.mp) + ' · venduto €' + Math.round(x.o.fatturato) + ' · margine €' + Math.round(x.o.margine_netto) + '<br><span style="color:var(--gray-500);font-size:0.78rem;">' + escAlert((x.o.articoli || []).map(function (a) { return a.title; }).join(', ')) + '</span></div></div>'; }).join('');
+  }).catch(function () {});
+}
+setTimeout(function () { caricaDuoAlerts(false); }, 700);
 </script>
 </body>
 </html>`;
@@ -3258,7 +3377,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.14', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.15', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -3717,6 +3836,43 @@ export default async function handler(req, res) {
     // ============ FORECAST INCASSI ============
     // Calcola pagamenti previsti per il mese corrente + mese prossimo (default)
     // Cache KV 24h come /api/inventory-discovery. ?refresh=1 per forzare ricalcolo
+    if (req.method === 'GET' && path === '/api/duo-alerts') {
+      try {
+        if (!KV_ENABLED) return res.json({ success: false, error: 'KV non configurato' });
+        const refresh = query.get('refresh') === '1';
+        const CACHE = 'duo_alerts_cache', OPKEY = 'duo_alerts_bulk_id';
+        if (!refresh) {
+          const c = await kvGet(CACHE);
+          if (c) { const obj = JSON.parse(c); if (Date.now() - new Date(obj.generato_il).getTime() < 12 * 3600 * 1000) return res.json({ success: true, status: 'ready', cached: true, ...obj }); }
+        }
+        const mioOp = await kvGet(OPKEY);
+        const d = await shopifyGraphQL('{ currentBulkOperation { id status url errorCode objectCount } }');
+        const cur = d.currentBulkOperation;
+        if (mioOp && cur && cur.id === mioOp) {
+          if (cur.status === 'RUNNING' || cur.status === 'CREATED') return res.json({ success: true, status: 'running', oggetti: cur.objectCount });
+          if (cur.status === 'COMPLETED') {
+            const giorno = getRomeDateString();
+            const testo = cur.url ? await (await fetch(cur.url)).text() : '';
+            const risultato = analizzaCatalogoDuo(testo, giorno);
+            ['sito_negativi', 'sito_extra_sconto_negativi', 'miinto_sotto_soglia', 'miinto_prezzo_fuori_regola'].forEach(k => { risultato[k + '_count'] = risultato[k].length; });
+            await kvSetBody(CACHE, JSON.stringify(risultato));
+            await kvDel(OPKEY);
+            return res.json({ success: true, status: 'ready', cached: false, ...risultato });
+          }
+          await kvDel(OPKEY);
+          return res.json({ success: false, status: 'error', error: 'Bulk operation ' + cur.status + (cur.errorCode ? ' ' + cur.errorCode : '') });
+        }
+        if (cur && (cur.status === 'RUNNING' || cur.status === 'CREATED')) return res.json({ success: true, status: 'busy', messaggio: 'Shopify sta già eseguendo un altro export, riprovo tra poco' });
+        const st = await shopifyGraphQL('mutation($q: String!) { bulkOperationRunQuery(query: $q) { bulkOperation { id status } userErrors { field message } } }', { q: DUO_BULK_QUERY });
+        const errs = st.bulkOperationRunQuery.userErrors || [];
+        if (errs.length) return res.json({ success: false, status: 'error', error: errs.map(e => e.message).join('; ') });
+        await kvSetEx(OPKEY, 3600, st.bulkOperationRunQuery.bulkOperation.id);
+        return res.json({ success: true, status: 'running' });
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    }
+
     if (req.method === 'GET' && path === '/api/alerts') {
       try {
         const refresh = query.get('refresh') === '1';
