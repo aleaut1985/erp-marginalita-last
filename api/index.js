@@ -1,6 +1,7 @@
-// TLuxy Business Manager v5.20 - Nome app + icona bianco/nero · v5.19: Icona app Home (T. oro) + manifest · v5.18: Box Oggi (incasso + margine) in cima, card canali compatte espandibili · v5.17: Miinto anche giorno su giorno · v5.16: Pannello canali (Miinto, TLuxy fonti, Winkelstraat, Bradery private sale) · v5.15.1: Dashboard senza cache browser · v5.15: Controllo margini DUOMO nell'ERP · v5.14: Alert canali lenti (banner + /api/alerts) · v5.13: Restyle grafico mobile-first (Bodoni Moda + Jost) · v5.12: Nuova commissione Miinto 21,5% dal 01/11/2026 + The Bradery anticipo 90/10 (regole con data di validità)
+// TLuxy Business Manager v5.21 - Accesso con Face ID (passkey) · v5.20: Nome app + icona bianco/nero · v5.19: Icona app Home (T. oro) + manifest · v5.18: Box Oggi (incasso + margine) in cima, card canali compatte espandibili · v5.17: Miinto anche giorno su giorno · v5.16: Pannello canali (Miinto, TLuxy fonti, Winkelstraat, Bradery private sale) · v5.15.1: Dashboard senza cache browser · v5.15: Controllo margini DUOMO nell'ERP · v5.14: Alert canali lenti (banner + /api/alerts) · v5.13: Restyle grafico mobile-first (Bodoni Moda + Jost) · v5.12: Nuova commissione Miinto 21,5% dal 01/11/2026 + The Bradery anticipo 90/10 (regole con data di validità)
 
 import * as crypto from 'node:crypto';
+import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'autore-luxit.myshopify.com';
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '';
@@ -13,10 +14,13 @@ const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '').split(',').map(e => e.
 const AUTH_SECRET = process.env.AUTH_SECRET || (RESEND_API_KEY + '_tluxy_erp_secret_salt_2026');
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'https://erp-marginalita-last.vercel.app';
 const AUTH_COOKIE_NAME = 'tluxy_erp_session';
-const AUTH_SESSION_DAYS = 7;
+// v5.21: accesso con passkey (Face ID / Touch ID). Attivo se PASSKEY_AUTH=1; PASSKEY_SETUP_CODE serve per registrare un dispositivo senza essere già dentro.
+const PASSKEY_AUTH = process.env.PASSKEY_AUTH === '1';
+const PASSKEY_SETUP_CODE = (process.env.PASSKEY_SETUP_CODE || '').trim();
+const AUTH_SESSION_DAYS = PASSKEY_AUTH ? 30 : 7;
 const MAGIC_LINK_MINUTES = 15;
 const MAGIC_LINK_RATE_LIMIT = 3; // max 3 magic link/ora per email
-const AUTH_ENABLED = !!(RESEND_API_KEY && ALLOWED_EMAILS.length > 0);
+const AUTH_ENABLED = PASSKEY_AUTH || !!(RESEND_API_KEY && ALLOWED_EMAILS.length > 0);
 
 function hmacSign(payload) {
   return crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('hex');
@@ -109,6 +113,98 @@ async function sendMagicLinkEmail(email, magicLink) {
     throw new Error(`Resend API error ${res.status}: ${errorBody}`);
   }
   return await res.json();
+}
+
+
+// ============ PASSKEY (FACE ID) — v5.21 ============
+function rpFromReq(req) {
+  const hostPort = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
+  return { rpID: hostPort.split(':')[0], origin: `${proto}://${hostPort}` };
+}
+async function readJsonBody(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  let body = '';
+  await new Promise((resolve, reject) => { req.on('data', c => body += c); req.on('end', resolve); req.on('error', reject); });
+  try { return JSON.parse(body || '{}'); } catch (e) { return {}; }
+}
+async function getPasskeys() { try { return JSON.parse((await kvGet('passkeys_v1')) || '[]'); } catch (e) { return []; } }
+async function savePasskeys(list) { return kvSetBody('passkeys_v1', JSON.stringify(list)); }
+function codiceOk(code) {
+  if (!PASSKEY_SETUP_CODE || !code) return false;
+  const a = Buffer.from(String(code).trim()), b = Buffer.from(PASSKEY_SETUP_CODE);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+async function salvaChallenge(res, challenge) {
+  const id = crypto.randomBytes(16).toString('hex');
+  await kvSetEx('pk_chal_' + id, 300, challenge);
+  res.setHeader('Set-Cookie', `pk_chal=${id}; Path=/; Max-Age=300; HttpOnly; Secure; SameSite=Strict`);
+}
+async function leggiChallenge(req) {
+  const id = parseCookies(req.headers.cookie || '').pk_chal;
+  if (!id || !/^[a-f0-9]{32}$/.test(id)) return null;
+  const c = await kvGet('pk_chal_' + id);
+  await kvDel('pk_chal_' + id);
+  return c;
+}
+
+function passkeyLoginPage(haPasskey) {
+  return `<!DOCTYPE html>
+<html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>TLuxy Business Manager</title>
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-title" content="TLuxy Business Manager"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black"><meta name="theme-color" content="#111111">
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,500&family=Jost:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Jost', -apple-system, sans-serif; background: #111; color: #fff; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .wrap { width: 100%; max-width: 360px; text-align: center; }
+  .logo { font-family: 'Bodoni Moda', Georgia, serif; font-size: 4.2rem; line-height: 1; }
+  .sub { letter-spacing: 0.35em; font-size: 0.8rem; opacity: .8; margin: 10px 0 6px; padding-left: .35em; }
+  .app { font-size: 0.8rem; opacity: .55; margin-bottom: 48px; }
+  button { width: 100%; padding: 16px; border-radius: 14px; border: none; background: #fff; color: #111; font-family: inherit; font-size: 1rem; font-weight: 500; cursor: pointer; }
+  button.sec { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.3); margin-top: 12px; font-size: .9rem; }
+  input { width: 100%; padding: 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,.3); background: transparent; color: #fff; font-family: inherit; font-size: 1rem; text-align: center; letter-spacing: .2em; margin-bottom: 12px; }
+  .msg { margin-top: 18px; font-size: .85rem; min-height: 1.2em; opacity: .85; }
+  .msg.err { color: #ff8a8a; opacity: 1; }
+  #setup { display: none; margin-top: 28px; }
+</style></head><body><div class="wrap">
+  <div class="logo">T.</div><div class="sub">LUXY</div><div class="app">Business Manager</div>
+  <button id="btnLogin">Accedi con Face ID</button>
+  <button class="sec" id="btnShowSetup">Registra questo dispositivo</button>
+  <div id="setup"><input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="Codice di attivazione"><button id="btnRegister">Attiva Face ID</button></div>
+  <div class="msg" id="msg"></div>
+</div>
+<script src="https://unpkg.com/@simplewebauthn/browser@13.3.0/dist/bundle/index.umd.min.js"></script>
+<script>
+var W = window.SimpleWebAuthnBrowser, msg = document.getElementById('msg');
+function say(t, err) { msg.textContent = t; msg.className = 'msg' + (err ? ' err' : ''); }
+async function post(u, b) { var r = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}), credentials: 'same-origin' }); return r.json(); }
+async function login() {
+  try {
+    say('');
+    var o = await post('/api/passkey/login-options');
+    if (!o.success) return say(o.error || 'Errore', true);
+    var a = await W.startAuthentication({ optionsJSON: o.options });
+    var v = await post('/api/passkey/login-verify', { response: a });
+    if (v.success) { say('Accesso riuscito'); location.href = '/'; } else say(v.error || 'Accesso non riuscito', true);
+  } catch (e) { say(e && e.name === 'NotAllowedError' ? 'Accesso annullato' : (e.message || 'Errore'), true); }
+}
+async function register() {
+  try {
+    say('');
+    var o = await post('/api/passkey/register-options', { setup_code: document.getElementById('code').value });
+    if (!o.success) return say(o.error || 'Codice non valido', true);
+    var a = await W.startRegistration({ optionsJSON: o.options });
+    var v = await post('/api/passkey/register-verify', { response: a, nome: navigator.platform || 'dispositivo' });
+    if (v.success) { say('Face ID attivato'); location.href = '/'; } else say(v.error || 'Registrazione non riuscita', true);
+  } catch (e) { say(e && e.name === 'NotAllowedError' ? 'Operazione annullata' : (e.message || 'Errore'), true); }
+}
+document.getElementById('btnLogin').onclick = login;
+document.getElementById('btnRegister').onclick = register;
+document.getElementById('btnShowSetup').onclick = function () { document.getElementById('setup').style.display = 'block'; this.style.display = 'none'; };
+${haPasskey ? '' : "document.getElementById('btnShowSetup').click(); document.getElementById('btnLogin').style.display='none';"}
+</script></body></html>`;
 }
 
 // Pagine HTML di login/conferma/errore
@@ -1634,7 +1730,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p>Business Intelligence Dashboard · v5.20</p>
+        <p>Business Intelligence Dashboard · v5.21</p>
       </div>
     </div>
     <div class="header-right">
@@ -3436,6 +3532,62 @@ export default async function handler(req, res) {
   }
 
   try {
+    // ============ PASSKEY ENDPOINTS (v5.21) ============
+    if (PASSKEY_AUTH && req.method === 'GET' && path === '/login') {
+      res.setHeader('Content-Type', 'text/html');
+      res.setHeader('Cache-Control', 'no-store');
+      const pks = await getPasskeys();
+      return res.status(200).send(passkeyLoginPage(pks.length > 0));
+    }
+    if (PASSKEY_AUTH && req.method === 'POST' && path.startsWith('/api/passkey/')) {
+      try {
+        if (!KV_ENABLED) return res.status(503).json({ success: false, error: 'KV non configurato' });
+        const { rpID, origin } = rpFromReq(req);
+        const data = await readJsonBody(req);
+        const pks = await getPasskeys();
+        if (path === '/api/passkey/login-options') {
+          if (!pks.length) return res.json({ success: false, error: 'Nessun dispositivo registrato: usa il codice di attivazione' });
+          const options = await generateAuthenticationOptions({ rpID, userVerification: 'required', allowCredentials: pks.map(p => ({ id: p.id, transports: p.transports })) });
+          await salvaChallenge(res, options.challenge);
+          return res.json({ success: true, options });
+        }
+        if (path === '/api/passkey/login-verify') {
+          const challenge = await leggiChallenge(req);
+          const cred = pks.find(p => p.id === data.response?.id);
+          if (!challenge || !cred) return res.json({ success: false, error: 'Sessione scaduta o dispositivo non riconosciuto, riprova' });
+          const v = await verifyAuthenticationResponse({ response: data.response, expectedChallenge: challenge, expectedOrigin: origin, expectedRPID: rpID, requireUserVerification: true, credential: { id: cred.id, publicKey: Buffer.from(cred.publicKey, 'base64url'), counter: cred.counter || 0, transports: cred.transports } });
+          if (!v.verified) return res.json({ success: false, error: 'Verifica non riuscita' });
+          cred.counter = v.authenticationInfo.newCounter; cred.ultimo_accesso = new Date().toISOString();
+          await savePasskeys(pks);
+          setAuthCookie(res, 'passkey:' + (cred.nome || 'dispositivo'));
+          return res.json({ success: true });
+        }
+        if (path === '/api/passkey/register-options') {
+          const loggato = getAuthenticatedUser(req);
+          if (!loggato && !codiceOk(data.setup_code)) return res.json({ success: false, error: 'Codice di attivazione non valido' });
+          const options = await generateRegistrationOptions({ rpName: 'TLuxy Business Manager', rpID, userName: 'TLuxy', userDisplayName: 'TLuxy Business Manager', userID: new TextEncoder().encode('tluxy-owner'), attestationType: 'none', excludeCredentials: pks.map(p => ({ id: p.id, transports: p.transports })), authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' } });
+          await salvaChallenge(res, options.challenge);
+          await kvSetEx('pk_reg_ok_' + options.challenge, 300, '1');
+          return res.json({ success: true, options });
+        }
+        if (path === '/api/passkey/register-verify') {
+          const challenge = await leggiChallenge(req);
+          if (!challenge || !(await kvGet('pk_reg_ok_' + challenge))) return res.json({ success: false, error: 'Sessione scaduta, riprova' });
+          const v = await verifyRegistrationResponse({ response: data.response, expectedChallenge: challenge, expectedOrigin: origin, expectedRPID: rpID, requireUserVerification: true });
+          if (!v.verified || !v.registrationInfo) return res.json({ success: false, error: 'Registrazione non verificata' });
+          const c = v.registrationInfo.credential;
+          const nome = String(data.nome || 'dispositivo').slice(0, 40) + ' ' + new Date().toISOString().slice(0, 10);
+          pks.push({ id: c.id, publicKey: Buffer.from(c.publicKey).toString('base64url'), counter: c.counter || 0, transports: c.transports || data.response?.response?.transports || [], nome, creato: new Date().toISOString() });
+          await savePasskeys(pks);
+          setAuthCookie(res, 'passkey:' + nome);
+          return res.json({ success: true });
+        }
+        return res.status(404).json({ success: false, error: 'Endpoint passkey sconosciuto' });
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    }
+
     // ============ AUTH ENDPOINTS (MAGIC LINK) ============
     // Pagina login: GET /login (pubblica, sempre accessibile)
     if (req.method === 'GET' && path === '/login') {
@@ -3575,7 +3727,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.20', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.21', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
