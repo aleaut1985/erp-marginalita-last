@@ -196,6 +196,7 @@ async function register() {
     say('');
     var o = await post('/api/passkey/register-options', { setup_code: document.getElementById('code').value });
     if (!o.success) return say(o.error || 'Codice non valido', true);
+    if (o.fallback) { say(o.messaggio); setTimeout(function () { location.href = '/'; }, 1200); return; }
     var a = await W.startRegistration({ optionsJSON: o.options });
     var v = await post('/api/passkey/register-verify', { response: a, nome: navigator.platform || 'dispositivo' });
     if (v.success) { say('Face ID attivato'); location.href = '/'; } else say(v.error || 'Registrazione non riuscita', true);
@@ -1736,7 +1737,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p>Business Intelligence Dashboard · v5.21.1</p>
+        <p>Business Intelligence Dashboard · v5.21.4</p>
       </div>
     </div>
     <div class="header-right">
@@ -3575,6 +3576,11 @@ export default async function handler(req, res) {
           const ok1 = await salvaChallenge(res, options.challenge);
           const ok2 = await kvSetEx('pk_reg_ok_' + options.challenge, 300, '1');
           console.log('[passkey] register-options', JSON.stringify({ ok1, ok2, rpID, origin }));
+          if (!ok1 || !ok2) {
+            // Database non raggiungibile: con il codice valido si entra comunque (sessione 30 giorni), Face ID si attiva quando il DB torna online
+            setAuthCookie(res, 'codice-attivazione');
+            return res.json({ success: true, fallback: true, messaggio: 'Database non disponibile: accesso con codice. Face ID si attiverà quando il database torna online.' });
+          }
           return res.json({ success: true, options });
         }
         if (path === '/api/passkey/register-verify') {
@@ -3738,7 +3744,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.21.1', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.21.4', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
