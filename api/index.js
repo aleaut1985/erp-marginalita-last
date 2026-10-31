@@ -137,8 +137,9 @@ function codiceOk(code) {
 }
 async function salvaChallenge(res, challenge) {
   const id = crypto.randomBytes(16).toString('hex');
-  await kvSetEx('pk_chal_' + id, 300, challenge);
-  res.setHeader('Set-Cookie', `pk_chal=${id}; Path=/; Max-Age=300; HttpOnly; Secure; SameSite=Strict`);
+  const ok = await kvSetEx('pk_chal_' + id, 300, challenge);
+  res.setHeader('Set-Cookie', `pk_chal=${id}; Path=/; Max-Age=300; HttpOnly; Secure; SameSite=Lax`);
+  return ok;
 }
 async function leggiChallenge(req) {
   const id = parseCookies(req.headers.cookie || '').pk_chal;
@@ -3565,13 +3566,17 @@ export default async function handler(req, res) {
           const loggato = getAuthenticatedUser(req);
           if (!loggato && !codiceOk(data.setup_code)) return res.json({ success: false, error: 'Codice di attivazione non valido' });
           const options = await generateRegistrationOptions({ rpName: 'TLuxy Business Manager', rpID, userName: 'TLuxy', userDisplayName: 'TLuxy Business Manager', userID: new TextEncoder().encode('tluxy-owner'), attestationType: 'none', excludeCredentials: pks.map(p => ({ id: p.id, transports: p.transports })), authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' } });
-          await salvaChallenge(res, options.challenge);
-          await kvSetEx('pk_reg_ok_' + options.challenge, 300, '1');
+          const ok1 = await salvaChallenge(res, options.challenge);
+          const ok2 = await kvSetEx('pk_reg_ok_' + options.challenge, 300, '1');
+          console.log('[passkey] register-options', JSON.stringify({ ok1, ok2, rpID, origin }));
           return res.json({ success: true, options });
         }
         if (path === '/api/passkey/register-verify') {
+          const cookieId = parseCookies(req.headers.cookie || '').pk_chal;
           const challenge = await leggiChallenge(req);
-          if (!challenge || !(await kvGet('pk_reg_ok_' + challenge))) return res.json({ success: false, error: 'Sessione scaduta, riprova' });
+          const regOk = challenge ? await kvGet('pk_reg_ok_' + challenge) : null;
+          console.log('[passkey] register-verify', JSON.stringify({ cookie: !!cookieId, challenge: !!challenge, regOk: !!regOk, rpID, origin }));
+          if (!challenge || !regOk) return res.json({ success: false, error: 'Sessione scaduta, riprova (' + (cookieId ? 'c1' : 'c0') + (challenge ? 'k1' : 'k0') + (regOk ? 'r1' : 'r0') + ')' });
           const v = await verifyRegistrationResponse({ response: data.response, expectedChallenge: challenge, expectedOrigin: origin, expectedRPID: rpID, requireUserVerification: true });
           if (!v.verified || !v.registrationInfo) return res.json({ success: false, error: 'Registrazione non verificata' });
           const c = v.registrationInfo.credential;
@@ -3583,6 +3588,7 @@ export default async function handler(req, res) {
         }
         return res.status(404).json({ success: false, error: 'Endpoint passkey sconosciuto' });
       } catch (error) {
+        console.log('[passkey] errore', path, error.message);
         return res.status(500).json({ success: false, error: error.message });
       }
     }
