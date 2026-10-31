@@ -1,4 +1,4 @@
-// ERP Marginalità v5.13 - Restyle grafico mobile-first (Bodoni Moda + Jost) · v5.12: Nuova commissione Miinto 21,5% dal 01/11/2026 + The Bradery anticipo 90/10 (regole con data di validità)
+// ERP Marginalità v5.14 - Alert canali lenti (banner + /api/alerts) · v5.13: Restyle grafico mobile-first (Bodoni Moda + Jost) · v5.12: Nuova commissione Miinto 21,5% dal 01/11/2026 + The Bradery anticipo 90/10 (regole con data di validità)
 
 import * as crypto from 'node:crypto';
 
@@ -718,6 +718,54 @@ async function applyJDFilter(ordini) {
   }).filter(o => !o._jd_excluded);
 }
 
+// ============ ALERT CANALI LENTI (v5.14) ============
+// Confronta gli ultimi `giorni` giorni con la media settimanale delle 4 settimane precedenti, per marketplace.
+// Esclude ordini cancellati e rimborsati totalmente. Considera "attivo" un canale con almeno `minOrdiniSett` ordini/settimana di media.
+function calcolaAlertCanali(ordini, opts = {}) {
+  const giorni = opts.giorni || 7;
+  const settimaneBase = opts.settimaneBase || 4;
+  const soglia = opts.soglia ?? 0.5;            // calo minimo per alert (0.5 = -50%)
+  const minOrdiniSett = opts.minOrdiniSett ?? 1.5;
+  const now = Date.now();
+  const msGiorno = 86400000;
+  const inizioRecente = now - giorni * msGiorno;
+  const inizioBase = inizioRecente - settimaneBase * 7 * msGiorno;
+  const canali = {};
+  for (const o of ordini) {
+    if (o.cancelled_at) continue;
+    const t = new Date(o.created_at).getTime();
+    if (isNaN(t) || t < inizioBase) continue;
+    const ref = getOrderRefundInfo(o);
+    if (ref.isFullRefund) continue;
+    const mp = riconosciMarketplace(o);
+    const cur = getOrderCurrencyInfo(o);
+    const valore = Math.max(0, (cur.eurTotal || 0) - (ref.totalRefundedEur || 0));
+    const c = canali[mp.key] || (canali[mp.key] = { key: mp.key, nome: (mp.config && mp.config.nome) || mp.key, ordini_recenti: 0, fatturato_recente: 0, ordini_base: 0, fatturato_base: 0, ultimo_ordine: null });
+    if (t >= inizioRecente) { c.ordini_recenti++; c.fatturato_recente += valore; }
+    else { c.ordini_base++; c.fatturato_base += valore; }
+    if (!c.ultimo_ordine || t > new Date(c.ultimo_ordine).getTime()) c.ultimo_ordine = o.created_at;
+  }
+  const alerts = [];
+  const riepilogo = Object.values(canali).map(c => {
+    const mediaOrd = c.ordini_base / settimaneBase * (giorni / 7);
+    const mediaFat = c.fatturato_base / settimaneBase * (giorni / 7);
+    const giorniUltimo = c.ultimo_ordine ? Math.floor((now - new Date(c.ultimo_ordine).getTime()) / msGiorno) : null;
+    const variazione = mediaFat > 0 ? (c.fatturato_recente - mediaFat) / mediaFat : null;
+    const attivo = mediaOrd >= minOrdiniSett * (giorni / 7);
+    const r = { ...c, fatturato_recente: Math.round(c.fatturato_recente), fatturato_base: Math.round(c.fatturato_base), media_ordini: Math.round(mediaOrd * 10) / 10, media_fatturato: Math.round(mediaFat), variazione_pct: variazione === null ? null : Math.round(variazione * 100), giorni_da_ultimo_ordine: giorniUltimo, attivo, stato: 'ok' };
+    if (attivo && c.ordini_recenti === 0) {
+      r.stato = 'fermo';
+      alerts.push({ livello: 'critico', key: c.key, nome: c.nome, messaggio: `Nessun ordine da ${giorniUltimo ?? giorni} giorni (di solito ~${Math.round(mediaOrd)} ordini ogni ${giorni} giorni)` });
+    } else if (attivo && variazione !== null && variazione <= -soglia && c.ordini_recenti < mediaOrd) {
+      r.stato = 'in_calo';
+      alerts.push({ livello: 'attenzione', key: c.key, nome: c.nome, messaggio: `Vendite ${Math.round(variazione * 100)}% rispetto alla media: €${Math.round(c.fatturato_recente).toLocaleString('it-IT')} contro ~€${Math.round(mediaFat).toLocaleString('it-IT')} (${c.ordini_recenti} ordini contro ~${Math.round(mediaOrd)})` });
+    }
+    return r;
+  }).sort((a, b) => b.media_fatturato - a.media_fatturato);
+  alerts.sort((a, b) => (a.livello === 'critico' ? 0 : 1) - (b.livello === 'critico' ? 0 : 1));
+  return { generato_il: new Date().toISOString(), finestra_giorni: giorni, settimane_confronto: settimaneBase, soglia_calo_pct: Math.round(soglia * 100), alerts, canali: riepilogo };
+}
+
 async function processOrders(ordini) {
   const jdOrdersOriginalIds = new Set(ordini.filter(o => riconosciMarketplace(o).key === 'JAMMY_DUDE').map(o => o.id));
   const filtered = await applyJDFilter(ordini);
@@ -1287,6 +1335,19 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .summary-label { font-size: 0.68rem; color: var(--gray-700); text-transform: uppercase; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 8px; }
   .summary-value { font-family: var(--font-main); font-size: 1.2rem; font-weight: 700; color: var(--black); letter-spacing: 0.02em; text-transform: uppercase; }
   .summary-detail { margin-top: 6px; font-size: 0.82rem; color: var(--gray-700); }
+  .alerts-banner:empty { display: none; }
+  .alerts-banner { background: var(--white); border: 1px solid #ECE6DA; border-radius: var(--radius-lg); padding: 16px 20px; margin-bottom: 16px; }
+  .alerts-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+  .alerts-title { font-family: 'Bodoni Moda', Georgia, serif; font-size: 1.15rem; font-weight: 500; }
+  .alerts-refresh { background: transparent; border: 1px solid var(--gray-200); border-radius: 999px; padding: 5px 12px; font-family: var(--font-main); font-size: 0.7rem; cursor: pointer; color: var(--gray-700); }
+  .alert-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--gray-100); font-size: 0.85rem; line-height: 1.45; }
+  .alert-item:first-of-type { border-top: none; }
+  .alert-dot { flex: 0 0 8px; height: 8px; border-radius: 50%; margin-top: 6px; }
+  .alert-item.critico .alert-dot { background: var(--red); }
+  .alert-item.attenzione .alert-dot { background: var(--gold); }
+  .alert-item strong { font-weight: 600; }
+  .alerts-ok { font-size: 0.82rem; color: var(--green-dark); }
+  .alerts-meta { font-size: 0.7rem; color: var(--gray-500); margin-top: 6px; }
   /* ===== v5.13 restyle: tipografia sito (Bodoni Moda + Jost), oro come accento, mobile-first ===== */
   :root { --font-main: 'Jost', -apple-system, 'Segoe UI', Roboto, sans-serif; --font-display: 'Bodoni Moda', 'Didot', Georgia, serif; --gold: #B8935A; --gold-light: #F6EFE2; }
   body { font-weight: 400; letter-spacing: 0; }
@@ -1353,7 +1414,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.13</p>
+        <p>Business Intelligence Dashboard · v5.14</p>
       </div>
     </div>
     <div class="header-right">
@@ -1375,6 +1436,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     </div>
   </div>
   <div id="analytics-tab" class="tab-content active">
+    <div id="alerts-banner" class="alerts-banner"></div>
     <div class="section">
       <div class="section-header"><div><div class="section-title">Performance</div><div class="section-subtitle">Analisi vendite e marginalità in tempo reale</div></div></div>
       <div class="info-box">Fuso orario Europa/Roma reale. Costo merce letto da Shopify. Ordini senza "Cost per item" segnalati sotto.</div>
@@ -3027,6 +3089,22 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   setTimeout(() => { calcola(); confronta(); const todayBtn = document.querySelector('[data-analytics-periods] .period-btn[data-period="today"]'); setPeriod('today', todayBtn); }, 300);
 });
+
+// ===== v5.14 Alert canali lenti =====
+function escAlert(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function caricaAlertCanali(refresh) {
+  var box = document.getElementById('alerts-banner');
+  if (!box) return;
+  if (refresh) box.innerHTML = '<div class="alerts-meta">Aggiorno gli alert…</div>';
+  fetch('/api/alerts' + (refresh ? '?refresh=1' : '')).then(function (r) { return r.json(); }).then(function (d) {
+    if (!d || !d.success) { box.innerHTML = ''; return; }
+    var ora = new Date(d.generato_il).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    var head = '<div class="alerts-head"><div class="alerts-title">' + (d.alerts.length ? 'Canali da controllare' : 'Canali di vendita') + '</div><button class="alerts-refresh" onclick="caricaAlertCanali(true)">Aggiorna</button></div>';
+    var body = d.alerts.length ? d.alerts.map(function (a) { return '<div class="alert-item ' + escAlert(a.livello) + '"><span class="alert-dot"></span><div><strong>' + escAlert(a.nome) + '</strong> · ' + escAlert(a.messaggio) + '</div></div>'; }).join('') : '<div class="alerts-ok">Tutti i canali attivi sono nella norma negli ultimi ' + d.finestra_giorni + ' giorni.</div>';
+    box.innerHTML = head + body + '<div class="alerts-meta">Ultimi ' + d.finestra_giorni + ' giorni contro la media delle ' + d.settimane_confronto + ' settimane precedenti · aggiornato ' + ora + '</div>';
+  }).catch(function () { box.innerHTML = ''; });
+}
+setTimeout(function () { caricaAlertCanali(false); }, 400);
 </script>
 </body>
 </html>`;
@@ -3180,7 +3258,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.13', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.14', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -3639,6 +3717,27 @@ export default async function handler(req, res) {
     // ============ FORECAST INCASSI ============
     // Calcola pagamenti previsti per il mese corrente + mese prossimo (default)
     // Cache KV 24h come /api/inventory-discovery. ?refresh=1 per forzare ricalcolo
+    if (req.method === 'GET' && path === '/api/alerts') {
+      try {
+        const refresh = query.get('refresh') === '1';
+        const giorni = Math.min(30, Math.max(3, parseInt(query.get('giorni')) || 7));
+        const soglia = Math.min(0.9, Math.max(0.1, (parseFloat(query.get('soglia')) || 50) / 100));
+        const cacheKey = `alerts_cache_${giorni}_${Math.round(soglia * 100)}`;
+        if (!refresh && KV_ENABLED) {
+          try { const c = await kvGet(cacheKey); if (c) return res.json({ success: true, cached: true, ...JSON.parse(c) }); } catch (e) {}
+        }
+        const oggi = getRomeDateString();
+        const da = getRomeDateString(new Date(Date.now() - (giorni + 28 + 1) * 86400000));
+        let ordini = await getShopifyOrders('custom', da, oggi);
+        ordini = await processOrders(ordini);
+        const risultato = calcolaAlertCanali(ordini, { giorni, soglia });
+        if (KV_ENABLED) { try { await kvSetEx(cacheKey, 3 * 3600, JSON.stringify(risultato)); } catch (e) {} }
+        return res.json({ success: true, cached: false, ...risultato });
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    }
+
     if (req.method === 'GET' && path === '/api/forecast') {
       try {
         const forceRefresh = query.get('refresh') === '1';
