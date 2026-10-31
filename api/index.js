@@ -1713,6 +1713,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .oggi-val { font-size: 1.55rem; font-weight: 500; margin-top: 4px; white-space: nowrap; }
   .oggi-sub { font-size: 0.72rem; color: var(--gray-500); margin-top: 2px; }
   .oggi-ieri { font-size: 0.76rem; color: var(--gray-700); margin-top: 10px; }
+  .mese-strip { border: 1px solid #ECE6DA; border-radius: 12px; padding: 6px 12px; margin: 4px 0 10px; }
+  .mese-row { display: grid; grid-template-columns: minmax(0, 1fr) 78px 82px 48px; gap: 8px; align-items: center; padding: 5px 0; font-size: 0.78rem; border-top: 1px solid var(--gray-100); }
+  .mese-row:first-child, .mese-row.mese-head + .mese-row { border-top: none; }
+  .mese-head { font-size: 0.6rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.06em; padding-bottom: 0; }
+  .mese-nome { color: var(--gray-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: capitalize; }
+  .mese-num { font-weight: 500; white-space: nowrap; text-align: right; } .mese-head span { text-align: right; } .mese-num.pos { color: var(--green-dark); } .mese-num small { font-size: 0.62rem; color: var(--gray-500); font-weight: 400; display: block; line-height: 1; } .mese-row .ch-pill { font-size: 0.66rem; padding: 2px 7px; }
   /* ===== v5.13 restyle: tipografia sito (Bodoni Moda + Jost), oro come accento, mobile-first ===== */
   :root { --font-main: 'Jost', -apple-system, 'Segoe UI', Roboto, sans-serif; --font-display: 'Bodoni Moda', 'Didot', Georgia, serif; --gold: #B8935A; --gold-light: #F6EFE2; }
   body { font-weight: 400; letter-spacing: 0; }
@@ -1738,6 +1744,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     .header-info h1 { font-size: 0.85rem; margin-bottom: 0; white-space: nowrap; }
     .header-info { min-width: 0; }
     .header-info p { display: none; }
+    .header-info h1 { overflow: hidden; text-overflow: ellipsis; }
     .header-right { gap: 6px; flex-wrap: nowrap; }
     .status-pill { padding: 5px 10px; font-size: 0.64rem; }
     #logoutBtn { margin-left: 0 !important; padding: 6px 10px !important; font-size: 0.64rem !important; }
@@ -1782,7 +1789,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p>Business Intelligence Dashboard · v5.22</p>
+        <p>Business Intelligence Dashboard · v5.23</p>
       </div>
     </div>
     <div class="header-right">
@@ -3553,9 +3560,33 @@ function caricaOggiBox() {
     var mp = d.margine_percentuale || 0;
     var ieri = (y && y.success) ? '<div class="oggi-ieri">Ieri: ' + eur0(y.lordo_iva_inclusa) + ' incassati · margine ' + eur0(y.margine_netto) + ' (' + (y.margine_percentuale || 0).toFixed(1) + '%) · ' + (y.ordini_totali || 0) + ' ordini</div>' : '';
     box.innerHTML = '<div class="alerts-head"><div class="alerts-title">Oggi</div><button class="alerts-refresh" onclick="caricaOggiBox()">Aggiorna</button></div>'
+      + '<div id="mese-strip" class="mese-strip"><span class="ch-lab">Calcolo il mese…</span></div>'
       + '<div class="oggi-grid"><div class="oggi-kpi dark"><div class="ch-lab">Incassato</div><div class="oggi-val">' + eur0(d.lordo_iva_inclusa) + '</div><div class="oggi-sub">' + (d.ordini_totali || 0) + ' ordini · IVA inclusa</div></div>'
       + '<div class="oggi-kpi ' + (d.margine_netto < 0 ? 'neg' : 'pos') + '"><div class="ch-lab">Margine netto</div><div class="oggi-val">' + eur0(d.margine_netto) + '</div><div class="oggi-sub">' + mp.toFixed(1) + '% sul lordo</div></div></div>' + ieri;
+    caricaMeseStrip();
   }).catch(function () { box.innerHTML = ''; });
+}
+function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function caricaMeseStrip() {
+  var el = document.getElementById('mese-strip'); if (!el) return;
+  var oggi = new Date(), g = oggi.getDate();
+  var inizio = new Date(oggi.getFullYear(), oggi.getMonth(), 1);
+  var inizioPrec = new Date(oggi.getFullYear(), oggi.getMonth() - 1, 1);
+  var ultimoPrec = new Date(oggi.getFullYear(), oggi.getMonth(), 0).getDate();
+  var finePrec = new Date(oggi.getFullYear(), oggi.getMonth() - 1, Math.min(g, ultimoPrec));
+  var mesi = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
+  function get(da, a) { return fetch('/api/analytics?from=' + ymd(da) + '&to=' + ymd(a)).then(function (r) { return r.json(); }); }
+  Promise.all([get(inizio, oggi), get(inizioPrec, finePrec)]).then(function (r) {
+    var c = r[0], p = r[1];
+    if (!c || !c.success) { el.innerHTML = ''; return; }
+    function riga(nome, x, conf) {
+      var v = (conf && conf.success && conf.lordo_iva_inclusa > 0) ? Math.round((x.lordo_iva_inclusa - conf.lordo_iva_inclusa) / conf.lordo_iva_inclusa * 100) : null;
+      return '<div class="mese-row"><span class="mese-nome">' + nome + '</span><span class="mese-num">' + eur0(x.lordo_iva_inclusa) + '</span><span class="mese-num pos">' + eur0(x.margine_netto) + ' <small>' + (x.margine_percentuale || 0).toFixed(1) + '%</small></span>' + (conf ? pillVar(v) : '<span></span>') + '</div>';
+    }
+    el.innerHTML = '<div class="mese-row mese-head"><span></span><span>Incassato</span><span>Margine</span><span></span></div>'
+      + riga(mesi[oggi.getMonth()] + ' 1–' + g, c, p)
+      + ((p && p.success) ? riga(mesi[inizioPrec.getMonth()] + ' 1–' + finePrec.getDate(), p, null) : '');
+  }).catch(function () { el.innerHTML = ''; });
 }
 setTimeout(caricaOggiBox, 200);
 </script>
@@ -3814,7 +3845,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.22', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.23', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
