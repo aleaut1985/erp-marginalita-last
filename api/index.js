@@ -1,4 +1,4 @@
-// ERP Marginalità v5.16 - Pannello canali (Miinto, TLuxy fonti, Winkelstraat, Bradery private sale) · v5.15.1: Dashboard senza cache browser · v5.15: Controllo margini DUOMO nell'ERP · v5.14: Alert canali lenti (banner + /api/alerts) · v5.13: Restyle grafico mobile-first (Bodoni Moda + Jost) · v5.12: Nuova commissione Miinto 21,5% dal 01/11/2026 + The Bradery anticipo 90/10 (regole con data di validità)
+// ERP Marginalità v5.17 - Miinto anche giorno su giorno · v5.16: Pannello canali (Miinto, TLuxy fonti, Winkelstraat, Bradery private sale) · v5.15.1: Dashboard senza cache browser · v5.15: Controllo margini DUOMO nell'ERP · v5.14: Alert canali lenti (banner + /api/alerts) · v5.13: Restyle grafico mobile-first (Bodoni Moda + Jost) · v5.12: Nuova commissione Miinto 21,5% dal 01/11/2026 + The Bradery anticipo 90/10 (regole con data di validità)
 
 import * as crypto from 'node:crypto';
 
@@ -841,7 +841,13 @@ function calcolaPannelloCanali(ordini) {
   const mi = settimana('MIINTO');
   const miStato = mi.precedente.ordini >= 3 && mi.corrente.ordini === 0 ? 'critico' : (mi.variazione_pct !== null && mi.variazione_pct <= -40 && mi.precedente.ordini >= 3 ? 'attenzione' : 'ok');
   if (miStato !== 'ok') alerts.push({ livello: miStato, nome: 'Miinto', messaggio: `ultimi 7 giorni €${mi.corrente.fatturato} (${mi.corrente.ordini} ordini) contro €${mi.precedente.fatturato} (${mi.precedente.ordini}) della settimana prima` });
-  sezioni.push({ key: 'MIINTO', nome: 'Miinto', confronto: 'Ultimi 7 giorni vs 7 precedenti', stato: miStato, ...mi });
+  const giorno = (key) => {
+    const rr = righe.filter(r => r.key === key);
+    const oggi = somma(rr.filter(r => r.t >= inizioOggi)), ieriStessaOra = somma(rr.filter(r => r.t >= inizioOggi - D && r.t < now - D));
+    const ieri = somma(rr.filter(r => r.t >= inizioOggi - D && r.t < inizioOggi)), altroIeri = somma(rr.filter(r => r.t >= inizioOggi - 2 * D && r.t < inizioOggi - D));
+    return { oggi, ieri_stessa_ora: ieriStessaOra, variazione_oggi_pct: varPct(oggi.fatturato, ieriStessaOra.fatturato), ieri, altro_ieri: altroIeri, variazione_ieri_pct: varPct(ieri.fatturato, altroIeri.fatturato) };
+  };
+  sezioni.push({ key: 'MIINTO', nome: 'Miinto', confronto: 'Giorno su giorno e settimana su settimana', stato: miStato, ...mi, giorno: giorno('MIINTO') });
 
   // 2) TLuxy diretto — giorno su giorno + fonti
   const sito = righe.filter(r => r.key === 'TLUXY_SITE');
@@ -1608,7 +1614,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>ERP Marginalità</h1>
-        <p>Business Intelligence Dashboard · v5.16</p>
+        <p>Business Intelligence Dashboard · v5.17</p>
       </div>
     </div>
     <div class="header-right">
@@ -3310,6 +3316,10 @@ function caricaAlertCanali(refresh) {
           var maxF = Math.max.apply(null, s.fonti_7gg.map(function (f) { return f.fatturato; })) || 1;
           html += '<div class="ch-lab" style="margin-top:10px">Da dove arrivano gli ordini (7 giorni)</div>' + s.fonti_7gg.map(function (f) { return '<div class="src-row"><span class="src-name">' + escAlert(f.fonte) + '</span><span class="src-bar"><i style="width:' + Math.max(4, Math.round(f.fatturato / maxF * 100)) + '%"></i></span><span class="src-num">' + f.ordini + ' · ' + eur0(f.fatturato) + '</span></div>'; }).join('');
         }
+      } else if (s.key === 'MIINTO' && s.giorno) {
+        html += rigaConfronto('Oggi finora', s.giorno.oggi, 'Ieri stessa ora', s.giorno.ieri_stessa_ora, s.giorno.variazione_oggi_pct);
+        html += rigaConfronto('Ieri', s.giorno.ieri, 'L’altro ieri', s.giorno.altro_ieri, s.giorno.variazione_ieri_pct);
+        html += rigaConfronto('Ultimi 7 giorni', s.corrente, '7 precedenti', s.precedente, s.variazione_pct);
       } else if (s.key === 'THE_BRADERY') {
         if (s.in_corso && s.confronto_in_corso) html += rigaConfronto('Vendita in corso (' + s.confronto_in_corso.giorni + ' gg)', s.confronto_in_corso.corrente, 'Precedente, stessi giorni', s.confronto_in_corso.precedente_stessi_giorni, s.confronto_in_corso.variazione_pct);
         else if (s.ultima_vendita) html += '<div class="ch-note">Nessuna private sale in corso. Ultima: ' + dataBreve(s.ultima_vendita.dal) + '–' + dataBreve(s.ultima_vendita.al) + ' · ' + eur0(s.ultima_vendita.fatturato) + ' (' + s.ultima_vendita.ordini + ' ordini)' + (s.vendita_precedente ? '<br>Precedente: ' + dataBreve(s.vendita_precedente.dal) + '–' + dataBreve(s.vendita_precedente.al) + ' · ' + eur0(s.vendita_precedente.fatturato) + ' (' + s.vendita_precedente.ordini + ' ordini)' : '') + '</div>';
@@ -3519,7 +3529,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.16', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'T. Luxy ERP — Marginalità v5.17', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -4018,7 +4028,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && path === '/api/alerts') {
       try {
         const refresh = query.get('refresh') === '1';
-        const cacheKey = 'pannello_canali_v516';
+        const cacheKey = 'pannello_canali_v517';
         if (!refresh && KV_ENABLED) {
           try { const c = await kvGet(cacheKey); if (c) { const obj = JSON.parse(c); if (Date.now() - new Date(obj.generato_il).getTime() < 15 * 60000) return res.json({ success: true, cached: true, ...obj }); } } catch (e) {}
         }
