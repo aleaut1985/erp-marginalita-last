@@ -15,12 +15,16 @@ const AUTH_SECRET = process.env.AUTH_SECRET || (RESEND_API_KEY + '_tluxy_erp_sec
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'https://erp-marginalita-last.vercel.app';
 const AUTH_COOKIE_NAME = 'tluxy_erp_session';
 // v5.21: accesso con passkey (Face ID / Touch ID). Attivo se PASSKEY_AUTH=1; PASSKEY_SETUP_CODE serve per registrare un dispositivo senza essere già dentro.
-const PASSKEY_AUTH = process.env.PASSKEY_AUTH === '1';
+// v5.22: accesso con utente e password (ERP_USER + ERP_PASS_HASH = 'salt:scrypt'); ha priorità sulla passkey.
+const ERP_USER = (process.env.ERP_USER || '').trim().toLowerCase();
+const ERP_PASS_HASH = (process.env.ERP_PASS_HASH || '').trim();
+const PASSWORD_AUTH = !!(ERP_USER && ERP_PASS_HASH.includes(':'));
+const PASSKEY_AUTH = !PASSWORD_AUTH && process.env.PASSKEY_AUTH === '1';
 const PASSKEY_SETUP_CODE = (process.env.PASSKEY_SETUP_CODE || '').trim();
-const AUTH_SESSION_DAYS = PASSKEY_AUTH ? 30 : 7;
+const AUTH_SESSION_DAYS = (PASSKEY_AUTH || PASSWORD_AUTH) ? 30 : 7;
 const MAGIC_LINK_MINUTES = 15;
 const MAGIC_LINK_RATE_LIMIT = 3; // max 3 magic link/ora per email
-const AUTH_ENABLED = PASSKEY_AUTH || !!(RESEND_API_KEY && ALLOWED_EMAILS.length > 0);
+const AUTH_ENABLED = PASSWORD_AUTH || PASSKEY_AUTH || !!(RESEND_API_KEY && ALLOWED_EMAILS.length > 0);
 
 function hmacSign(payload) {
   return crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('hex');
@@ -115,6 +119,47 @@ async function sendMagicLinkEmail(email, magicLink) {
   return await res.json();
 }
 
+
+// ============ LOGIN UTENTE + PASSWORD (v5.22) ============
+const tentativiLogin = new Map(); // per istanza: ip -> { n, t }
+function passwordOk(user, pass) {
+  try {
+    const u1 = Buffer.from(String(user || '').trim().toLowerCase()), u2 = Buffer.from(ERP_USER);
+    const userOk = u1.length === u2.length && crypto.timingSafeEqual(u1, u2);
+    const [salt, hash] = ERP_PASS_HASH.split(':');
+    const calc = crypto.scryptSync(String(pass || ''), Buffer.from(salt, 'hex'), 64, { N: 16384, r: 8, p: 1 });
+    const passOk = crypto.timingSafeEqual(calc, Buffer.from(hash, 'hex'));
+    return userOk && passOk;
+  } catch (e) { return false; }
+}
+function passwordLoginPage(errore) {
+  return `<!DOCTYPE html>
+<html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>TLuxy Business Manager</title>
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-title" content="TLuxy Business Manager"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black"><meta name="theme-color" content="#111111">
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,500&family=Jost:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Jost', -apple-system, sans-serif; background: #111; color: #fff; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .wrap { width: 100%; max-width: 360px; text-align: center; }
+  .logo { font-family: 'Bodoni Moda', Georgia, serif; font-size: 4.2rem; line-height: 1; }
+  .sub { letter-spacing: 0.35em; font-size: 0.8rem; opacity: .8; margin: 10px 0 6px; padding-left: .35em; }
+  .app { font-size: 0.8rem; opacity: .55; margin-bottom: 40px; }
+  input { width: 100%; padding: 15px 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,.3); background: transparent; color: #fff; font-family: inherit; font-size: 1rem; margin-bottom: 12px; }
+  input::placeholder { color: rgba(255,255,255,.45); }
+  button { width: 100%; padding: 16px; border-radius: 14px; border: none; background: #fff; color: #111; font-family: inherit; font-size: 1rem; font-weight: 500; cursor: pointer; margin-top: 4px; }
+  .err { margin-top: 16px; font-size: .85rem; color: #ff8a8a; }
+</style></head><body><div class="wrap">
+  <div class="logo">T.</div><div class="sub">LUXY</div><div class="app">Business Manager</div>
+  <form method="POST" action="/login">
+    <input name="user" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" placeholder="Utente" required>
+    <input name="password" type="password" autocomplete="current-password" placeholder="Password" required>
+    <button type="submit">Entra</button>
+  </form>
+  ${errore ? '<div class="err">' + errore + '</div>' : ''}
+</div></body></html>`;
+}
 
 // ============ PASSKEY (FACE ID) — v5.21 ============
 function rpFromReq(req) {
@@ -1737,7 +1782,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p>Business Intelligence Dashboard · v5.21.4</p>
+        <p>Business Intelligence Dashboard · v5.22</p>
       </div>
     </div>
     <div class="header-right">
@@ -3539,6 +3584,31 @@ export default async function handler(req, res) {
   }
 
   try {
+    // ============ LOGIN UTENTE + PASSWORD (v5.22) ============
+    if (PASSWORD_AUTH && path === '/login') {
+      res.setHeader('Cache-Control', 'no-store');
+      if (req.method === 'GET') { res.setHeader('Content-Type', 'text/html'); return res.status(200).send(passwordLoginPage(query.get('expired') === '1' ? null : null)); }
+      if (req.method === 'POST') {
+        const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'x';
+        const t = tentativiLogin.get(ip) || { n: 0, t: Date.now() };
+        if (Date.now() - t.t > 15 * 60000) { t.n = 0; t.t = Date.now(); }
+        let user = '', pass = '';
+        if (req.body && typeof req.body === 'object') { user = req.body.user; pass = req.body.password; }
+        else {
+          let raw = ''; await new Promise((resolve, reject) => { req.on('data', c => raw += c); req.on('end', resolve); req.on('error', reject); });
+          const f = new URLSearchParams(raw); user = f.get('user'); pass = f.get('password');
+        }
+        res.setHeader('Content-Type', 'text/html');
+        if (t.n >= 8) return res.status(429).send(passwordLoginPage('Troppi tentativi, riprova tra 15 minuti'));
+        await new Promise(r => setTimeout(r, 300));
+        if (!passwordOk(user, pass)) { t.n++; tentativiLogin.set(ip, t); return res.status(401).send(passwordLoginPage('Utente o password non corretti')); }
+        tentativiLogin.delete(ip);
+        setAuthCookie(res, 'utente:' + ERP_USER);
+        res.writeHead(303, { Location: '/' });
+        return res.end();
+      }
+    }
+
     // ============ PASSKEY ENDPOINTS (v5.21) ============
     if (PASSKEY_AUTH && req.method === 'GET' && path === '/login') {
       res.setHeader('Content-Type', 'text/html');
@@ -3744,7 +3814,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.21.4', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.22', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
