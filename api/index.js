@@ -1630,6 +1630,61 @@ function calcolaMarkFoyOrdine(ordine, variantCosts = {}, duoUserCosts = {}) {
   return { incasso, costo, margine: incasso - costo, mancanti, fonti, righe };
 }
 
+
+// ============ v5.30 NOTIFICA ORDINI DUOMO (webhook Shopify orders/create) ============
+const NTFY_TOPIC = process.env.NTFY_TOPIC || '';
+const DUO_NOTIFY_EMAIL = process.env.DUO_NOTIFY_EMAIL || '';
+const ERP_PUBLIC_URL = process.env.ERP_PUBLIC_URL || 'https://erp-marginalita-last.vercel.app';
+const WEBHOOK_PATH = '/api/webhooks/orders-create';
+const notificatiDuo = new Set();
+async function margineOrdineSingolo(ordineRaw) {
+  const [ordine] = await processOrders([ordineRaw]);
+  const vids = [], pids = [];
+  (ordine.line_items || []).forEach(li => { if (li.variant_id) vids.push(li.variant_id); if (li.product_id) pids.push(li.product_id); });
+  const variantCosts = (await fetchVariantCosts(vids, pids)).costs;
+  const duoUserCosts = {};
+  if (KV_ENABLED) { try { const dv = (ordine.line_items || []).filter(li => li.variant_id && isDuoSku(li.sku)).map(li => li.variant_id); if (dv.length) { const r = await kvMGet(dv.map(v => 'duo_user_cost_' + v)); dv.forEach(v => { const x = parseFloat(r['duo_user_cost_' + v]); if (!isNaN(x)) duoUserCosts[v] = x; }); } } catch (e) {} }
+  await caricaPrezziMarkFoy([ordine]);
+  const mp = riconosciMarketplace(ordine);
+  if (mp.key === 'MARK_FOYS') { const m = calcolaMarkFoyOrdine(ordine, variantCosts, duoUserCosts); return { mp: mp.config.nome, incasso: m.incasso, margine: m.margine, pct: m.incasso > 0 ? m.margine / m.incasso * 100 : 0, mancanti: m.mancanti.length }; }
+  const { costo, errori } = calcolaCostoOrdine(ordine, variantCosts, duoUserCosts);
+  const cur = getOrderCurrencyInfo(ordine);
+  const lordo = cur.eurTotal;
+  const sped = (ordine.shipping_lines || []).reduce((s2, l) => s2 + toEurAmount(l.price_set, l.price, cur.originalCurrency), 0);
+  const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
+  const ivaPerc = mp.key === 'POIZON' ? 22 : getIvaPerPaese(country);
+  const tax = toEurAmount(ordine.total_tax_set, ordine.total_tax, cur.originalCurrency);
+  const iva = tax > 0 ? tax : (lordo - lordo / (1 + ivaPerc / 100));
+  const ris = calcolaMarginalita(lordo, iva, costo, sped, mp.config, mp.key);
+  return { mp: mp.config.nome, incasso: lordo, margine: ris.margine_netto, pct: lordo > 0 ? ris.margine_netto / lordo * 100 : 0, mancanti: errori.length };
+}
+async function inviaNotificaDuo(ordine, m) {
+  const eur = n => '€' + Math.round(n || 0).toLocaleString('it-IT');
+  const righeDuo = (ordine.line_items || []).filter(li => isDuoSku(li.sku));
+  const titolo = 'DUOMO ' + (ordine.name || ('#' + ordine.order_number)) + ' · margine ' + eur(m.margine) + ' (' + m.pct.toFixed(1).replace('.', ',') + '%)' + (m.mancanti ? ' · costo mancante' : '');
+  const testo = m.mp + ' · incasso ' + eur(m.incasso) + '\n' + righeDuo.map(li => '• ' + li.title + (li.variant_title ? ' – ' + li.variant_title : '') + ' ×' + li.quantity).join('\n');
+  const esiti = [];
+  if (NTFY_TOPIC) {
+    try { const r = await fetch('https://ntfy.sh/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: NTFY_TOPIC, title: titolo, message: testo, tags: ['shopping_bags'], priority: 4, click: ERP_PUBLIC_URL }) }); esiti.push('ntfy ' + r.status); } catch (e) { esiti.push('ntfy errore ' + e.message); }
+  }
+  if (RESEND_API_KEY && DUO_NOTIFY_EMAIL) {
+    try { const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { 'Authorization': 'Bearer ' + RESEND_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: MAIL_FROM, to: [DUO_NOTIFY_EMAIL], subject: titolo, text: testo + '\n\n' + ERP_PUBLIC_URL }) }); esiti.push('email ' + r.status); } catch (e) { esiti.push('email errore ' + e.message); }
+  }
+  console.log('[duo-notifica]', titolo, esiti.join(', '));
+  return { titolo, esiti };
+}
+async function assicuraWebhookOrdini() {
+  const token = await getShopifyAccessToken();
+  const address = ERP_PUBLIC_URL + WEBHOOK_PATH;
+  const r = await fetch(`https://${SHOPIFY_STORE}/admin/api/2024-01/webhooks.json?topic=orders/create`, { headers: { 'X-Shopify-Access-Token': token } });
+  const j = await r.json();
+  const esistente = (j.webhooks || []).find(w => w.address === address);
+  if (esistente) return { gia_presente: true, id: esistente.id };
+  const c = await fetch(`https://${SHOPIFY_STORE}/admin/api/2024-01/webhooks.json`, { method: 'POST', headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' }, body: JSON.stringify({ webhook: { topic: 'orders/create', address, format: 'json' } }) });
+  const cj = await c.json();
+  return { creato: c.ok, status: c.status, risposta: cj };
+}
+
 // ============ ICONE APP (v5.19) ============
 const ICON_PNG = {
   '180': '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',
@@ -1984,7 +2039,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.29</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.30</p>
       </div>
     </div>
     <div class="header-right">
@@ -3834,6 +3889,7 @@ function caricaMeseStrip() {
   }).catch(function () { el.innerHTML = nonDisp; });
 }
 setTimeout(caricaOggiBox, 200);
+setTimeout(function () { fetch('/api/setup-webhooks').catch(function () {}); }, 4000);
 </script>
 </body>
 </html>`;
@@ -3860,6 +3916,25 @@ export default async function handler(req, res) {
   }
 
   try {
+    // ============ WEBHOOK SHOPIFY (pubblico, verificato con HMAC) ============
+    if (req.method === 'POST' && path === WEBHOOK_PATH) {
+      let raw = ''; await new Promise((resolve, reject) => { req.on('data', c => raw += c); req.on('end', resolve); req.on('error', reject); });
+      const hmac = req.headers['x-shopify-hmac-sha256'] || '';
+      const atteso = crypto.createHmac('sha256', SHOPIFY_CLIENT_SECRET).update(raw, 'utf8').digest('base64');
+      const ok = hmac && atteso.length === String(hmac).length && crypto.timingSafeEqual(Buffer.from(atteso), Buffer.from(String(hmac)));
+      if (!ok) { console.log('[webhook] HMAC non valido'); return res.status(401).json({ ok: false }); }
+      try {
+        const ordine = JSON.parse(raw);
+        const haDuo = (ordine.line_items || []).some(li => isDuoSku(li.sku));
+        if (haDuo && !notificatiDuo.has(ordine.id)) {
+          notificatiDuo.add(ordine.id);
+          const m = await margineOrdineSingolo(ordine);
+          await inviaNotificaDuo(ordine, m);
+        }
+      } catch (e) { console.log('[webhook] errore', e.message); }
+      return res.status(200).json({ ok: true });
+    }
+
     // ============ LOGIN UTENTE + PASSWORD (v5.22) ============
     if (PASSWORD_AUTH && path === '/login') {
       res.setHeader('Cache-Control', 'no-store');
@@ -4090,7 +4165,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.29', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.30', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -4315,6 +4390,22 @@ export default async function handler(req, res) {
           ultima_sincronizzazione: new Date().toISOString()
         });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
+    }
+
+    if (req.method === 'GET' && path === '/api/setup-webhooks') {
+      try { return res.json({ success: true, ntfy: !!NTFY_TOPIC, email: !!(RESEND_API_KEY && DUO_NOTIFY_EMAIL), webhook: await assicuraWebhookOrdini() }); }
+      catch (e) { return res.status(500).json({ success: false, error: e.message }); }
+    }
+    if (req.method === 'GET' && path === '/api/test-notifica-duo') {
+      try {
+        const token = await getShopifyAccessToken();
+        const r = await fetch(`https://${SHOPIFY_STORE}/admin/api/2024-01/orders.json?status=any&limit=100&order=created_at+desc`, { headers: { 'X-Shopify-Access-Token': token } });
+        const j = await r.json();
+        const o = (j.orders || []).find(x => (x.line_items || []).some(li => isDuoSku(li.sku)));
+        if (!o) return res.json({ success: false, error: 'Nessun ordine DUOMO negli ultimi 100' });
+        const m = await margineOrdineSingolo(o);
+        return res.json({ success: true, prova: true, ...(await inviaNotificaDuo(o, m)) });
+      } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
     }
 
     if (req.method === 'GET' && path === '/api/bestsellers') {
