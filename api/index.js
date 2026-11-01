@@ -1107,6 +1107,27 @@ async function processOrders(ordini) {
 // Strategia: per ogni product_id unico, 1 chiamata a /products/{id}.json che ritorna
 // tutte le varianti del prodotto con i loro inventory_item_id. Poi batch /inventory_items.json
 // Aggiunge logging dettagliato delle chiamate fallite.
+// v5.27: costi e immagini via GraphQL (100 varianti per chiamata) — molto più veloce del REST prodotto-per-prodotto
+const MEM_VARIANT_IMG = new Map();
+async function infoVariantiGraphQL(variantIds) {
+  const out = {};
+  const ids = [...new Set(variantIds.filter(Boolean).map(String))];
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    try {
+      const d = await shopifyGraphQL('query($ids:[ID!]!){ nodes(ids:$ids){ ... on ProductVariant { id inventoryItem { unitCost { amount } } image { url } product { featuredImage { url } } } } }', { ids: chunk.map(v => 'gid://shopify/ProductVariant/' + v) });
+      (d.nodes || []).forEach(n => {
+        if (!n || !n.id) return;
+        const vid = n.id.split('/').pop();
+        const c = n.inventoryItem && n.inventoryItem.unitCost ? parseFloat(n.inventoryItem.unitCost.amount) : null;
+        const img = (n.image && n.image.url) || (n.product && n.product.featuredImage && n.product.featuredImage.url) || null;
+        out[vid] = { costo: (c !== null && !isNaN(c)) ? c : null, immagine: img };
+        if (img) MEM_VARIANT_IMG.set(vid, img);
+      });
+    } catch (e) { console.log('[gql costi] errore', e.message); }
+  }
+  return out;
+}
 const MEM_VARIANT_COST = new Map(); // cache in memoria (istanza calda) — utile se il KV non risponde
 async function fetchVariantCosts(variantIds, orderProductIds = []) {
   const stats = { products_tentati: 0, products_ok: 0, products_falliti: [], variants_mappati: 0, inventory_tentati: 0, inventory_ok: 0, inventory_falliti: [], kv_hit: 0, kv_miss: 0, kv_new_saved: 0 };
@@ -1138,6 +1159,19 @@ async function fetchVariantCosts(variantIds, orderProductIds = []) {
   // Se tutti i variant sono in cache, skip le chiamate Shopify
   if (variantsToFetch.length === 0) {
     return { costs: costsFromKV, stats };
+  }
+  // v5.27: prima GraphQL (veloce); il REST resta solo per le varianti non trovate
+  {
+    const gq = await infoVariantiGraphQL(variantsToFetch);
+    const nuovi = {};
+    Object.entries(gq).forEach(([vid, info]) => { if (info.costo !== null) { costsFromKV[vid] = info.costo; MEM_VARIANT_COST.set(vid, info.costo); nuovi['variant_cost_' + vid] = String(info.costo); } });
+    if (KV_ENABLED && Object.keys(nuovi).length) { try { await kvMSet(nuovi); } catch (e) {} }
+    const ancora = variantsToFetch.filter(v => !(v in costsFromKV));
+    if (ancora.length === 0) {
+      uniqueVariantIds.forEach(v => { if (!(v in costsFromKV)) costsFromKV[v] = null; });
+      return { costs: costsFromKV, stats };
+    }
+    variantsToFetch.length = 0; ancora.forEach(v => variantsToFetch.push(v));
   }
   
   const token = await getShopifyAccessToken();
@@ -1462,6 +1496,56 @@ function calcolaBestSellers(ordini, top = 20, variantCosts = {}) {
   return Object.values(prodotti).sort((a, b) => b.fatturato_lordo - a.fatturato_lordo).slice(0, top);
 }
 
+// v5.27: Best seller per modello (colori raggruppati), per brand e per canale
+function calcolaBestSellersModelli(ordini, variantCosts = {}) {
+  const modelli = {}, brand = {}, canaliTot = {};
+  let tot = { pezzi: 0, fatturato: 0, netto: 0, ncc: 0, costo: 0, ordini: 0, senza_costo: 0 };
+  ordini.forEach(ordine => {
+    if (ordine.cancelled_at) return;
+    tot.ordini++;
+    const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
+    const ivaPerc = getIvaPerPaese(country);
+    const ordCurrency = ordine.currency || SHOP_CURRENCY;
+    const mp = riconosciMarketplace(ordine);
+    const chKey = mp.key, chNome = (mp.config && mp.config.nome) || mp.key;
+    (ordine.line_items || []).forEach(item => {
+      const q = parseInt(item.quantity) || 0; if (!q) return;
+      const lordo = toEurAmount(item.price_set, item.price, ordCurrency) * q;
+      const netto = lordo / (1 + ivaPerc / 100);
+      const cu = item.variant_id && variantCosts[item.variant_id] != null ? variantCosts[item.variant_id] : null;
+      const costo = cu !== null ? cu * q : 0;
+      const ncc = cu !== null ? netto : 0;
+      const vend = (item.vendor || '').trim() || 'Altro';
+      const vendKey = vend.toUpperCase();
+      const titolo = (item.title || '').trim();
+      const key = vendKey + '|' + titolo.toUpperCase().replace(/\s+/g, ' ');
+      if (!modelli[key]) modelli[key] = { titolo, brand: vend, pezzi: 0, fatturato: 0, netto: 0, costo: 0, senza_costo: 0, ncc: 0, varianti: {}, canali: {}, variant_id: item.variant_id, immagine: null };
+      const m = modelli[key];
+      m.pezzi += q; m.fatturato += lordo; m.netto += netto; m.ncc += ncc; m.costo += costo; if (cu === null) m.senza_costo += q;
+      const vt = item.variant_title || '—'; m.varianti[vt] = (m.varianti[vt] || 0) + q;
+      if (!m.canali[chKey]) m.canali[chKey] = { nome: chNome, pezzi: 0, fatturato: 0 };
+      m.canali[chKey].pezzi += q; m.canali[chKey].fatturato += lordo;
+      if (!brand[vendKey]) brand[vendKey] = { brand: vend, pezzi: 0, fatturato: 0, netto: 0, ncc: 0, costo: 0, sito: 0 };
+      const b = brand[vendKey]; b.pezzi += q; b.fatturato += lordo; b.netto += netto; b.ncc += ncc; b.costo += costo; if (chKey === 'TLUXY_SITE') b.sito += lordo;
+      if (!canaliTot[chKey]) canaliTot[chKey] = { key: chKey, nome: chNome, pezzi: 0, fatturato: 0 };
+      canaliTot[chKey].pezzi += q; canaliTot[chKey].fatturato += lordo;
+      tot.pezzi += q; tot.fatturato += lordo; tot.netto += netto; tot.ncc += ncc; tot.costo += costo; if (cu === null) tot.senza_costo += q;
+    });
+  });
+  const r0 = n => Math.round(n);
+  const marg = x => x.ncc > 0 ? Math.round((x.ncc - x.costo) / x.ncc * 1000) / 10 : 0;
+  const lista = Object.values(modelli).map(m => ({ titolo: m.titolo, brand: m.brand, pezzi: m.pezzi, fatturato: r0(m.fatturato), ricavo: r0(m.ncc - m.costo), margine_pct: marg(m), prezzo_medio: m.pezzi ? r0(m.fatturato / m.pezzi) : 0, senza_costo: m.senza_costo, variant_id: m.variant_id,
+    varianti: Object.entries(m.varianti).sort((a, b) => b[1] - a[1]).map(([nome, pezzi]) => ({ nome, pezzi })),
+    canali: Object.entries(m.canali).map(([k, c]) => ({ key: k, nome: c.nome, pezzi: c.pezzi, fatturato: r0(c.fatturato) })).sort((a, b) => b.fatturato - a.fatturato) }))
+    .sort((a, b) => b.fatturato - a.fatturato);
+  return {
+    totali: { ordini: tot.ordini, pezzi: tot.pezzi, fatturato: r0(tot.fatturato), ricavo: r0(tot.ncc - tot.costo), margine_pct: marg(tot), pezzi_senza_costo: tot.senza_costo, modelli: lista.length },
+    brand: Object.values(brand).map(b => ({ brand: b.brand, pezzi: b.pezzi, fatturato: r0(b.fatturato), ricavo: r0(b.ncc - b.costo), margine_pct: marg(b), quota_pct: tot.fatturato ? Math.round(b.fatturato / tot.fatturato * 1000) / 10 : 0, sito: r0(b.sito) })).sort((a, b) => b.fatturato - a.fatturato).slice(0, 15),
+    canali: Object.values(canaliTot).map(c => ({ ...c, fatturato: r0(c.fatturato) })).sort((a, b) => b.fatturato - a.fatturato),
+    modelli: lista.slice(0, 40)
+  };
+}
+
 async function arricchisciConImmagini(prodotti) {
   if (prodotti.length === 0) return prodotti;
   try {
@@ -1648,6 +1732,28 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .bs-stat.fatturato { background: var(--gold-light); }
   .bs-stat.ricavo { background: var(--green-light); color: var(--green-dark); }
   .bs-stat.ricavo .bs-stat-value { color: var(--green-dark); }
+  .bs2 { display: block; }
+  .bs2-kpi { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; margin-bottom: 18px; }
+  .bs2-kpi > div { background: var(--gray-100); border-radius: 12px; padding: 10px 12px; }
+  .bs2-kpi span { display: block; font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray-500); }
+  .bs2-kpi b { font-size: 1.05rem; font-weight: 600; white-space: nowrap; } .bs2-kpi small { font-size: 0.72rem; color: var(--gray-500); font-weight: 400; }
+  .bs2-sec { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--gray-700); margin: 6px 0 8px; font-weight: 600; }
+  .bs2-brands { margin-bottom: 18px; }
+  .bs2-brand { display: grid; grid-template-columns: 112px minmax(0,1fr) 128px; gap: 8px; align-items: center; padding: 4px 0; font-size: 0.82rem; }
+  .bs2-bn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bs2-bar { height: 8px; background: var(--gray-100); border-radius: 4px; overflow: hidden; } .bs2-bar i { display: block; height: 100%; background: var(--black); border-radius: 4px; }
+  .bs2-bv { text-align: right; white-space: nowrap; font-weight: 500; } .bs2-bv small { color: var(--gray-500); font-weight: 400; font-size: 0.68rem; }
+  .bs2-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .bs2-chips { display: flex; gap: 6px; } .bs2-chip { border: 1px solid var(--gray-200); background: #fff; border-radius: 999px; padding: 5px 12px; font-size: 0.74rem; cursor: pointer; font-family: inherit; } .bs2-chip.on { background: var(--black); color: #fff; border-color: var(--black); }
+  .bs2-row { border-top: 1px solid var(--gray-100); } .bs2-row > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 26px 52px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 8px 0; } .bs2-row > summary::-webkit-details-marker { display: none; }
+  .bs2-rank { font-size: 0.78rem; font-weight: 600; color: var(--gray-500); text-align: center; } .bs2-rank.top { color: var(--black); }
+  .bs2-img { width: 52px; height: 52px; border-radius: 8px; background: var(--gray-100); overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--gray-300); } .bs2-img img { width: 100%; height: 100%; object-fit: cover; }
+  .bs2-info { min-width: 0; display: flex; flex-direction: column; } .bs2-t { font-size: 0.86rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .bs2-s { font-size: 0.72rem; color: var(--gray-500); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bs2-num { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; } .bs2-num b { font-size: 0.9rem; font-weight: 600; white-space: nowrap; }
+  .bs2-m { font-size: 0.66rem; padding: 1px 7px; border-radius: 999px; background: var(--gray-100); } .bs2-m.ok { background: var(--green-light); color: var(--green-dark); } .bs2-m.mid { background: #FFF4D6; color: #8B6914; } .bs2-m.low { background: #FDECEC; color: #B42318; }
+  .bs2-det { padding: 0 0 10px 88px; font-size: 0.78rem; color: var(--gray-700); display: grid; gap: 4px; } .bs2-l { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray-500); margin-right: 4px; }
+  .bs2-ch { display: inline-block; background: var(--gray-100); border-radius: 6px; padding: 1px 6px; margin: 0 4px 2px 0; font-size: 0.72rem; }
+  @media (max-width: 640px) { .bs2-kpi { grid-template-columns: repeat(2, minmax(0,1fr)); } .bs2-brand { grid-template-columns: 96px minmax(0,1fr) 104px; } .bs2-bv small { display: block; line-height: 1.1; } .bs2-det { padding-left: 0; } }
   .bs-empty { text-align: center; padding: 80px 20px; color: var(--gray-500); font-style: italic; grid-column: 1 / -1; }
   .confronto-form { background: var(--cream); padding: 24px; border-radius: var(--radius-md); margin-bottom: 24px; border: 1px solid var(--gray-200); }
   .table-wrap { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--gray-200); }
@@ -1806,7 +1912,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.26</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.27</p>
       </div>
     </div>
     <div class="header-right">
@@ -2250,14 +2356,48 @@ async function applyCustomRange() {
 async function loadBestSellers(p, btn) {
   setActiveButton('[data-bs-periods] .period-btn', btn);
   const cont = document.getElementById('bs-content'); cont.innerHTML = '<div class="bs-empty">Caricamento prodotti...</div>';
-  try { const data = await fetchNoCache('/api/bestsellers?periodo=' + p); if (data.success && data.prodotti && data.prodotti.length > 0) { renderBestSellers(data.prodotti); return; } cont.innerHTML = '<div class="bs-empty">Nessun prodotto.</div>'; } catch(e) { cont.innerHTML = '<div class="bs-empty">Errore: ' + e.message + '</div>'; }
+  try { const data = await fetchNoCache('/api/bestsellers?periodo=' + p); if (data.success && data.modelli && data.modelli.length > 0) { renderBestSellers2(data); return; } cont.innerHTML = '<div class="bs-empty">' + (data.success ? 'Nessun prodotto venduto nel periodo.' : 'Errore: ' + (data.error || '')) + '</div>'; } catch(e) { cont.innerHTML = '<div class="bs-empty">Errore: ' + e.message + '</div>'; }
 }
 async function applyBsCustomRange() {
   const from = document.getElementById('bs-date-from').value; const to = document.getElementById('bs-date-to').value;
   if (!from || !to) { alert('Seleziona date'); return; } if (from > to) { alert('Da deve precedere A'); return; }
   setActiveButton('[data-bs-periods] .period-btn', null);
   const cont = document.getElementById('bs-content'); cont.innerHTML = '<div class="bs-empty">Caricamento...</div>';
-  try { const data = await fetchNoCache('/api/bestsellers?from=' + from + '&to=' + to); if (data.success && data.prodotti && data.prodotti.length > 0) { renderBestSellers(data.prodotti); return; } cont.innerHTML = '<div class="bs-empty">Nessun prodotto.</div>'; } catch(e) { cont.innerHTML = '<div class="bs-empty">Errore: ' + e.message + '</div>'; }
+  try { const data = await fetchNoCache('/api/bestsellers?from=' + from + '&to=' + to); if (data.success && data.modelli && data.modelli.length > 0) { renderBestSellers2(data); return; } cont.innerHTML = '<div class="bs-empty">' + (data.success ? 'Nessun prodotto venduto nel periodo.' : 'Errore: ' + (data.error || '')) + '</div>'; } catch(e) { cont.innerHTML = '<div class="bs-empty">Errore: ' + e.message + '</div>'; }
+}
+var BS_DATA = null, BS_FILTRO = 'tutti';
+function bsEsc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function bsEur(n) { return '€' + Math.round(n || 0).toLocaleString('it-IT'); }
+function bsMargCls(m) { return m >= 30 ? 'ok' : (m >= 15 ? 'mid' : 'low'); }
+function bsFiltro(f) { BS_FILTRO = f; renderBestSellers2(BS_DATA); }
+function renderBestSellers2(d) {
+  BS_DATA = d;
+  var cont = document.getElementById('bs-content');
+  cont.className = 'bs2';
+  var t = d.totali;
+  var modelli = d.modelli.map(function (m) {
+    if (BS_FILTRO === 'tutti') return m;
+    var sel = m.canali.filter(function (c) { return BS_FILTRO === 'sito' ? c.key === 'TLUXY_SITE' : c.key !== 'TLUXY_SITE'; });
+    if (!sel.length) return null;
+    var f = sel.reduce(function (s, c) { return s + c.fatturato; }, 0), q = sel.reduce(function (s, c) { return s + c.pezzi; }, 0);
+    return Object.assign({}, m, { fatturato: f, pezzi: q, ricavo: m.fatturato ? Math.round(m.ricavo * f / m.fatturato) : 0 });
+  }).filter(Boolean).sort(function (a, b) { return b.fatturato - a.fatturato; });
+  var maxB = d.brand.length ? d.brand[0].fatturato : 1;
+  var sitoTot = (d.canali.filter(function (c) { return c.key === 'TLUXY_SITE'; })[0] || { fatturato: 0 }).fatturato;
+  var html = '<div class="bs2-kpi"><div><span>Fatturato</span><b>' + bsEur(t.fatturato) + '</b></div><div><span>Pezzi</span><b>' + t.pezzi + '</b></div><div><span>Margine merce</span><b>' + bsEur(t.ricavo) + ' <small>' + t.margine_pct + '%</small></b></div><div><span>Di cui sito</span><b>' + bsEur(sitoTot) + ' <small>' + (t.fatturato ? Math.round(sitoTot / t.fatturato * 100) : 0) + '%</small></b></div></div>';
+  html += '<div class="bs2-sec">Brand</div><div class="bs2-brands">' + d.brand.slice(0, 8).map(function (b) {
+    return '<div class="bs2-brand"><span class="bs2-bn">' + bsEsc(b.brand) + '</span><span class="bs2-bar"><i style="width:' + Math.max(3, Math.round(b.fatturato / maxB * 100)) + '%"></i></span><span class="bs2-bv">' + bsEur(b.fatturato) + ' <small>' + b.quota_pct + '% · ' + b.pezzi + ' pz</small></span></div>';
+  }).join('') + '</div>';
+  html += '<div class="bs2-head"><div class="bs2-sec" style="margin:0">Modelli più venduti</div><div class="bs2-chips">' + [['tutti', 'Tutti'], ['sito', 'Sito'], ['mp', 'Marketplace']].map(function (c) { return '<button class="bs2-chip' + (BS_FILTRO === c[0] ? ' on' : '') + '" data-f="' + c[0] + '" onclick="bsFiltro(this.dataset.f)">' + c[1] + '</button>'; }).join('') + '</div></div>';
+  html += '<div class="bs2-list">' + (modelli.length ? modelli.slice(0, 30).map(function (m, i) {
+    var img = m.immagine ? '<img src="' + bsEsc(m.immagine) + '&width=160" loading="lazy" alt="">' : '<span>◇</span>';
+    var colori = m.varianti.slice(0, 4).map(function (v) { return bsEsc(v.nome.split(' / ')[0]) + (v.pezzi > 1 ? ' ×' + v.pezzi : ''); }).join(', ') + (m.varianti.length > 4 ? '…' : '');
+    var canali = m.canali.map(function (c) { return '<span class="bs2-ch">' + bsEsc(c.nome) + ' ' + c.pezzi + ' · ' + bsEur(c.fatturato) + '</span>'; }).join('');
+    return '<details class="bs2-row"><summary><span class="bs2-rank' + (i < 3 ? ' top' : '') + '">' + (i + 1) + '</span><span class="bs2-img">' + img + '</span><span class="bs2-info"><span class="bs2-t">' + bsEsc(m.titolo) + '</span><span class="bs2-s">' + bsEsc(m.brand) + ' · ' + m.pezzi + ' pz · media ' + bsEur(m.prezzo_medio) + '</span></span><span class="bs2-num"><b>' + bsEur(m.fatturato) + '</b><span class="bs2-m ' + bsMargCls(m.margine_pct) + '">' + (m.senza_costo === m.pezzi ? 'costo ?' : m.margine_pct + '%') + '</span></span></summary>'
+      + '<div class="bs2-det"><div><span class="bs2-l">Colori</span> ' + colori + '</div><div><span class="bs2-l">Canali</span> ' + canali + '</div><div><span class="bs2-l">Margine merce</span> ' + bsEur(m.ricavo) + (m.senza_costo ? ' <small>(' + m.senza_costo + ' pz senza costo in Shopify)</small>' : '') + '</div></div></details>';
+  }).join('') : '<div class="bs-empty">Nessun modello per questo filtro.</div>') + '</div>';
+  html += '<div class="alerts-meta" style="margin-top:10px">Margine merce = prezzo senza IVA − costo merce, solo sui pezzi con costo in Shopify (fees marketplace e spedizione escluse). ' + (t.pezzi_senza_costo ? t.pezzi_senza_costo + ' pezzi senza costo. ' : '') + t.ordini + ' ordini, ' + t.modelli + ' modelli venduti.</div>';
+  cont.innerHTML = html;
 }
 function renderBestSellers(prodotti) {
   const cont = document.getElementById('bs-content');
@@ -3877,7 +4017,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.26', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.27', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -4110,9 +4250,11 @@ export default async function handler(req, res) {
           if (item.product_id) productIds.add(item.product_id);
         }));
         const variantCosts = (await fetchVariantCosts([...variantIds], [...productIds])).costs;
-        let prodotti = calcolaBestSellers(ordini, 20, variantCosts);
-        prodotti = await arricchisciConImmagini(prodotti);
-        return res.json({ success: true, periodo: from && to ? `${from} → ${to}` : periodo, totale_prodotti_unici: prodotti.length, prodotti });
+        const bs = calcolaBestSellersModelli(ordini, variantCosts);
+        const senzaImg = bs.modelli.filter(m => m.variant_id && !MEM_VARIANT_IMG.has(String(m.variant_id))).map(m => m.variant_id);
+        if (senzaImg.length) await infoVariantiGraphQL(senzaImg);
+        bs.modelli.forEach(m => { m.immagine = m.variant_id ? (MEM_VARIANT_IMG.get(String(m.variant_id)) || null) : null; });
+        return res.json({ success: true, versione: 2, periodo: from && to ? `${from} → ${to}` : periodo, ...bs });
       } catch (error) { return res.status(500).json({ success: false, error: error.message }); }
     }
 
