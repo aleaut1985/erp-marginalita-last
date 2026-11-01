@@ -1739,7 +1739,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .bs2-kpi b { font-size: 1.05rem; font-weight: 600; white-space: nowrap; } .bs2-kpi small { font-size: 0.72rem; color: var(--gray-500); font-weight: 400; }
   .bs2-sec { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--gray-700); margin: 6px 0 8px; font-weight: 600; }
   .bs2-brands { margin-bottom: 18px; }
-  .bs2-brand { display: grid; grid-template-columns: 112px minmax(0,1fr) 128px; gap: 8px; align-items: center; padding: 4px 0; font-size: 0.82rem; }
+  .bs2-brand { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(0,1fr) 72px 64px; gap: 8px; align-items: center; padding: 7px 0; font-size: 0.82rem; border-top: 1px solid var(--gray-100); }
+  .bs2-brand small { display: block; font-size: 0.66rem; color: var(--gray-500); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bs2-brand.bs2-bhead { border-top: none; padding: 0 0 2px; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray-500); } .bs2-bhead span:not(:first-child) { text-align: right; }
+  .bs2-bn b { font-weight: 500; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bs2-bm, .bs2-bs { text-align: right; } .bs2-bs { font-weight: 500; }
   .bs2-bn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bs2-bar { height: 8px; background: var(--gray-100); border-radius: 4px; overflow: hidden; } .bs2-bar i { display: block; height: 100%; background: var(--black); border-radius: 4px; }
   .bs2-bv { text-align: right; white-space: nowrap; font-weight: 500; } .bs2-bv small { color: var(--gray-500); font-weight: 400; font-size: 0.68rem; }
@@ -1753,7 +1757,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .bs2-m { font-size: 0.66rem; padding: 1px 7px; border-radius: 999px; background: var(--gray-100); } .bs2-m.ok { background: var(--green-light); color: var(--green-dark); } .bs2-m.mid { background: #FFF4D6; color: #8B6914; } .bs2-m.low { background: #FDECEC; color: #B42318; }
   .bs2-det { padding: 0 0 10px 88px; font-size: 0.78rem; color: var(--gray-700); display: grid; gap: 4px; } .bs2-l { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray-500); margin-right: 4px; }
   .bs2-ch { display: inline-block; background: var(--gray-100); border-radius: 6px; padding: 1px 6px; margin: 0 4px 2px 0; font-size: 0.72rem; }
-  @media (max-width: 640px) { .bs2-kpi { grid-template-columns: repeat(2, minmax(0,1fr)); } .bs2-brand { grid-template-columns: 96px minmax(0,1fr) 104px; } .bs2-bv small { display: block; line-height: 1.1; } .bs2-det { padding-left: 0; } }
+  @media (max-width: 640px) { .bs2-kpi { grid-template-columns: repeat(2, minmax(0,1fr)); } .bs2-brand { grid-template-columns: minmax(0,1.3fr) minmax(0,1fr) 62px 52px; gap: 6px; } .bs2-det { padding-left: 0; } }
   .bs-empty { text-align: center; padding: 80px 20px; color: var(--gray-500); font-style: italic; grid-column: 1 / -1; }
   .confronto-form { background: var(--cream); padding: 24px; border-radius: var(--radius-md); margin-bottom: 24px; border: 1px solid var(--gray-200); }
   .table-wrap { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--gray-200); }
@@ -1912,7 +1916,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.27</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.28</p>
       </div>
     </div>
     <div class="header-right">
@@ -1980,8 +1984,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   </div>
   <div id="bestsellers-tab" class="tab-content">
     <div class="section">
-      <div class="section-header"><div><div class="section-title">Best Seller</div><div class="section-subtitle">Top 20 prodotti più venduti per fatturato</div></div></div>
-      <div class="info-box">Foto, prezzo, costo merce reale e ricavo effettivo.</div>
+      <div class="section-header"><div><div class="section-title">Best Seller</div><div class="section-subtitle">Brand e modelli più venduti, con margine e quota sul sito</div></div></div>
+      
       <div class="filter-bar">
         <div class="period-selector" data-bs-periods>
           <button class="period-btn" data-period="today">Oggi</button>
@@ -2385,8 +2389,9 @@ function renderBestSellers2(d) {
   var maxB = d.brand.length ? d.brand[0].fatturato : 1;
   var sitoTot = (d.canali.filter(function (c) { return c.key === 'TLUXY_SITE'; })[0] || { fatturato: 0 }).fatturato;
   var html = '<div class="bs2-kpi"><div><span>Fatturato</span><b>' + bsEur(t.fatturato) + '</b></div><div><span>Pezzi</span><b>' + t.pezzi + '</b></div><div><span>Margine merce</span><b>' + bsEur(t.ricavo) + ' <small>' + t.margine_pct + '%</small></b></div><div><span>Di cui sito</span><b>' + bsEur(sitoTot) + ' <small>' + (t.fatturato ? Math.round(sitoTot / t.fatturato * 100) : 0) + '%</small></b></div></div>';
-  html += '<div class="bs2-sec">Brand</div><div class="bs2-brands">' + d.brand.slice(0, 8).map(function (b) {
-    return '<div class="bs2-brand"><span class="bs2-bn">' + bsEsc(b.brand) + '</span><span class="bs2-bar"><i style="width:' + Math.max(3, Math.round(b.fatturato / maxB * 100)) + '%"></i></span><span class="bs2-bv">' + bsEur(b.fatturato) + ' <small>' + b.quota_pct + '% · ' + b.pezzi + ' pz</small></span></div>';
+  html += '<div class="bs2-sec">Brand</div><div class="bs2-brands"><div class="bs2-brand bs2-bhead"><span>Brand</span><span>Fatturato</span><span>Margine</span><span>Sul sito</span></div>' + d.brand.slice(0, 10).map(function (b) {
+    var sitoPct = b.fatturato ? Math.round(b.sito / b.fatturato * 100) : 0;
+    return '<div class="bs2-brand"><span class="bs2-bn"><b>' + bsEsc(b.brand) + '</b><small>' + b.pezzi + ' pz · media ' + bsEur(b.pezzi ? b.fatturato / b.pezzi : 0) + '</small></span><span class="bs2-bv">' + bsEur(b.fatturato) + '<small>' + b.quota_pct + '% del totale</small></span><span class="bs2-bm"><span class="bs2-m ' + bsMargCls(b.margine_pct) + '">' + b.margine_pct + '%</span><small>' + bsEur(b.ricavo) + '</small></span><span class="bs2-bs">' + sitoPct + '%<small>' + bsEur(b.sito) + '</small></span></div>';
   }).join('') + '</div>';
   html += '<div class="bs2-head"><div class="bs2-sec" style="margin:0">Modelli più venduti</div><div class="bs2-chips">' + [['tutti', 'Tutti'], ['sito', 'Sito'], ['mp', 'Marketplace']].map(function (c) { return '<button class="bs2-chip' + (BS_FILTRO === c[0] ? ' on' : '') + '" data-f="' + c[0] + '" onclick="bsFiltro(this.dataset.f)">' + c[1] + '</button>'; }).join('') + '</div></div>';
   html += '<div class="bs2-list">' + (modelli.length ? modelli.slice(0, 30).map(function (m, i) {
@@ -4017,7 +4022,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.27', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.28', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
