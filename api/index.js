@@ -1660,12 +1660,12 @@ async function margineOrdineSingolo(ordineRaw) {
 }
 async function inviaNotificaDuo(ordine, m) {
   const eur = n => '€' + Math.round(n || 0).toLocaleString('it-IT');
-  const righeDuo = (ordine.line_items || []).filter(li => isDuoSku(li.sku));
-  const titolo = 'DUOMO ' + (ordine.name || ('#' + ordine.order_number)) + ' · margine ' + eur(m.margine) + ' (' + m.pct.toFixed(1).replace('.', ',') + '%)' + (m.mancanti ? ' · costo mancante' : '');
-  const testo = m.mp + ' · incasso ' + eur(m.incasso) + '\n' + righeDuo.map(li => '• ' + li.title + (li.variant_title ? ' – ' + li.variant_title : '') + ' ×' + li.quantity).join('\n');
+  const haDuo = (ordine.line_items || []).some(li => isDuoSku(li.sku));
+  const titolo = m.mp + ' ' + (ordine.name || ('#' + ordine.order_number)) + ' · ' + eur(m.incasso) + ' · margine ' + eur(m.margine) + ' (' + m.pct.toFixed(1).replace('.', ',') + '%)' + (haDuo ? ' · DUOMO' : '') + (m.mancanti ? ' · costo mancante' : '');
+  const testo = (ordine.line_items || []).map(li => '• ' + li.title + (li.variant_title ? ' – ' + li.variant_title : '') + ' ×' + li.quantity + (isDuoSku(li.sku) ? ' (DUOMO)' : '')).join('\n');
   const esiti = [];
   if (NTFY_TOPIC) {
-    try { const r = await fetch('https://ntfy.sh/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: NTFY_TOPIC, title: titolo, message: testo, tags: ['shopping_bags'], priority: 4, click: ERP_PUBLIC_URL }) }); esiti.push('ntfy ' + r.status); } catch (e) { esiti.push('ntfy errore ' + e.message); }
+    try { const r = await fetch('https://ntfy.sh/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: NTFY_TOPIC, title: titolo, message: testo, tags: [m.margine < 0 ? 'red_circle' : (haDuo ? 'large_orange_diamond' : 'shopping_bags')], priority: (m.margine < 0 || haDuo) ? 4 : 3, click: ERP_PUBLIC_URL }) }); esiti.push('ntfy ' + r.status); } catch (e) { esiti.push('ntfy errore ' + e.message); }
   }
   if (RESEND_API_KEY && DUO_NOTIFY_EMAIL) {
     try { const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { 'Authorization': 'Bearer ' + RESEND_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: MAIL_FROM, to: [DUO_NOTIFY_EMAIL], subject: titolo, text: testo + '\n\n' + ERP_PUBLIC_URL }) }); esiti.push('email ' + r.status); } catch (e) { esiti.push('email errore ' + e.message); }
@@ -2039,7 +2039,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.30</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.31</p>
       </div>
     </div>
     <div class="header-right">
@@ -3925,8 +3925,7 @@ export default async function handler(req, res) {
       if (!ok) { console.log('[webhook] HMAC non valido'); return res.status(401).json({ ok: false }); }
       try {
         const ordine = JSON.parse(raw);
-        const haDuo = (ordine.line_items || []).some(li => isDuoSku(li.sku));
-        if (haDuo && !notificatiDuo.has(ordine.id)) {
+        if (!notificatiDuo.has(ordine.id)) {
           notificatiDuo.add(ordine.id);
           const m = await margineOrdineSingolo(ordine);
           await inviaNotificaDuo(ordine, m);
@@ -4165,7 +4164,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.30', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.31', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -4401,8 +4400,8 @@ export default async function handler(req, res) {
         const token = await getShopifyAccessToken();
         const r = await fetch(`https://${SHOPIFY_STORE}/admin/api/2024-01/orders.json?status=any&limit=100&order=created_at+desc`, { headers: { 'X-Shopify-Access-Token': token } });
         const j = await r.json();
-        const o = (j.orders || []).find(x => (x.line_items || []).some(li => isDuoSku(li.sku)));
-        if (!o) return res.json({ success: false, error: 'Nessun ordine DUOMO negli ultimi 100' });
+        const o = (j.orders || [])[0];
+        if (!o) return res.json({ success: false, error: 'Nessun ordine trovato' });
         const m = await margineOrdineSingolo(o);
         return res.json({ success: true, prova: true, ...(await inviaNotificaDuo(o, m)) });
       } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
