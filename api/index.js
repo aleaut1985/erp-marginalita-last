@@ -1661,8 +1661,8 @@ async function margineOrdineSingolo(ordineRaw) {
 async function inviaNotificaDuo(ordine, m) {
   const eur = n => '€' + Math.round(n || 0).toLocaleString('it-IT');
   const haDuo = (ordine.line_items || []).some(li => isDuoSku(li.sku));
-  const titolo = m.mp + ' ' + (ordine.name || ('#' + ordine.order_number)) + ' · ' + eur(m.incasso) + ' · margine ' + eur(m.margine) + ' (' + m.pct.toFixed(1).replace('.', ',') + '%)' + (haDuo ? ' · DUOMO' : '') + (m.mancanti ? ' · costo mancante' : '');
-  const testo = (ordine.line_items || []).map(li => '• ' + li.title + (li.variant_title ? ' – ' + li.variant_title : '') + ' ×' + li.quantity + (isDuoSku(li.sku) ? ' (DUOMO)' : '')).join('\n');
+  const titolo = eur(m.incasso) + ' · margine ' + eur(m.margine) + ' (' + Math.round(m.pct) + '%) · ' + m.mp + (haDuo ? ' · DUOMO' : '') + (m.mancanti ? ' · costo mancante' : '');
+  const testo = '#' + ordine.order_number + '\n' + (ordine.line_items || []).map(li => '• ' + li.title + (li.variant_title ? ' – ' + li.variant_title : '') + ' ×' + li.quantity + (isDuoSku(li.sku) ? ' (DUOMO)' : '')).join('\n');
   const esiti = [];
   if (NTFY_TOPIC) {
     try { const r = await fetch('https://ntfy.sh/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: NTFY_TOPIC, title: titolo, message: testo, tags: [m.margine < 0 ? 'red_circle' : (haDuo ? 'large_orange_diamond' : 'shopping_bags')], priority: (m.margine < 0 || haDuo) ? 4 : 3, click: ERP_PUBLIC_URL }) }); esiti.push('ntfy ' + r.status); } catch (e) { esiti.push('ntfy errore ' + e.message); }
@@ -2039,7 +2039,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.31</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.32</p>
       </div>
     </div>
     <div class="header-right">
@@ -4164,7 +4164,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.31', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.32', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
