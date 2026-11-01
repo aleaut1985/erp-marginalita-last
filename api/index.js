@@ -1510,8 +1510,9 @@ function calcolaBestSellersModelli(ordini, variantCosts = {}) {
     const chKey = mp.key, chNome = (mp.config && mp.config.nome) || mp.key;
     (ordine.line_items || []).forEach(item => {
       const q = parseInt(item.quantity) || 0; if (!q) return;
-      const lordo = toEurAmount(item.price_set, item.price, ordCurrency) * q;
-      const netto = lordo / (1 + ivaPerc / 100);
+      const mfP = chKey === 'MARK_FOYS' ? mfPrezzoRiga(item, ordine, variantCosts) : null;
+      const lordo = mfP !== null ? mfP * q : toEurAmount(item.price_set, item.price, ordCurrency) * q;
+      const netto = mfP !== null ? lordo : lordo / (1 + ivaPerc / 100);
       const cu = item.variant_id && variantCosts[item.variant_id] != null ? variantCosts[item.variant_id] : null;
       const costo = cu !== null ? cu * q : 0;
       const ncc = cu !== null ? netto : 0;
@@ -1561,6 +1562,73 @@ async function arricchisciConImmagini(prodotti) {
   } catch (e) { return prodotti; }
 }
 
+
+
+// ============ v5.29 MARK FOY'S: incasso = prezzo B2B (EUR, senza IVA, nessuna commissione) ============
+// Fonte 1: metafield prodotto custom.mark_foy_price. Fonte 2: scheda LISTINO del foglio "MARK FOY'S ORDERS" (Umberto).
+// Fonte 3: prodotti DUOMO → costo × 1,15. Margine = incasso − costo merce.
+const MF_LISTINO_SKU = {
+  'BAG YS 2 SD FW26 17078': 1380, 'BAG YS 2 SD SS25 14035': 1150, 'BAG YS 2 SD FW25 16805': 1380, 'BAG YS 2 BC FW25 16804': 345,
+  'BAG YS 2 SD FW26 17079': 1265, 'BAG YS 2 SD FW25 16798': 1265, 'BAG YS 2 SD SS25 12791': 1265, 'BAG YS 2 SD FW25 16799': 1265,
+  'BAG YS 2 SD FW25 16801': 1035, 'BAG YS 2 SD FW25 16797': 1035, 'BAG YS 2 SD FW25 16800': 1035, 'BAG YS 2 TH FW25 17276': 1380,
+  'BAG YS 2 TH FW25 17275': 1380, 'BAG YS 2 TH FW25 17274': 1380, 'BAG YS 2 TH FW25 16807': 1380, 'BAG YS 2 SD FW24 12192': 805,
+  'BAG YS 2 SD FW24 12200': 1150, 'BAG YS 2 SD SS24 12450': 920, 'BAG YS 2 SD FW24 12449': 977.5, 'BAG YS 2 SD FW25 16808': 920,
+  'BAG YS 2 SD FW24 12197': 920, 'BAG YS 2 SD SS25 13702': 1380, 'BAG YS 2 SD FW25 16596': 632.5, 'BAG YS 2 SD FW25 14741': 632.5,
+  'BAG YS 2 SD SS25 14714': 920, 'BAG YS 2 SD FW25 16806': 920, 'BAG YS 2 SD SS25 13823': 920, 'BAG YS 2 SD FW24 12199': 747.5,
+  'BAG YS 2 SD SS25 13704': 1265, 'BAG YS 2 SD FW24 12193': 1265
+};
+function mfPrezzoListino(item, dataOrdine) {
+  const sku = String(item.sku || '').toUpperCase().trim();
+  for (const ref in MF_LISTINO_SKU) { if (sku === ref || sku.startsWith(ref + ' ')) return MF_LISTINO_SKU[ref]; }
+  const t = String(item.title || '').toUpperCase();
+  if (t.includes('JACQUEMUS')) {
+    if (t.includes('CHIQUITO')) return t.includes('HOMME') ? 260 : 310;
+    if (t.includes('LONG BAMBINO') || (t.includes('BAMBINO') && t.includes('LONG'))) return 330;
+    if (t.includes('GRAND BAMBINO')) { const g = String(dataOrdine || '').slice(0, 10); return (g >= '2026-08-15' && g <= '2026-09-15') ? 285 : 325; }
+    if (t.includes('BAMBINO')) return 260;
+  }
+  return null;
+}
+const MEM_MF_PRICE = new Map();
+async function caricaPrezziMarkFoy(ordini) {
+  const pids = new Set();
+  ordini.forEach(o => { if (riconosciMarketplace(o).key === 'MARK_FOYS') (o.line_items || []).forEach(li => { if (li.product_id && !MEM_MF_PRICE.has(String(li.product_id))) pids.add(String(li.product_id)); }); });
+  const ids = [...pids];
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    try {
+      const d = await shopifyGraphQL('query($ids:[ID!]!){ nodes(ids:$ids){ ... on Product { id metafield(namespace:"custom", key:"mark_foy_price"){ value } } } }', { ids: chunk.map(p => 'gid://shopify/Product/' + p) });
+      const trovati = new Set();
+      (d.nodes || []).forEach(n => { if (!n || !n.id) return; const pid = n.id.split('/').pop(); trovati.add(pid); const v = n.metafield ? parseFloat(String(n.metafield.value).replace(',', '.')) : NaN; MEM_MF_PRICE.set(pid, isNaN(v) ? null : v); });
+      chunk.forEach(p => { if (!trovati.has(p)) MEM_MF_PRICE.set(p, null); }); // prodotto cancellato
+    } catch (e) { console.log('[markfoy] metafield errore', e.message); }
+  }
+}
+function mfPrezzoRiga(item, ordine, variantCosts = {}) {
+  let p = item.product_id ? MEM_MF_PRICE.get(String(item.product_id)) : null;
+  if (p === null || p === undefined) p = mfPrezzoListino(item, ordine.created_at);
+  if ((p === null || p === undefined) && isDuoSku(item.sku) && item.variant_id && variantCosts[item.variant_id] != null) p = Math.round(variantCosts[item.variant_id] * 1.15 * 100) / 100;
+  return (p === null || p === undefined) ? null : p;
+}
+// Incasso e costo di un ordine Mark Foy, riga per riga, al netto delle quantità rese
+function calcolaMarkFoyOrdine(ordine, variantCosts = {}, duoUserCosts = {}) {
+  const resiPerRiga = {};
+  (ordine.refunds || []).forEach(r => (r.refund_line_items || []).forEach(rli => { resiPerRiga[rli.line_item_id] = (resiPerRiga[rli.line_item_id] || 0) + (parseInt(rli.quantity) || 0); }));
+  let incasso = 0, costo = 0; const mancanti = [], fonti = { metafield: 0, listino: 0, duomo: 0 }; const righe = [];
+  for (const item of (ordine.line_items || [])) {
+    const q = Math.max(0, (parseInt(item.quantity) || 0) - (resiPerRiga[item.id] || 0));
+    let cu = item.variant_id ? variantCosts[item.variant_id] : null;
+    if ((cu === null || cu === undefined) && isDuoSku(item.sku) && item.variant_id && duoUserCosts[item.variant_id] !== undefined) cu = duoUserCosts[item.variant_id];
+    let prezzo = item.product_id ? MEM_MF_PRICE.get(String(item.product_id)) : null, fonte = 'metafield';
+    if (prezzo === null || prezzo === undefined) { prezzo = mfPrezzoListino(item, ordine.created_at); fonte = 'listino'; }
+    if ((prezzo === null || prezzo === undefined) && isDuoSku(item.sku) && cu !== null && cu !== undefined) { prezzo = Math.round(cu * 1.15 * 100) / 100; fonte = 'duomo'; }
+    if (prezzo === null || prezzo === undefined) { mancanti.push({ title: item.title, sku: item.sku || '', product_id: item.product_id, motivo: 'prezzo Mark Foy mancante' }); continue; }
+    if (cu === null || cu === undefined) { mancanti.push({ title: item.title, sku: item.sku || '', variant_id: item.variant_id, is_duo: isDuoSku(item.sku) }); continue; }
+    fonti[fonte] += q; incasso += prezzo * q; costo += cu * q;
+    righe.push({ title: item.title, sku: item.sku || '', quantita: q, prezzo_mf: prezzo, costo_unit: cu, fonte });
+  }
+  return { incasso, costo, margine: incasso - costo, mancanti, fonti, righe };
+}
 
 // ============ ICONE APP (v5.19) ============
 const ICON_PNG = {
@@ -1916,7 +1984,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.28</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.29</p>
       </div>
     </div>
     <div class="header-right">
@@ -4022,7 +4090,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.28', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy Department Store', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.29', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -4040,6 +4108,7 @@ export default async function handler(req, res) {
         const fetchResult = await fetchVariantCosts([...variantIds], [...productIds]);
         const variantCosts = fetchResult.costs;
         const fetchStats = fetchResult.stats;
+        await caricaPrezziMarkFoy(ordini);
         
         // Carica costi DUO salvati manualmente dall'utente (per gli ordini dove Shopify ha perso il cost)
         const duoUserCosts = {};
@@ -4073,8 +4142,9 @@ export default async function handler(req, res) {
         const ordini_valuta_estera = [];
         const ordini_con_resi = []; // dettaglio resi per visualizzazione
         ordini.forEach(ordine => {
-          const { costo: costo_merce, errori } = calcolaCostoOrdine(ordine, variantCosts, duoUserCosts);
           const mp = riconosciMarketplace(ordine);
+          const mfCalc = mp.key === 'MARK_FOYS' ? calcolaMarkFoyOrdine(ordine, variantCosts, duoUserCosts) : null;
+          const { costo: costo_merce, errori } = mfCalc ? { costo: mfCalc.costo, errori: mfCalc.mancanti } : calcolaCostoOrdine(ordine, variantCosts, duoUserCosts);
           const currencyInfo = getOrderCurrencyInfo(ordine);
           const refundInfo = getOrderRefundInfo(ordine);
           if (errori.length > 0) {
@@ -4094,13 +4164,17 @@ export default async function handler(req, res) {
           let costo_merce_effettivo = costo_merce;
           if (refundInfo.isFullRefund) {
             costo_merce_effettivo = 0;
+          } else if (mfCalc) {
+            costo_merce_effettivo = mfCalc.costo; // già al netto delle righe rese
           } else if (refundInfo.isPartialRefund && refundInfo.totalQuantity > 0) {
             // Sottrai costo della quantità rimborsata (proporzionale)
             const ratioReso = refundInfo.refundedQuantity / refundInfo.totalQuantity;
             costo_merce_effettivo = costo_merce * (1 - ratioReso);
           }
           
-          const ris = calcolaMarginalita(prezzo_lordo, iva_scorporata, costo_merce_effettivo, spedizione, mp.config, mp.key);
+          const ris = mfCalc
+            ? { prezzo_lordo_iva_inclusa: mfCalc.incasso, iva_scorporata: 0, prezzo_netto_iva: mfCalc.incasso, prezzo_netto_marketplace: mfCalc.incasso, fees_shopify: 0, fees_marketplace: 0, costo_merce: mfCalc.costo, spedizione: 0, costi_totali: mfCalc.costo, margine_netto: mfCalc.margine, margine_percentuale: mfCalc.incasso > 0 ? parseFloat((mfCalc.margine / mfCalc.incasso * 100).toFixed(2)) : 0 }
+            : calcolaMarginalita(prezzo_lordo, iva_scorporata, costo_merce_effettivo, spedizione, mp.config, mp.key);
           
           // Se reso totale → conta come 0 fatturato/margine (ma traccialo a parte)
           if (refundInfo.isFullRefund) {
@@ -4147,10 +4221,10 @@ export default async function handler(req, res) {
           // Split: merce da una parte; fees + spedizione + packaging dall'altra
           // (costo_fees = fees_shopify + fees_marketplace + spedizione — packaging è incluso in fees_marketplace)
           costi_merce_totali += costo_merce_effettivo;
-          costi_fees_totali += (ris.fees_shopify || 0) + (ris.fees_marketplace || 0) + (spedizione || 0);
+          costi_fees_totali += (ris.fees_shopify || 0) + (ris.fees_marketplace || 0) + (mfCalc ? 0 : (spedizione || 0));
           margine_netto += ris.margine_netto;
           
-          if (currencyInfo.isForeign) {
+          if (currencyInfo.isForeign && !mfCalc) {
             ordini_valuta_estera.push({
               order_number: ordine.order_number,
               name: ordine.name,
@@ -4182,11 +4256,12 @@ export default async function handler(req, res) {
             costo_merce: costo_merce_effettivo,
             fees_marketplace: ris.fees_marketplace,
             fees_shopify: ris.fees_shopify,
-            spedizione,
+            spedizione: mfCalc ? 0 : spedizione,
             margine_netto: ris.margine_netto,
+            mark_foy: mfCalc ? { fonti: mfCalc.fonti, righe: mfCalc.righe } : undefined,
             margine_percentuale: ris.margine_percentuale,
             currency: currencyInfo.originalCurrency,
-            is_foreign_currency: currencyInfo.isForeign,
+            is_foreign_currency: currencyInfo.isForeign && !mfCalc,
             total_original: currencyInfo.originalTotal,
             exchange_rate: currencyInfo.exchangeRate,
             // Info refund
@@ -4198,7 +4273,7 @@ export default async function handler(req, res) {
               title: item.title,
               sku: item.sku || '',
               quantity: parseInt(item.quantity) || 0,
-              prezzo_unit: toEurAmount(item.price_set, item.price, currencyInfo.originalCurrency),
+              prezzo_unit: (function() { if (mfCalc) { const r = mfCalc.righe.find(x => x.title === item.title && x.sku === (item.sku || '')); if (r) return r.prezzo_mf; } return toEurAmount(item.price_set, item.price, currencyInfo.originalCurrency); })(),
               cost_unit: (function() {
                 if (item.variant_id && variantCosts[item.variant_id] !== null && variantCosts[item.variant_id] !== undefined) return variantCosts[item.variant_id];
                 if (isDuoSku(item.sku) && item.variant_id && duoUserCosts[item.variant_id] !== undefined) return duoUserCosts[item.variant_id];
@@ -4255,6 +4330,7 @@ export default async function handler(req, res) {
           if (item.product_id) productIds.add(item.product_id);
         }));
         const variantCosts = (await fetchVariantCosts([...variantIds], [...productIds])).costs;
+        await caricaPrezziMarkFoy(ordini);
         const bs = calcolaBestSellersModelli(ordini, variantCosts);
         const senzaImg = bs.modelli.filter(m => m.variant_id && !MEM_VARIANT_IMG.has(String(m.variant_id))).map(m => m.variant_id);
         if (senzaImg.length) await infoVariantiGraphQL(senzaImg);
@@ -4542,8 +4618,8 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && path === '/api/forecast') {
       try {
         const forceRefresh = query.get('refresh') === '1';
-        const FORECAST_CACHE_KEY = 'forecast_cache';
-        const FORECAST_META_KEY = 'forecast_cache_meta';
+        const FORECAST_CACHE_KEY = 'forecast_cache_v529';
+        const FORECAST_META_KEY = 'forecast_cache_meta_v529';
         const FORECAST_TTL_HOURS = 24;
         
         // 1) Prova cache KV (se non force refresh)
@@ -4601,6 +4677,7 @@ export default async function handler(req, res) {
           if (item.product_id) productIds.add(item.product_id);
         }));
         const { costs: variantCosts } = await fetchVariantCosts([...variantIds], [...productIds]);
+        await caricaPrezziMarkFoy(ordini);
         
         // Carica costi DUO user
         const duoUserCosts = {};
@@ -4664,7 +4741,7 @@ export default async function handler(req, res) {
           const feesMP = prezzoDopoSconto * ((cfg.fee_principale || 0) / 100)
                        + prezzoDopoSconto * ((cfg.fee_secondaria || 0) / 100)
                        + prezzoDopoSconto * ((cfg.fee_accessoria || 0) / 100);
-          const nettoFromMP = Math.max(0, prezzoDopoSconto - feesMP - (cfg.fee_fissa_trasporto === 'GLS' ? 15 : (cfg.fee_fissa_trasporto || 0)) - (cfg.fee_fissa_packaging || 0));
+          const nettoFromMP = mp.key === 'MARK_FOYS' ? calcolaMarkFoyOrdine(ordine, variantCosts, duoUserCosts).incasso : Math.max(0, prezzoDopoSconto - feesMP - (cfg.fee_fissa_trasporto === 'GLS' ? 15 : (cfg.fee_fissa_trasporto || 0)) - (cfg.fee_fissa_packaging || 0));
           
           const pagamenti = calcolaPagamentiPrevisti(ordine.created_at, policy, nettoFromMP);
           if (pagamenti.length === 0) { ordiniSkipped++; return; }
