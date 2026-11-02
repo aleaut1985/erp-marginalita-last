@@ -1970,6 +1970,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .ric-card { border-radius: 12px; padding: 12px 14px; font-size: 0.84rem; } .ric-card.ok { background: var(--green-light); } .ric-card.low { background: #FDECEC; }
   .ric-card b { display: block; } .ric-card > span { display: block; font-size: 0.72rem; color: var(--gray-500); margin-bottom: 6px; } .ric-card small { color: var(--gray-500); }
   .ric-table { margin-bottom: 8px; }
+  .ric-forn { border: 1px solid var(--gray-200); border-radius: 12px; padding: 10px 12px 4px; margin-bottom: 10px; } .ric-forn-h { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 0.86rem; } .ric-forn .ric-it { font-size: 0.82rem; } .ric-forn .ric-it .bs2-m { margin-left: 4px; } .ric-forn .ric-img { background: var(--gray-100); }
   .ric-ta { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 0.82rem; line-height: 1.5; padding: 12px; border: 1px solid var(--gray-200); border-radius: 12px; background: #fff; resize: vertical; margin-bottom: 8px; }
   .ric-row { display: grid; grid-template-columns: minmax(0,1.6fr) minmax(0,0.8fr) 70px minmax(0,1fr) 88px; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--gray-100); font-size: 0.82rem; }
   .ric-row.ric-3 { grid-template-columns: minmax(0,1.4fr) minmax(0,1fr) 70px; }
@@ -2143,7 +2144,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.36</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.37</p>
       </div>
     </div>
     <div class="header-right">
@@ -4006,11 +4007,12 @@ var RIC_DATA = null, RIC_FILTRO = 'tutti';
 function ricYoy(v) { if (v === null || v === undefined) return '<span class="ric-na">n.d.</span>'; return '<span class="bs2-m ' + (v >= 40 ? 'ok' : (v < 0 ? 'low' : 'mid')) + '">' + (v > 0 ? '+' : '') + v + '%</span>'; }
 var RIC_SEGNALI = { opportunita: ['Opportunità', 'ok'], rafforza: ['Rafforza', 'ok'], tieni: ['Tieni', 'mid'], neutro: ['—', ''], 'in calo': ['In calo', 'low'], attenzione: ['Attenzione', 'low'] };
 function ricItem(foto, testo, sotto) { return '<div class="ric-it"><span class="ric-img">' + (foto ? '<img src="' + bsEsc(foto) + (foto.indexOf('?') > -1 ? '&' : '?') + 'width=120" loading="lazy" alt="">' : '◇') + '</span><span>' + testo + (sotto ? '<small>' + sotto + '</small>' : '') + '</span></div>'; }
-function ricCopia() {
-  var ta = document.getElementById('ric-fornitori'); if (!ta) return;
-  var ok = function () { var e = document.getElementById('ric-copia-esito'); if (e) e.textContent = 'Copiato: incollalo nel messaggio al fornitore.'; };
-  if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(ta.value).then(ok, function () { ta.select(); document.execCommand('copy'); ok(); }); }
-  else { ta.select(); document.execCommand('copy'); ok(); }
+var RIC_TESTI = {};
+function ricCopia(k) {
+  var testo = RIC_TESTI[k] || ''; if (!testo) return;
+  var ok = function () { var e = document.getElementById('ric-copia-esito'); if (e) e.textContent = 'Copiato (' + (k === 'tutto' ? 'borse e scarpe' : k.toLowerCase()) + '): incollalo nel messaggio al fornitore.'; };
+  var fallback = function () { var ta = document.createElement('textarea'); ta.value = testo; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e) {} document.body.removeChild(ta); ok(); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(testo).then(ok, fallback); else fallback();
 }
 function ricFiltro(f) { RIC_FILTRO = f; renderRicerche(RIC_DATA); }
 function caricaRicerche(refresh) {
@@ -4033,16 +4035,25 @@ function renderRicerche(d) {
       + (att.length ? '<div class="ric-card low"><b>Attenzione</b><span>In calo su Miinto e tanti prodotti da noi</span>' + att.map(function (b) { return '<div>' + bsEsc(b.brand) + ' <small>' + b.cat + ' · ' + b.yoy + '% · ' + b.tluxy_attivi + ' attivi</small></div>'; }).join('') + '</div>' : '') + '</div>';
   }
   if (opp.length) {
-    var oppOrd = opp.slice().sort(function (a, b) { return (b.yoy || 0) - (a.yoy || 0); });
     var NL = String.fromCharCode(10);
-    var righeF = oppOrd.map(function (b) {
-      var mods = (b.modelli || []).slice(0, 2).map(function (m) { return m.split(' · ')[0].split(' (')[0].trim(); }).filter(Boolean);
-      return '- ' + b.brand + ' (' + b.cat.toLowerCase() + ')' + (mods.length ? ': ' + mods.join(', ') : '');
-    });
-    var testoF = 'Buongiorno,' + NL + 'per la SS27 siamo interessati a disponibilità e prezzi per questi brand e modelli (colori preferiti: nero, marrone, beige):' + NL + NL + righeF.join(NL) + NL + NL + 'Grazie,' + NL + 'Alessio – T.Luxy';
-    html += '<div class="bs2-head"><div class="bs2-sec" style="margin:0">Lista acquisti per i fornitori (' + opp.length + ' brand)</div><button class="bs2-chip on" onclick="ricCopia()">Copia</button></div>'
-      + '<textarea id="ric-fornitori" class="ric-ta" readonly rows="' + Math.min(18, righeF.length + 7) + '">' + bsEsc(testoF) + '</textarea>'
-      + '<div class="alerts-meta" id="ric-copia-esito" style="margin:-4px 0 16px">Solo brand e modelli, senza nostri numeri: pronto da incollare in email o WhatsApp.</div>';
+    var oppOrd = opp.slice().sort(function (a, b) { return (b.yoy || 0) - (a.yoy || 0); });
+    var modsDi = function (b) { return (b.modelli || []).slice(0, 2).map(function (m) { return m.split(' · ')[0].split(' (')[0].trim(); }).filter(Boolean); };
+    var gruppi = [['Borse', oppOrd.filter(function (b) { return b.cat === 'Borse'; })], ['Scarpe', oppOrd.filter(function (b) { return b.cat === 'Scarpe'; })]].filter(function (g) { return g[1].length; });
+    var testoGruppo = function (g) { return g[0].toUpperCase() + NL + g[1].map(function (b) { var m = modsDi(b); return '- ' + b.brand + (m.length ? ': ' + m.join(', ') : ''); }).join(NL); };
+    var intro = 'Buongiorno,' + NL + 'per la SS27 siamo interessati a disponibilità e prezzi per questi brand e modelli (colori preferiti: nero, marrone, beige):' + NL + NL;
+    var firma = NL + NL + 'Grazie,' + NL + 'Alessio – T.Luxy';
+    RIC_TESTI = { tutto: intro + gruppi.map(testoGruppo).join(NL + NL) + firma };
+    gruppi.forEach(function (g) { RIC_TESTI[g[0]] = intro + testoGruppo(g) + firma; });
+    html += '<div class="bs2-head"><div class="bs2-sec" style="margin:0">Lista acquisti per i fornitori (' + opp.length + ' brand)</div><button class="bs2-chip on" data-k="tutto" onclick="ricCopia(this.dataset.k)">Copia tutto</button></div>';
+    html += gruppi.map(function (g) {
+      return '<div class="ric-forn"><div class="ric-forn-h"><b>' + g[0] + ' · ' + g[1].length + '</b><button class="bs2-chip" data-k="' + g[0] + '" onclick="ricCopia(this.dataset.k)">Copia ' + g[0].toLowerCase() + '</button></div>'
+        + g[1].map(function (b) {
+          var foto = ((b.modelli_foto || []).filter(Boolean)[0]) || ((b.tluxy_top || []).map(function (t) { return t.foto; }).filter(Boolean)[0]) || null;
+          var m = modsDi(b);
+          return ricItem(foto, '<b>' + bsEsc(b.brand) + '</b> <span class="bs2-m ok">' + (b.yoy > 0 ? '+' : '') + b.yoy + '%</span>', m.length ? bsEsc(m.join(', ')) : 'modelli non indicati nel report');
+        }).join('') + '</div>';
+    }).join('');
+    html += '<div class="alerts-meta" id="ric-copia-esito" style="margin:0 0 16px">Il testo copiato contiene solo brand e modelli, senza nostri numeri: pronto per email o WhatsApp.</div>';
   }
   html += '<div class="bs2-head"><div class="bs2-sec" style="margin:0">Brand: Miinto vs TLuxy</div><div class="bs2-chips">' + [['tutti', 'Tutti'], ['Borse', 'Borse'], ['Scarpe', 'Scarpe']].map(function (c) { return '<button class="bs2-chip' + (RIC_FILTRO === c[0] ? ' on' : '') + '" data-f="' + c[0] + '" onclick="ricFiltro(this.dataset.f)">' + c[1] + '</button>'; }).join('') + '</div></div>';
   var rows = d.brand.filter(function (b) { return RIC_FILTRO === 'tutti' || b.cat === RIC_FILTRO; });
@@ -4335,7 +4346,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.36', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.37', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
