@@ -1707,55 +1707,55 @@ const MIINTO_SS27 = {
     'Regola di acquisto: 70% modelli già provati, 30% novità SS27.'
   ],
   brand: [
-    { brand: 'Jacquemus', cat: 'Borse', quota: 9.8, prezzo: 613, sconto: 92, yoy: null, nota: 'n.1 borse; Le Grand Bambino nero n.1 per GMV e pezzi', modelli: ['Le Grand Bambino nero · €652 · sell-through 61%', 'The Large Bambino nero · €612'] },
-    { brand: 'Saint Laurent', cat: 'Borse', quota: 9.2, prezzo: 1939, sconto: 65, yoy: 170, nota: 'Lou Camera, Envelope, Cassandra; sell-through 100% su più modelli', modelli: ['Envelope Medium nero · €2.376 · sell-through 100%', 'Le 5 à 7 Supple Small nero · €2.817'] },
-    { brand: 'Marc Jacobs', cat: 'Borse', quota: 4.9, prezzo: 258, sconto: 90, yoy: -48, nota: 'tote in tela, volume ma in calo', modelli: ['The Medium Tote nero · €170', 'The Leather Mini Bag nero · €167'] },
-    { brand: 'Mulberry', cat: 'Borse', quota: 3.3, prezzo: 1083, sconto: 49, yoy: -29, nota: 'ridurre', modelli: ['Lily'] },
-    { brand: 'Chloé', cat: 'Borse', quota: 2.9, prezzo: 1067, sconto: 75, yoy: null, nota: 'core in Germania/Olanda', modelli: ['Marcie Mini · €1.450'] },
-    { brand: 'Gucci', cat: 'Borse', quota: 2.9, prezzo: 1440, sconto: 73, yoy: 74, nota: 'Dionysus ricerche +400%', modelli: ['Dionysus (ricerche +400%)'] },
-    { brand: 'Ganni', cat: 'Borse', quota: 2.8, prezzo: 342, sconto: 61, yoy: 103, nota: 'Bou Bag', modelli: ['Suede Bou Bag · €475', 'Mini Bou Bag · €345'] },
-    { brand: 'Coach', cat: 'Borse', quota: 2.6, prezzo: 405, sconto: 35, yoy: 40, nota: 'Tabby', modelli: ['Tabby Shoulder · €495', 'Field Tote 22 · €425'] },
-    { brand: 'Balenciaga', cat: 'Borse', quota: 2.6, prezzo: 2150, sconto: 58, yoy: 66, nota: '' },
-    { brand: 'Isabel Marant', cat: 'Borse', quota: 2.3, prezzo: 371, sconto: 75, yoy: 40, nota: '', modelli: ['Oscan Soft Zip · €850', 'Bahia · €550'] },
-    { brand: 'Tory Burch', cat: 'Borse', quota: 2.0, prezzo: 428, sconto: 87, yoy: null, nota: '', modelli: ['Ella Patent Tote · €345'] },
-    { brand: 'Celine', cat: 'Borse', quota: 1.7, prezzo: 2114, sconto: 50, yoy: -19, nota: 'ridurre acquisti; Triomphe resta desiderata in Polonia', modelli: ['Triomphe (la più desiderata in Polonia)', 'Luggage (ricerche +245%)'] },
-    { brand: 'Burberry', cat: 'Borse', quota: 1.6, prezzo: 861, sconto: 90, yoy: null, nota: '', modelli: ['Borsa a spalla check beige · €815 · sell-through 100%'] },
+    { brand: 'Jacquemus', cat: 'Borse', quota: 9.8, prezzo: 613, sconto: 92, yoy: null, nota: 'n.1 borse; Le Grand Bambino nero n.1 per GMV e pezzi', modelli: ['Le Grand Bambino nero · €652 · sell-through 61%', 'The Large Bambino nero · €612'], foto_web: 'https://cdn-images.farfetch-contents.com/29/88/45/90/29884590_59797248_600.jpg' },
+    { brand: 'Saint Laurent', cat: 'Borse', quota: 9.2, prezzo: 1939, sconto: 65, yoy: 170, nota: 'Lou Camera, Envelope, Cassandra; sell-through 100% su più modelli', modelli: ['Envelope Medium nero · €2.376 · sell-through 100%', 'Le 5 à 7 Supple Small nero · €2.817'], foto_web: 'https://saint-laurent.dam.kering.com/m/d526dcba7c6d517/eCom-600185BOW911000_A.jpg?v=7' },
+    { brand: 'Marc Jacobs', cat: 'Borse', quota: 4.9, prezzo: 258, sconto: 90, yoy: -48, nota: 'tote in tela, volume ma in calo', modelli: ['The Medium Tote nero · €170', 'The Leather Mini Bag nero · €167'], foto_web: 'https://cdn-images.farfetch-contents.com/17/98/09/40/17980940_53563817_1000.jpg' },
+    { brand: 'Mulberry', cat: 'Borse', quota: 3.3, prezzo: 1083, sconto: 49, yoy: -29, nota: 'ridurre', modelli: ['Lily'], foto_web: 'https://images.mulberry.com/i/mulberrygroup/G_HH8733_552G110_7?$pdp-zoom-1024px$&img404=404&v=13' },
+    { brand: 'Chloé', cat: 'Borse', quota: 2.9, prezzo: 1067, sconto: 75, yoy: null, nota: 'core in Germania/Olanda', modelli: ['Marcie Mini · €1.450'], foto_web: 'https://www.chloe.com/dw/image/v2/BLMX_PRD/on/demandware.static/-/Sites-chloe-master/default/dw6c8ca41d/images/all-images/CH26SP927R3526M/4r0fGKjHRdeGetiUEgsk8w_acc4ec81.jpeg?sw=600&sfrm=png&q=90' },
+    { brand: 'Gucci', cat: 'Borse', quota: 2.9, prezzo: 1440, sconto: 73, yoy: 74, nota: 'Dionysus ricerche +400%', modelli: ['Dionysus (ricerche +400%)'], foto_web: 'https://media.gucci.com/style/DarkGray_Center_0_0_490x490/1778594440/876531_FAF7S_9642_003_100_0000_Light-dionysus-small-shoulder-bag.jpg' },
+    { brand: 'Ganni', cat: 'Borse', quota: 2.8, prezzo: 342, sconto: 61, yoy: 103, nota: 'Bou Bag', modelli: ['Suede Bou Bag · €475', 'Mini Bou Bag · €345'], foto_web: 'https://ganni.kleecks-cdn.com/dw/image/v2/AAWT_PRD/on/demandware.static/-/Sites-ganni-master-catalogue/default/dw5f50e909/images/images/packshots/B2070016_979_1.jpg?sh=600' },
+    { brand: 'Coach', cat: 'Borse', quota: 2.6, prezzo: 405, sconto: 35, yoy: 40, nota: 'Tabby', modelli: ['Tabby Shoulder · €495', 'Field Tote 22 · €425'], foto_web: 'https://coach.scene7.com/is/image/Coach/ccx04_b4mpl_a0' },
+    { brand: 'Balenciaga', cat: 'Borse', quota: 2.6, prezzo: 2150, sconto: 58, yoy: 66, nota: '', modelli: ['Le Cagole (riferimento)'], foto_web: 'https://balenciaga.dam.kering.com/m/14b9682b34a160cf/Medium-6713091VG9Y1000_H.jpg?v=4' },
+    { brand: 'Isabel Marant', cat: 'Borse', quota: 2.3, prezzo: 371, sconto: 75, yoy: 40, nota: '', modelli: ['Oscan Soft Zip · €850', 'Bahia · €550'], foto_web: 'https://www.net-a-porter.com/variants/images/1647597349483271/ou/w2000_q60.jpg' },
+    { brand: 'Tory Burch', cat: 'Borse', quota: 2.0, prezzo: 428, sconto: 87, yoy: null, nota: '', modelli: ['Ella Patent Tote · €345'], foto_web: 'https://n.nordstrommedia.com/it/2d5ef11d-3ce3-4362-b4f3-ca780a943269.jpeg?w=780&h=1170&crop=pad' },
+    { brand: 'Celine', cat: 'Borse', quota: 1.7, prezzo: 2114, sconto: 50, yoy: -19, nota: 'ridurre acquisti; Triomphe resta desiderata in Polonia', modelli: ['Triomphe (la più desiderata in Polonia)', 'Luggage (ricerche +245%)'], foto_web: 'https://www.celine.com/on/demandware.static/-/Sites-masterCatalog/default/dw36f0bdd8/images/large/187363BF4.38NO_1_SS24_W_V5.jpg' },
+    { brand: 'Burberry', cat: 'Borse', quota: 1.6, prezzo: 861, sconto: 90, yoy: null, nota: '', modelli: ['Borsa a spalla check beige · €815 · sell-through 100%'], foto_web: 'https://assets.burberry.com/is/image/Burberryltd/B4579917-0A46-44D8-94C4-B9930E57CE82?$BBY_V3_SL_1$&wid=600&hei=600' },
     { brand: 'Valentino Garavani', cat: 'Borse', quota: 1.6, prezzo: 1398, sconto: 81, yoy: null, nota: '' },
-    { brand: 'Toteme', cat: 'Borse', quota: 1.5, prezzo: 840, sconto: 71, yoy: 878, nota: 'T-Lock: nuovo eroe quiet luxury', modelli: ['T-Lock Top-Handle · €890'] },
-    { brand: 'Dragon Diffusion', cat: 'Borse', quota: 1.5, prezzo: 386, sconto: 47, yoy: 55, nota: 'intrecciato, Sud Europa', modelli: ['Santa Croce Small · €432', 'Half Moon Tote · €495'] },
+    { brand: 'Toteme', cat: 'Borse', quota: 1.5, prezzo: 840, sconto: 71, yoy: 878, nota: 'T-Lock: nuovo eroe quiet luxury', modelli: ['T-Lock Top-Handle · €890'], foto_web: 'https://toteme.com/cdn/shop/files/TOTEME_SS23_BAGS_232-9103-612_T-LOCK_TOP_HANDLE_SOLID_BLACK_1_GB_2a033a90-0950-4b6a-ae3e-cfab7fd6b4dc.jpg?v=1731414043&width=600' },
+    { brand: 'Dragon Diffusion', cat: 'Borse', quota: 1.5, prezzo: 386, sconto: 47, yoy: 55, nota: 'intrecciato, Sud Europa', modelli: ['Santa Croce Small · €432', 'Half Moon Tote · €495'], foto_web: 'https://dragondiffusion.com/cdn/shop/files/dragon-diffusion-leather-bag-handmade-santa-croce-small-black-1.webp?v=1721735908&width=600' },
     { brand: 'Dolce & Gabbana', cat: 'Borse', quota: 1.4, prezzo: 1254, sconto: 79, yoy: -17, nota: 'ridurre' },
-    { brand: 'Prada', cat: 'Borse', quota: 1.2, prezzo: 1709, sconto: 66, yoy: 71, nota: 'Re-Edition', modelli: ['Re-Edition 2005'] },
-    { brand: 'Fendi', cat: 'Borse', quota: 1.2, prezzo: 1680, sconto: 54, yoy: null, nota: 'Baguette e Spy in forte domanda nel resale', modelli: ['Baguette', 'Spy'] },
+    { brand: 'Prada', cat: 'Borse', quota: 1.2, prezzo: 1709, sconto: 66, yoy: 71, nota: 'Re-Edition', modelli: ['Re-Edition 2005'], foto_web: 'https://www.prada.com/content/dam/pradabkg_products/1/1BH/1BH204/R064F0002/1BH204_R064_F0002_V_V9L_SLO.jpg' },
+    { brand: 'Fendi', cat: 'Borse', quota: 1.2, prezzo: 1680, sconto: 54, yoy: null, nota: 'Baguette e Spy in forte domanda nel resale', modelli: ['Baguette', 'Spy'], foto_web: 'https://static.fendi.com/dam/is/image/fendi/8BR600AT57F15ZW_01?wid=600&hei=600&hash=8d6719182feadb9918a823edf161af18-19f8e3f7857' },
     { brand: "Tod's", cat: 'Borse', quota: 1.1, prezzo: 1309, sconto: 83, yoy: null, nota: '' },
-    { brand: 'Michael Kors', cat: 'Borse', quota: 1.1, prezzo: 210, sconto: 88, yoy: 31, nota: '', modelli: ['Parker Crossbody · €375'] },
-    { brand: 'Yuzefi', cat: 'Borse', quota: 1.0, prezzo: 596, sconto: 39, yoy: 1841, nota: 'Fortune Cookie Hobo', modelli: ['Fortune Cookie Hobo · €449'] },
-    { brand: 'DeMellier', cat: 'Borse', quota: 1.0, prezzo: 559, sconto: 56, yoy: 655, nota: 'New York Tote, Alexandria', modelli: ['New York Tote · €560', 'Mini Alexandria · €375'] },
-    { brand: 'Acne Studios', cat: 'Borse', quota: 0.8, prezzo: 1288, sconto: 42, yoy: 51, nota: 'Musubi', modelli: ['Musubi Tote in pelle · €1.500'] },
-    { brand: 'Diesel', cat: 'Borse', quota: null, prezzo: 450, sconto: null, yoy: 161, nota: 'volume driver', modelli: ['Camera Bag · €450'] },
-    { brand: 'Bottega Veneta', cat: 'Borse', quota: null, prezzo: null, sconto: null, yoy: null, nota: 'intrecciato: icona SS27 artigianale; Veneta Hobo ricerche +146%', modelli: ['Intrecciato Cabat / Andiamo · €3.800', 'Veneta Hobo (ricerche +146%)'] },
-    { brand: 'Miu Miu', cat: 'Borse', quota: null, prezzo: null, sconto: null, yoy: null, nota: 'Aventure (intrecciato) tra i riferimenti SS27', modelli: ['Aventure · €2.500'] },
-    { brand: 'UGG', cat: 'Scarpe', quota: 8.7, prezzo: 162, sconto: 13, yoy: null, nota: 'Tasman/Tazz: pantofole +101% donna, +120% uomo', modelli: ['Tasman II / Tazz II · €150', 'Classic Ultra Mini · €168'] },
-    { brand: 'Golden Goose', cat: 'Scarpe', quota: 8.6, prezzo: 486, sconto: 9, yoy: 21, nota: 'Super-Star; uomo 6,5% +19%', modelli: ['Super-Star bianca · €520', 'Ball Star bianca · €488'] },
-    { brand: 'Autry', cat: 'Scarpe', quota: 4.7, prezzo: 168, sconto: 16, yoy: 32, nota: 'Medalist; n.1 uomo 7,5%', modelli: ['Medalist Low · €195'] },
-    { brand: 'Hogan', cat: 'Scarpe', quota: 3.7, prezzo: 348, sconto: 20, yoy: null, nota: 'core Centro Europa', modelli: ['H461'] },
-    { brand: 'Moon Boot', cat: 'Scarpe', quota: 3.2, prezzo: 194, sconto: 17, yoy: 38, nota: '', modelli: ['Icon Nylon nero · €182', 'Icon Low nero · €160'] },
-    { brand: 'Philippe Model', cat: 'Scarpe', quota: 5.6, prezzo: 218, sconto: 30, yoy: 46, nota: 'uomo: PRSX n.1', modelli: ['PRSX Basic bianca · €306', 'PRSX Tennis blu · €209'] },
-    { brand: 'Premiata', cat: 'Scarpe', quota: 1.8, prezzo: 232, sconto: 15, yoy: null, nota: '', modelli: ['Belle · €280', 'Lus · €290'] },
-    { brand: 'Christian Louboutin', cat: 'Scarpe', quota: 1.2, prezzo: 726, sconto: 8, yoy: 169, nota: 'Kate 100; Polonia +349%', modelli: ['Kate 100 nera · €741'] },
-    { brand: 'Inuikii', cat: 'Scarpe', quota: 1.1, prezzo: 223, sconto: 23, yoy: 130, nota: '', modelli: ['Classic Low suede · €285'] },
-    { brand: 'ALOHAS', cat: 'Scarpe', quota: 1.0, prezzo: 166, sconto: 9, yoy: 71, nota: '', modelli: ['Cassidy Mule · €195'] },
-    { brand: 'Prada', cat: 'Scarpe', quota: 0.8, prezzo: 803, sconto: 18, yoy: 142, nota: '' },
-    { brand: 'Gucci', cat: 'Scarpe', quota: 1.9, prezzo: 608, sconto: 29, yoy: 138, nota: 'uomo', modelli: ['Mocassino (Polonia)'] },
-    { brand: 'Dior', cat: 'Scarpe', quota: 1.0, prezzo: 812, sconto: 24, yoy: 115, nota: 'uomo; B22', modelli: ['B22'] },
-    { brand: 'Red Wing Shoes', cat: 'Scarpe', quota: 1.3, prezzo: 307, sconto: 18, yoy: 374, nota: 'uomo, Iron Ranger', modelli: ['Iron Ranger · €380'] },
-    { brand: 'Timberland', cat: 'Scarpe', quota: 1.2, prezzo: 167, sconto: 20, yoy: 101, nota: 'uomo, 6-Inch', modelli: ['Premium 6-Inch marrone · €210'] },
-    { brand: 'Santoni', cat: 'Scarpe', quota: 2.6, prezzo: 552, sconto: 20, yoy: 30, nota: 'uomo', modelli: ['Carlo suede loafer · €890'] },
-    { brand: 'Maison Margiela', cat: 'Scarpe', quota: 1.2, prezzo: 607, sconto: 9, yoy: 36, nota: 'uomo, Replica/Tabi', modelli: ['Replica', 'Tabi'] },
-    { brand: 'Axel Arigato', cat: 'Scarpe', quota: 3.4, prezzo: 238, sconto: 10, yoy: -55, nota: 'ridurre', modelli: ['Clean 90 · €230'] },
+    { brand: 'Michael Kors', cat: 'Borse', quota: 1.1, prezzo: 210, sconto: 88, yoy: 31, nota: '', modelli: ['Parker Crossbody · €375'], foto_web: 'https://assets.michaelkors.com/transform/ECOM_Image_Large/e77b11b3-e8c2-44a0-8be2-f872d8ea5650/32H3G7PC3B-099-0160_1-tif' },
+    { brand: 'Yuzefi', cat: 'Borse', quota: 1.0, prezzo: 596, sconto: 39, yoy: 1841, nota: 'Fortune Cookie Hobo', modelli: ['Fortune Cookie Hobo · €449'], foto_web: 'https://cdn-images.farfetch-contents.com/24/26/50/76/24265076_54308107_600.jpg' },
+    { brand: 'DeMellier', cat: 'Borse', quota: 1.0, prezzo: 559, sconto: 56, yoy: 655, nota: 'New York Tote, Alexandria', modelli: ['New York Tote · €560', 'Mini Alexandria · €375'], foto_web: 'https://demellierlondon.com/cdn/shop/files/The-New-York-work-bag-black-small-grain-1.jpg?v=1763106744&width=600' },
+    { brand: 'Acne Studios', cat: 'Borse', quota: 0.8, prezzo: 1288, sconto: 42, yoy: 51, nota: 'Musubi', modelli: ['Musubi Tote in pelle · €1.500'], foto_web: 'https://www.net-a-porter.com/variants/images/1647597343833467/ou/w2000_q60.jpg' },
+    { brand: 'Diesel', cat: 'Borse', quota: null, prezzo: 450, sconto: null, yoy: 161, nota: 'volume driver', modelli: ['Camera Bag · €450'], foto_web: 'https://diesel.com/dw/image/v2/BBLG_PRD/on/demandware.static/-/Sites-diesel-master-catalog/default/dw946e356e/images/large/X10223_PR818_T8013_G.jpg?q=80' },
+    { brand: 'Bottega Veneta', cat: 'Borse', quota: null, prezzo: null, sconto: null, yoy: null, nota: 'intrecciato: icona SS27 artigianale; Veneta Hobo ricerche +146%', modelli: ['Intrecciato Cabat / Andiamo · €3.800', 'Veneta Hobo (ricerche +146%)'], foto_web: 'https://www.net-a-porter.com/variants/images/1647597326482827/ou/w2000_q60.jpg' },
+    { brand: 'Miu Miu', cat: 'Borse', quota: null, prezzo: null, sconto: null, yoy: null, nota: 'Aventure (intrecciato) tra i riferimenti SS27', modelli: ['Aventure · €2.500'], foto_web: 'https://www.miumiu.com/content/dam/miumiubkg_products/5/5BG/5BG291/2BBLF0NBL/5BG291_2BBL_F0NBL_V_OON_SLF.jpg' },
+    { brand: 'UGG', cat: 'Scarpe', quota: 8.7, prezzo: 162, sconto: 13, yoy: null, nota: 'Tasman/Tazz: pantofole +101% donna, +120% uomo', modelli: ['Tasman II / Tazz II · €150', 'Classic Ultra Mini · €168'], foto_web: 'https://dms.deckers.com/ugg/image/upload/t_product-xlarge-wp/v1741285640/1174470-CHE_1.png?_s=RAABAB0' },
+    { brand: 'Golden Goose', cat: 'Scarpe', quota: 8.6, prezzo: 486, sconto: 9, yoy: 21, nota: 'Super-Star; uomo 6,5% +19%', modelli: ['Super-Star bianca · €520', 'Ball Star bianca · €488'], foto_web: 'https://static2.goldengoose.com/public/Style/ECOMM/GWF00105.F003347-10220.jpg' },
+    { brand: 'Autry', cat: 'Scarpe', quota: 4.7, prezzo: 168, sconto: 16, yoy: 32, nota: 'Medalist; n.1 uomo 7,5%', modelli: ['Medalist Low · €195'], foto_web: 'https://static.autry-usa.com/articoli/sneakers_medalist_low_in_pelle_bianca_848190_dettaglio_02_20260709112554.jpg' },
+    { brand: 'Hogan', cat: 'Scarpe', quota: 3.7, prezzo: 348, sconto: 20, yoy: null, nota: 'core Centro Europa', modelli: ['H461'], foto_web: 'https://cdn.germainecollard.com/proxy/97260_1.JPG/' },
+    { brand: 'Moon Boot', cat: 'Scarpe', quota: 3.2, prezzo: 194, sconto: 17, yoy: 38, nota: '', modelli: ['Icon Nylon nero · €182', 'Icon Low nero · €160'], foto_web: 'https://cdn-images.farfetch-contents.com/17/75/58/52/17755852_50575637_1000.jpg' },
+    { brand: 'Philippe Model', cat: 'Scarpe', quota: 5.6, prezzo: 218, sconto: 30, yoy: 46, nota: 'uomo: PRSX n.1', modelli: ['PRSX Basic bianca · €306', 'PRSX Tennis blu · €209'], foto_web: 'https://cdn.shopify.com/s/files/1/0771/7204/8174/files/PRLU__1011_1.png?v=1699405441&width=600' },
+    { brand: 'Premiata', cat: 'Scarpe', quota: 1.8, prezzo: 232, sconto: 15, yoy: null, nota: '', modelli: ['Belle · €280', 'Lus · €290'], foto_web: 'https://www.premiata.us/cdn/shop/files/BEL07813_4_0b9bfcce-7c8b-4b22-b710-17306a7a08e5.jpg?crop=center&height=750&v=1769168622&width=600' },
+    { brand: 'Christian Louboutin', cat: 'Scarpe', quota: 1.2, prezzo: 726, sconto: 8, yoy: 169, nota: 'Kate 100; Polonia +349%', modelli: ['Kate 100 nera · €741'], foto_web: 'https://us.christianlouboutin.com/media/catalog/product/3/1/3191411bk01-3191411bk01-main_image-ecommerce-fw19_kate_100_patent.jpg' },
+    { brand: 'Inuikii', cat: 'Scarpe', quota: 1.1, prezzo: 223, sconto: 23, yoy: 130, nota: '', modelli: ['Classic Low suede · €285'], foto_web: 'https://www.inuikii.com/cdn/shop/files/1001.001.0092.152_3.jpg?v=1787260530&width=600' },
+    { brand: 'ALOHAS', cat: 'Scarpe', quota: 1.0, prezzo: 166, sconto: 9, yoy: 71, nota: '', modelli: ['Cassidy Mule · €195'], foto_web: 'https://images.urbndata.com/is/image/FreePeople/101193597_012_d/?$a15-pdp-detail-shot$&fit=constrain&qlt=80&wid=640' },
+    { brand: 'Prada', cat: 'Scarpe', quota: 0.8, prezzo: 803, sconto: 18, yoy: 142, nota: '', modelli: ['Monolith loafer (riferimento)'], foto_web: 'https://www.prada.com/content/dam/pradabkg_products/1/1D6/1D649M/B4LF0002/1D649M_B4L_F0002_F_G055_SLR.jpg' },
+    { brand: 'Gucci', cat: 'Scarpe', quota: 1.9, prezzo: 608, sconto: 29, yoy: 138, nota: 'uomo', modelli: ['Mocassino (Polonia)'], foto_web: 'https://media.gucci.com/style/DarkGray_Center_0_0_490x490/1702979103/307929_BLM00_1000_002_100_0000_Light-mens-horsebit-1953-loafer.jpg' },
+    { brand: 'Dior', cat: 'Scarpe', quota: 1.0, prezzo: 812, sconto: 24, yoy: 115, nota: 'uomo; B22', modelli: ['B22'], foto_web: 'https://i.ebayimg.com/images/g/1l8AAeSwLDNqBZ6w/s-l1200.jpg' },
+    { brand: 'Red Wing Shoes', cat: 'Scarpe', quota: 1.3, prezzo: 307, sconto: 18, yoy: 374, nota: 'uomo, Iron Ranger', modelli: ['Iron Ranger · €380'], foto_web: 'https://embed.widencdn.net/img/redwing/vhngyoup5h/1200x1200px/RW08111C_MUL_N1_0418.webp?keep=S&position=S&crop=no&color=F2F2F2' },
+    { brand: 'Timberland', cat: 'Scarpe', quota: 1.2, prezzo: 167, sconto: 20, yoy: 101, nota: 'uomo, 6-Inch', modelli: ['Premium 6-Inch marrone · €210'], foto_web: 'https://assets.timberland.com/images/t_img/f_auto,h_600,e_sharpen:60,w_600/dpr_2.0/v1741199070/TB110061713-HERO/Mens-Timberland-Premium-6Inch-Waterproof-Boot-TBL-Wheat-Nubuck-HERO.png' },
+    { brand: 'Santoni', cat: 'Scarpe', quota: 2.6, prezzo: 552, sconto: 20, yoy: 30, nota: 'uomo', modelli: ['Carlo suede loafer · €890'], foto_web: 'https://cdn-images.farfetch-contents.com/22/67/05/73/22670573_53534889_600.jpg' },
+    { brand: 'Maison Margiela', cat: 'Scarpe', quota: 1.2, prezzo: 607, sconto: 9, yoy: 36, nota: 'uomo, Replica/Tabi', modelli: ['Replica', 'Tabi'], foto_web: 'https://www.mrporter.com/variants/images/1647597278218578/ou/w2000_q60.jpg' },
+    { brand: 'Axel Arigato', cat: 'Scarpe', quota: 3.4, prezzo: 238, sconto: 10, yoy: -55, nota: 'ridurre', modelli: ['Clean 90 · €230'], foto_web: 'https://www.mrporter.com/variants/images/1647597336654577/ou/w2000_q60.jpg' },
     { brand: 'Off White', cat: 'Scarpe', quota: 2.0, prezzo: 407, sconto: 16, yoy: -39, nota: 'ridurre' },
-    { brand: 'Stuart Weitzman', cat: 'Scarpe', quota: 0.8, prezzo: 344, sconto: 34, yoy: -40, nota: 'ridurre', modelli: ['Nudistia · €425'] },
-    { brand: 'Salomon', cat: 'Scarpe', quota: null, prezzo: 160, sconto: null, yoy: null, nota: 'XT-6: trail sneaker, forte in UK/USA', modelli: ['XT-6 · €160'] },
-    { brand: 'New Balance', cat: 'Scarpe', quota: 2.1, prezzo: 152, sconto: 15, yoy: null, nota: '550/327, 1906R', modelli: ['1906R · €175', '550 / 327'] }
+    { brand: 'Stuart Weitzman', cat: 'Scarpe', quota: 0.8, prezzo: 344, sconto: 34, yoy: -40, nota: 'ridurre', modelli: ['Nudistia · €425'], foto_web: 'https://m.media-amazon.com/images/I/615xkhRHJtL._AC_UY900_.jpg' },
+    { brand: 'Salomon', cat: 'Scarpe', quota: null, prezzo: 160, sconto: null, yoy: null, nota: 'XT-6: trail sneaker, forte in UK/USA', modelli: ['XT-6 · €160'], foto_web: 'https://cdn.dam.salomon.com/75c57008-3baf-486b-8538-b37900898a7d/L45416900/PNG-2000px-max-72dpi.png?width=600&fit=cover&optimize=medium&bg-color=f5f5f5&format=pjpg' },
+    { brand: 'New Balance', cat: 'Scarpe', quota: 2.1, prezzo: 152, sconto: 15, yoy: null, nota: '550/327, 1906R', modelli: ['1906R · €175', '550 / 327'], foto_web: 'https://nb.scene7.com/is/image/NB/u1906567_nb_02_i?$pdpflexf2$&wid=440&hei=440' }
   ],
   borse_forme: [
     { forma: 'Borse a mano', quota: 33.1, prezzo: 540, yoy: null }, { forma: 'Borse a spalla', quota: 28.9, prezzo: 523, yoy: null },
@@ -2144,7 +2144,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.37</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.38</p>
       </div>
     </div>
     <div class="header-right">
@@ -4006,7 +4006,7 @@ function caricaMeseStrip() {
 var RIC_DATA = null, RIC_FILTRO = 'tutti';
 function ricYoy(v) { if (v === null || v === undefined) return '<span class="ric-na">n.d.</span>'; return '<span class="bs2-m ' + (v >= 40 ? 'ok' : (v < 0 ? 'low' : 'mid')) + '">' + (v > 0 ? '+' : '') + v + '%</span>'; }
 var RIC_SEGNALI = { opportunita: ['Opportunità', 'ok'], rafforza: ['Rafforza', 'ok'], tieni: ['Tieni', 'mid'], neutro: ['—', ''], 'in calo': ['In calo', 'low'], attenzione: ['Attenzione', 'low'] };
-function ricItem(foto, testo, sotto) { return '<div class="ric-it"><span class="ric-img">' + (foto ? '<img src="' + bsEsc(foto) + (foto.indexOf('?') > -1 ? '&' : '?') + 'width=120" loading="lazy" alt="">' : '◇') + '</span><span>' + testo + (sotto ? '<small>' + sotto + '</small>' : '') + '</span></div>'; }
+function ricItem(foto, testo, sotto) { return '<div class="ric-it"><span class="ric-img">' + (foto ? '<img src="' + bsEsc(foto.indexOf('cdn.shopify.com') > -1 ? foto + (foto.indexOf('?') > -1 ? '&' : '?') + 'width=120' : foto) + '" loading="lazy" referrerpolicy="no-referrer" alt="">' : '◇') + '</span><span>' + testo + (sotto ? '<small>' + sotto + '</small>' : '') + '</span></div>'; }
 var RIC_TESTI = {};
 function ricCopia(k) {
   var testo = RIC_TESTI[k] || ''; if (!testo) return;
@@ -4048,7 +4048,7 @@ function renderRicerche(d) {
     html += gruppi.map(function (g) {
       return '<div class="ric-forn"><div class="ric-forn-h"><b>' + g[0] + ' · ' + g[1].length + '</b><button class="bs2-chip" data-k="' + g[0] + '" onclick="ricCopia(this.dataset.k)">Copia ' + g[0].toLowerCase() + '</button></div>'
         + g[1].map(function (b) {
-          var foto = ((b.modelli_foto || []).filter(Boolean)[0]) || ((b.tluxy_top || []).map(function (t) { return t.foto; }).filter(Boolean)[0]) || null;
+          var foto = b.foto_web || ((b.modelli_foto || []).filter(Boolean)[0]) || ((b.tluxy_top || []).map(function (t) { return t.foto; }).filter(Boolean)[0]) || null;
           var m = modsDi(b);
           return ricItem(foto, '<b>' + bsEsc(b.brand) + '</b> <span class="bs2-m ok">' + (b.yoy > 0 ? '+' : '') + b.yoy + '%</span>', m.length ? bsEsc(m.join(', ')) : 'modelli non indicati nel report');
         }).join('') + '</div>';
@@ -4059,7 +4059,7 @@ function renderRicerche(d) {
   var rows = d.brand.filter(function (b) { return RIC_FILTRO === 'tutti' || b.cat === RIC_FILTRO; });
   html += '<div class="ric-table"><div class="ric-row ric-h"><span>Brand</span><span>Miinto</span><span>Crescita</span><span>TLuxy 180 gg</span><span>Segnale</span></div>' + rows.map(function (b) {
     var sg = RIC_SEGNALI[b.segnale] || ['—', ''];
-    var det = '<div class="ric-det"><div><span class="bs2-l">Più venduti su Miinto</span>' + ((b.modelli && b.modelli.length) ? b.modelli.slice(0, 2).map(function (m, i) { return ricItem((b.modelli_foto || [])[i], (i + 1) + '. ' + bsEsc(m), (b.modelli_foto || [])[i] ? 'foto dal nostro catalogo' : ''); }).join('') : '<div class="ric-na">non indicati nel report</div>') + '</div>'
+    var det = '<div class="ric-det"><div><span class="bs2-l">Più venduti su Miinto</span>' + ((b.modelli && b.modelli.length) ? b.modelli.slice(0, 2).map(function (m, i) { var fc = (b.modelli_foto || [])[i], fw = i === 0 ? b.foto_web : null; return ricItem(fc || fw, (i + 1) + '. ' + bsEsc(m), fc ? 'foto dal nostro catalogo' : (fw ? 'foto dal web' : '')); }).join('') : '<div class="ric-na">non indicati nel report</div>') + '</div>'
       + '<div><span class="bs2-l">Più venduti da noi (180 gg)</span>' + ((b.tluxy_top && b.tluxy_top.length) ? b.tluxy_top.map(function (m, i) { return ricItem(m.foto, (i + 1) + '. ' + bsEsc(m.titolo) + (m.colore ? ' – ' + bsEsc(m.colore) : ''), m.pezzi + ' pz · ' + bsEur(m.fatturato)); }).join('') : '<div class="ric-na">nessuna vendita</div>') + '</div>'
       + (b.nota ? '<div class="ric-nota">' + bsEsc(b.nota) + '</div>' : '') + '</div>';
     return '<details class="ric-exp"><summary class="ric-row"><span><b>' + bsEsc(b.brand) + '</b><small>' + b.cat + (b.nota ? ' · ' + bsEsc(b.nota) : '') + '</small></span><span>' + (b.quota !== null ? b.quota + '%' : '—') + '<small>' + (b.prezzo ? 'medio ' + bsEur(b.prezzo) : '') + '</small></span><span>' + ricYoy(b.yoy) + '</span><span>' + bsEur(b.tluxy_fatturato_180g) + '<small>' + b.tluxy_pezzi_180g + ' pz · ' + b.tluxy_attivi + ' attivi</small></span><span>' + (sg[1] ? '<span class="bs2-m ' + sg[1] + '">' + sg[0] + '</span>' : sg[0]) + '</span></summary>' + det + '</details>';
@@ -4346,7 +4346,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.37', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.38', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
