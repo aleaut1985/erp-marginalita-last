@@ -1685,6 +1685,89 @@ async function assicuraWebhookOrdini() {
   return { creato: c.ok, status: c.status, risposta: cj };
 }
 
+
+// ============ v5.33 RICERCHE: Miinto SS27 Buying Guidelines (maggio-giugno 2026) ============
+// Fonte: email di Lethicia Miranda (Miinto) del 19/06/2026 — file Drive "Miinto SS27 Buying Journey_May26", "SS27_CategoryInsights_Bags", "SS27_CategoryInsights_Shoes".
+// yoy = crescita GMV su Miinto anno su anno. null = segno non leggibile nel PDF (estrazione testo perde il "−").
+const MIINTO_SS27 = {
+  fonte: { titolo: 'Miinto SS27 Buying Guidelines', data: '19/06/2026', periodo_dati: 'nov 2025 – mag 2026 (Miinto BI)', link: {
+    guida: 'https://drive.google.com/file/d/1Mljbx5sUx44Yc6ZCBgUC81K3AQo8TGzR/view', borse: 'https://drive.google.com/file/d/1dpS2O3x1TJBWE3pdB6rQpyiIe38GUHWy/view', scarpe: 'https://drive.google.com/file/d/1wVyoh-JXHISC7lBVad896GcVENTGtXlX/view',
+    brand: 'https://drive.google.com/drive/u/0/folders/1HbCKV7FzN1ctoZ6Y8RVMkcMF37y0Vr-3', categorie: 'https://drive.google.com/drive/u/0/folders/1O8QZ9vgox0-hLBZsg9i9V7gXcQNwd2Y7', mercati: 'https://drive.google.com/drive/u/0/folders/1KCjNrwQUGaCabu11Qr25c8SWX4M4DqOU', emergenti: 'https://drive.google.com/file/d/1G8pSVStflnrZRtdJxaH7GOLRtsnpgjyl/view' } },
+  sintesi: [
+    'Borse: 12% del GMV Miinto, +11% anno su anno, prezzo medio €430, sconto medio 19%, conversione 0,9%.',
+    'Saint Laurent borse +170% (Polonia +330%, Scandinavia +250%): raddoppiare la profondità su Lou Camera, Envelope, Cassandra, Le 5 à 7.',
+    'Jacquemus è il brand borse n.1 (9,8% del GMV): Le Grand Bambino nero/marrone/beige da tenere sempre disponibile per 12 mesi.',
+    'Nuovi brand in forte crescita: Totême +878%, DeMellier +655%, Yuzefi +1841%, Ganni +103%, Gucci +74%, Prada +71%, Balenciaga +66%.',
+    'In calo su Miinto: Marc Jacobs, Mulberry, Celine, Dolce & Gabbana (ridurre gli acquisti).',
+    'Forme: mini bag −47% e tracolle −19%; in crescita secchiello +76%, pochette +42%, tote +5%. Spostare il 10% del budget su borse a spalla, secchiello e tote strutturate.',
+    'Colori: nero 43%, marrone 24%, beige 13% = 80% del GMV borse donna. Nuovi: cognac, castagna, latte; accento bordeaux.',
+    'Materiali: pelle 82%; in crescita scamosciato e pelle intrecciata/rafia.',
+    'Scarpe: 28% del GMV (categoria n.1), prezzo medio €227. Volume: UGG, Golden Goose, Autry. Crescita: Louboutin +169%, Prada +142%, Red Wing +374%, Timberland +101%, Gucci uomo +138%, Dior uomo +115%.',
+    'Mercati: Polonia e USA vogliono icone di lusso (mai fuori stock su Saint Laurent, Jacquemus, Gucci, Balenciaga); Italia/Francia/Spagna preferiscono artigianato e brand italiani (Zanellato, Gianni Chiarini).',
+    'Regola di acquisto: 70% modelli già provati, 30% novità SS27.'
+  ],
+  brand: [
+    { brand: 'Jacquemus', cat: 'Borse', quota: 9.8, prezzo: 613, sconto: 92, yoy: null, nota: 'n.1 borse; Le Grand Bambino nero n.1 per GMV e pezzi' },
+    { brand: 'Saint Laurent', cat: 'Borse', quota: 9.2, prezzo: 1939, sconto: 65, yoy: 170, nota: 'Lou Camera, Envelope, Cassandra; sell-through 100% su più modelli' },
+    { brand: 'Marc Jacobs', cat: 'Borse', quota: 4.9, prezzo: 258, sconto: 90, yoy: -48, nota: 'tote in tela, volume ma in calo' },
+    { brand: 'Mulberry', cat: 'Borse', quota: 3.3, prezzo: 1083, sconto: 49, yoy: -29, nota: 'ridurre' },
+    { brand: 'Chloé', cat: 'Borse', quota: 2.9, prezzo: 1067, sconto: 75, yoy: null, nota: 'core in Germania/Olanda' },
+    { brand: 'Gucci', cat: 'Borse', quota: 2.9, prezzo: 1440, sconto: 73, yoy: 74, nota: 'Dionysus ricerche +400%' },
+    { brand: 'Ganni', cat: 'Borse', quota: 2.8, prezzo: 342, sconto: 61, yoy: 103, nota: 'Bou Bag' },
+    { brand: 'Coach', cat: 'Borse', quota: 2.6, prezzo: 405, sconto: 35, yoy: 40, nota: 'Tabby' },
+    { brand: 'Balenciaga', cat: 'Borse', quota: 2.6, prezzo: 2150, sconto: 58, yoy: 66, nota: '' },
+    { brand: 'Isabel Marant', cat: 'Borse', quota: 2.3, prezzo: 371, sconto: 75, yoy: 40, nota: '' },
+    { brand: 'Tory Burch', cat: 'Borse', quota: 2.0, prezzo: 428, sconto: 87, yoy: null, nota: '' },
+    { brand: 'Celine', cat: 'Borse', quota: 1.7, prezzo: 2114, sconto: 50, yoy: -19, nota: 'ridurre acquisti; Triomphe resta desiderata in Polonia' },
+    { brand: 'Burberry', cat: 'Borse', quota: 1.6, prezzo: 861, sconto: 90, yoy: null, nota: '' },
+    { brand: 'Valentino Garavani', cat: 'Borse', quota: 1.6, prezzo: 1398, sconto: 81, yoy: null, nota: '' },
+    { brand: 'Toteme', cat: 'Borse', quota: 1.5, prezzo: 840, sconto: 71, yoy: 878, nota: 'T-Lock: nuovo eroe quiet luxury' },
+    { brand: 'Dragon Diffusion', cat: 'Borse', quota: 1.5, prezzo: 386, sconto: 47, yoy: 55, nota: 'intrecciato, Sud Europa' },
+    { brand: 'Dolce & Gabbana', cat: 'Borse', quota: 1.4, prezzo: 1254, sconto: 79, yoy: -17, nota: 'ridurre' },
+    { brand: 'Prada', cat: 'Borse', quota: 1.2, prezzo: 1709, sconto: 66, yoy: 71, nota: 'Re-Edition' },
+    { brand: 'Fendi', cat: 'Borse', quota: 1.2, prezzo: 1680, sconto: 54, yoy: null, nota: 'Baguette e Spy in forte domanda nel resale' },
+    { brand: "Tod's", cat: 'Borse', quota: 1.1, prezzo: 1309, sconto: 83, yoy: null, nota: '' },
+    { brand: 'Michael Kors', cat: 'Borse', quota: 1.1, prezzo: 210, sconto: 88, yoy: 31, nota: '' },
+    { brand: 'Yuzefi', cat: 'Borse', quota: 1.0, prezzo: 596, sconto: 39, yoy: 1841, nota: 'Fortune Cookie Hobo' },
+    { brand: 'DeMellier', cat: 'Borse', quota: 1.0, prezzo: 559, sconto: 56, yoy: 655, nota: 'New York Tote, Alexandria' },
+    { brand: 'Acne Studios', cat: 'Borse', quota: 0.8, prezzo: 1288, sconto: 42, yoy: 51, nota: 'Musubi' },
+    { brand: 'Diesel', cat: 'Borse', quota: null, prezzo: 450, sconto: null, yoy: 161, nota: 'volume driver' },
+    { brand: 'Bottega Veneta', cat: 'Borse', quota: null, prezzo: null, sconto: null, yoy: null, nota: 'intrecciato: icona SS27 artigianale; Veneta Hobo ricerche +146%' },
+    { brand: 'Miu Miu', cat: 'Borse', quota: null, prezzo: null, sconto: null, yoy: null, nota: 'Aventure (intrecciato) tra i riferimenti SS27' },
+    { brand: 'UGG', cat: 'Scarpe', quota: 8.7, prezzo: 162, sconto: 13, yoy: null, nota: 'Tasman/Tazz: pantofole +101% donna, +120% uomo' },
+    { brand: 'Golden Goose', cat: 'Scarpe', quota: 8.6, prezzo: 486, sconto: 9, yoy: 21, nota: 'Super-Star; uomo 6,5% +19%' },
+    { brand: 'Autry', cat: 'Scarpe', quota: 4.7, prezzo: 168, sconto: 16, yoy: 32, nota: 'Medalist; n.1 uomo 7,5%' },
+    { brand: 'Hogan', cat: 'Scarpe', quota: 3.7, prezzo: 348, sconto: 20, yoy: null, nota: 'core Centro Europa' },
+    { brand: 'Moon Boot', cat: 'Scarpe', quota: 3.2, prezzo: 194, sconto: 17, yoy: 38, nota: '' },
+    { brand: 'Philippe Model', cat: 'Scarpe', quota: 5.6, prezzo: 218, sconto: 30, yoy: 46, nota: 'uomo: PRSX n.1' },
+    { brand: 'Premiata', cat: 'Scarpe', quota: 1.8, prezzo: 232, sconto: 15, yoy: null, nota: '' },
+    { brand: 'Christian Louboutin', cat: 'Scarpe', quota: 1.2, prezzo: 726, sconto: 8, yoy: 169, nota: 'Kate 100; Polonia +349%' },
+    { brand: 'Inuikii', cat: 'Scarpe', quota: 1.1, prezzo: 223, sconto: 23, yoy: 130, nota: '' },
+    { brand: 'ALOHAS', cat: 'Scarpe', quota: 1.0, prezzo: 166, sconto: 9, yoy: 71, nota: '' },
+    { brand: 'Prada', cat: 'Scarpe', quota: 0.8, prezzo: 803, sconto: 18, yoy: 142, nota: '' },
+    { brand: 'Gucci', cat: 'Scarpe', quota: 1.9, prezzo: 608, sconto: 29, yoy: 138, nota: 'uomo' },
+    { brand: 'Dior', cat: 'Scarpe', quota: 1.0, prezzo: 812, sconto: 24, yoy: 115, nota: 'uomo; B22' },
+    { brand: 'Red Wing Shoes', cat: 'Scarpe', quota: 1.3, prezzo: 307, sconto: 18, yoy: 374, nota: 'uomo, Iron Ranger' },
+    { brand: 'Timberland', cat: 'Scarpe', quota: 1.2, prezzo: 167, sconto: 20, yoy: 101, nota: 'uomo, 6-Inch' },
+    { brand: 'Santoni', cat: 'Scarpe', quota: 2.6, prezzo: 552, sconto: 20, yoy: 30, nota: 'uomo' },
+    { brand: 'Maison Margiela', cat: 'Scarpe', quota: 1.2, prezzo: 607, sconto: 9, yoy: 36, nota: 'uomo, Replica/Tabi' },
+    { brand: 'Axel Arigato', cat: 'Scarpe', quota: 3.4, prezzo: 238, sconto: 10, yoy: -55, nota: 'ridurre' },
+    { brand: 'Off White', cat: 'Scarpe', quota: 2.0, prezzo: 407, sconto: 16, yoy: -39, nota: 'ridurre' },
+    { brand: 'Stuart Weitzman', cat: 'Scarpe', quota: 0.8, prezzo: 344, sconto: 34, yoy: -40, nota: 'ridurre' },
+    { brand: 'Salomon', cat: 'Scarpe', quota: null, prezzo: 160, sconto: null, yoy: null, nota: 'XT-6: trail sneaker, forte in UK/USA' },
+    { brand: 'New Balance', cat: 'Scarpe', quota: 2.1, prezzo: 152, sconto: 15, yoy: null, nota: '550/327, 1906R' }
+  ],
+  borse_forme: [
+    { forma: 'Borse a mano', quota: 33.1, prezzo: 540, yoy: null }, { forma: 'Borse a spalla', quota: 28.9, prezzo: 523, yoy: null },
+    { forma: 'Tote', quota: 16.5, prezzo: 342, yoy: 5 }, { forma: 'Tracolle', quota: 13.4, prezzo: 471, yoy: -19 },
+    { forma: 'Pochette', quota: 3.0, prezzo: 246, yoy: 42 }, { forma: 'Secchiello', quota: 2.5, prezzo: 511, yoy: 76 }, { forma: 'Mini bag', quota: 0.8, prezzo: 419, yoy: -47 }
+  ],
+  modelli_top: ['Jacquemus Le Grand Bambino nero (n.1 GMV e pezzi)', 'Jacquemus Le Bambino nero e beige', 'Saint Laurent Envelope Medium nero (sell-through 100%)', 'Saint Laurent Le 5 à 7 Supple Small nero', 'Saint Laurent Le 37 secchiello nero', 'Saint Laurent Monogram Grain de Poudre', 'Burberry borsa check beige', 'Golden Goose Super-Star bianca', 'Christian Louboutin Kate 100 nera', 'UGG Tasman / Tazz / Classic Ultra Mini'],
+  emergenti: ['Polène (borse, in forte crescita in FR/NL/UK/ES)', 'Totême', 'DeMellier', 'Yuzefi', 'Ganni', 'Strathberry', 'A.P.C. accessori', 'Salomon', 'On Running', 'New Balance']
+};
+let CACHE_RICERCHE = null;
+function normBrand(v) { return String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+
 // ============ ICONE APP (v5.19) ============
 const ICON_PNG = {
   '180': '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',
@@ -1881,6 +1964,19 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .bs2-det { padding: 0 0 10px 88px; font-size: 0.78rem; color: var(--gray-700); display: grid; gap: 4px; } .bs2-l { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray-500); margin-right: 4px; }
   .bs2-ch { display: inline-block; background: var(--gray-100); border-radius: 6px; padding: 1px 6px; margin: 0 4px 2px 0; font-size: 0.72rem; }
   @media (max-width: 640px) { .bs2-kpi { grid-template-columns: repeat(2, minmax(0,1fr)); } .bs2-brand { grid-template-columns: minmax(0,1.3fr) minmax(0,1fr) 62px 52px; gap: 6px; } .bs2-det { padding-left: 0; } }
+  .ric-src { font-size: 0.74rem; color: var(--gray-500); margin-bottom: 12px; } .ric-src a { color: var(--gray-700); }
+  .ric-list { margin: 0 0 16px 18px; padding: 0; font-size: 0.84rem; line-height: 1.5; } .ric-list li { margin-bottom: 4px; }
+  .ric-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .ric-card { border-radius: 12px; padding: 12px 14px; font-size: 0.84rem; } .ric-card.ok { background: var(--green-light); } .ric-card.low { background: #FDECEC; }
+  .ric-card b { display: block; } .ric-card > span { display: block; font-size: 0.72rem; color: var(--gray-500); margin-bottom: 6px; } .ric-card small { color: var(--gray-500); }
+  .ric-table { margin-bottom: 8px; }
+  .ric-row { display: grid; grid-template-columns: minmax(0,1.6fr) minmax(0,0.8fr) 70px minmax(0,1fr) 88px; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--gray-100); font-size: 0.82rem; }
+  .ric-row.ric-3 { grid-template-columns: minmax(0,1.4fr) minmax(0,1fr) 70px; }
+  .ric-row small { display: block; font-size: 0.66rem; color: var(--gray-500); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ric-row b { font-weight: 500; } .ric-row > span:not(:first-child) { text-align: right; }
+  .ric-h { border-top: none; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray-500); }
+  .ric-na { font-size: 0.66rem; color: var(--gray-300); } .ric-tags { margin-bottom: 8px; }
+  @media (max-width: 640px) { .ric-row { grid-template-columns: minmax(0,1.3fr) 62px minmax(0,1fr) 78px; } .ric-row > span:nth-child(2) { display: none; } .ric-row.ric-3 { grid-template-columns: minmax(0,1.2fr) minmax(0,1fr) 62px; } .ric-row.ric-3 > span:nth-child(2) { display: block; } }
   .bs-empty { text-align: center; padding: 80px 20px; color: var(--gray-500); font-style: italic; grid-column: 1 / -1; }
   .confronto-form { background: var(--cream); padding: 24px; border-radius: var(--radius-md); margin-bottom: 24px; border: 1px solid var(--gray-200); }
   .table-wrap { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--gray-200); }
@@ -2039,7 +2135,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.32</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.33</p>
       </div>
     </div>
     <div class="header-right">
@@ -2051,6 +2147,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     <div class="tabs">
       <button class="tab active" data-tab="analytics">Analytics</button>
       <button class="tab" data-tab="bestsellers">Best Seller</button>
+      <button class="tab" data-tab="ricerche">Ricerche</button>
       <button class="tab" data-tab="compare">Confronto MP</button>
       <button class="tab" data-tab="calculator">Calcolatore</button>
       <button class="tab" data-tab="marketplaces">Marketplace</button>
@@ -2120,6 +2217,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="custom-range"><label>Da</label><input type="date" id="bs-date-from"><label>A</label><input type="date" id="bs-date-to"><button class="apply-btn" id="bs-apply">Applica</button></div>
       </div>
       <div id="bs-content" class="bs-grid"><div class="bs-empty">Caricamento prodotti...</div></div>
+    </div>
+  </div>
+  <div id="ricerche-tab" class="tab-content">
+    <div class="section">
+      <div class="section-header"><div><div class="section-title">Ricerche</div><div class="section-subtitle">Miinto SS27 Buying Guidelines incrociate con le vendite e il catalogo TLuxy</div></div></div>
+      <div id="ric-content"><div class="bs-empty">Apri la scheda per caricare l'analisi.</div></div>
     </div>
   </div>
   <div id="compare-tab" class="tab-content">
@@ -2332,6 +2435,7 @@ function showTab(name) {
   document.getElementById(name + '-tab').classList.add('active');
   const tabBtn = document.querySelector('.tab[data-tab="' + name + '"]'); if (tabBtn) tabBtn.classList.add('active');
   if (name === 'compare' && !document.getElementById('compare-body').children.length) confronta();
+  if (name === 'ricerche' && !RIC_DATA) caricaRicerche(false);
   if (name === 'bestsellers') { const bsContent = document.getElementById('bs-content'); if (bsContent.querySelector('.bs-empty')) { const activeBtn = document.querySelector('[data-bs-periods] .period-btn.active') || document.querySelector('[data-bs-periods] .period-btn[data-period="month"]'); loadBestSellers(activeBtn ? activeBtn.dataset.period : 'month', activeBtn); } }
 }
 
@@ -3888,6 +3992,43 @@ function caricaMeseStrip() {
       + ((p && p.success) ? riga(mesi[inizioPrec.getMonth()] + ' 1–' + finePrec.getDate(), p, null) : '');
   }).catch(function () { el.innerHTML = nonDisp; });
 }
+
+// ===== v5.33 Ricerche: Miinto SS27 =====
+var RIC_DATA = null, RIC_FILTRO = 'tutti';
+function ricYoy(v) { if (v === null || v === undefined) return '<span class="ric-na">n.d.</span>'; return '<span class="bs2-m ' + (v >= 40 ? 'ok' : (v < 0 ? 'low' : 'mid')) + '">' + (v > 0 ? '+' : '') + v + '%</span>'; }
+var RIC_SEGNALI = { opportunita: ['Opportunità', 'ok'], rafforza: ['Rafforza', 'ok'], tieni: ['Tieni', 'mid'], neutro: ['—', ''], 'in calo': ['In calo', 'low'], attenzione: ['Attenzione', 'low'] };
+function ricFiltro(f) { RIC_FILTRO = f; renderRicerche(RIC_DATA); }
+function caricaRicerche(refresh) {
+  var el = document.getElementById('ric-content');
+  el.innerHTML = '<div class="bs-empty">Incrocio i dati Miinto con 180 giorni di ordini e il catalogo TLuxy…</div>';
+  fetch('/api/ricerche-miinto' + (refresh ? '?refresh=1' : '')).then(function (r) { return r.json(); }).then(function (d) {
+    if (!d.success) { el.innerHTML = '<div class="bs-empty">Errore: ' + bsEsc(d.error || '') + '</div>'; return; }
+    RIC_DATA = d; renderRicerche(d);
+  }).catch(function (e) { el.innerHTML = '<div class="bs-empty">Errore: ' + bsEsc(e.message) + '</div>'; });
+}
+function renderRicerche(d) {
+  var el = document.getElementById('ric-content');
+  var f = d.fonte.link;
+  var html = '<div class="ric-src">Fonte: ' + bsEsc(d.fonte.titolo) + ' (' + bsEsc(d.fonte.data) + ', dati ' + bsEsc(d.fonte.periodo_dati) + ') · <a href="' + f.guida + '" target="_blank">Guida</a> · <a href="' + f.borse + '" target="_blank">Borse</a> · <a href="' + f.scarpe + '" target="_blank">Scarpe</a> · <a href="' + f.brand + '" target="_blank">Brand</a> · <a href="' + f.mercati + '" target="_blank">Mercati</a></div>';
+  html += '<div class="bs2-sec">In sintesi</div><ul class="ric-list">' + d.sintesi.map(function (x) { return '<li>' + bsEsc(x) + '</li>'; }).join('') + '</ul>';
+  var opp = d.brand.filter(function (b) { return b.segnale === 'opportunita'; });
+  var att = d.brand.filter(function (b) { return b.segnale === 'attenzione'; });
+  if (opp.length || att.length) {
+    html += '<div class="ric-cards">' + (opp.length ? '<div class="ric-card ok"><b>Opportunità</b><span>Crescono su Miinto ma da noi quasi assenti</span>' + opp.map(function (b) { return '<div>' + bsEsc(b.brand) + ' <small>' + b.cat + ' · ' + (b.yoy > 0 ? '+' : '') + b.yoy + '% · ' + b.tluxy_attivi + ' attivi</small></div>'; }).join('') + '</div>' : '')
+      + (att.length ? '<div class="ric-card low"><b>Attenzione</b><span>In calo su Miinto e tanti prodotti da noi</span>' + att.map(function (b) { return '<div>' + bsEsc(b.brand) + ' <small>' + b.cat + ' · ' + b.yoy + '% · ' + b.tluxy_attivi + ' attivi</small></div>'; }).join('') + '</div>' : '') + '</div>';
+  }
+  html += '<div class="bs2-head"><div class="bs2-sec" style="margin:0">Brand: Miinto vs TLuxy</div><div class="bs2-chips">' + [['tutti', 'Tutti'], ['Borse', 'Borse'], ['Scarpe', 'Scarpe']].map(function (c) { return '<button class="bs2-chip' + (RIC_FILTRO === c[0] ? ' on' : '') + '" data-f="' + c[0] + '" onclick="ricFiltro(this.dataset.f)">' + c[1] + '</button>'; }).join('') + '</div></div>';
+  var rows = d.brand.filter(function (b) { return RIC_FILTRO === 'tutti' || b.cat === RIC_FILTRO; });
+  html += '<div class="ric-table"><div class="ric-row ric-h"><span>Brand</span><span>Miinto</span><span>Crescita</span><span>TLuxy 180 gg</span><span>Segnale</span></div>' + rows.map(function (b) {
+    var sg = RIC_SEGNALI[b.segnale] || ['—', ''];
+    return '<div class="ric-row"><span><b>' + bsEsc(b.brand) + '</b><small>' + b.cat + (b.nota ? ' · ' + bsEsc(b.nota) : '') + '</small></span><span>' + (b.quota !== null ? b.quota + '%' : '—') + '<small>' + (b.prezzo ? 'medio ' + bsEur(b.prezzo) : '') + '</small></span><span>' + ricYoy(b.yoy) + '</span><span>' + bsEur(b.tluxy_fatturato_180g) + '<small>' + b.tluxy_pezzi_180g + ' pz · ' + b.tluxy_attivi + ' attivi</small></span><span>' + (sg[1] ? '<span class="bs2-m ' + sg[1] + '">' + sg[0] + '</span>' : sg[0]) + '</span></div>';
+  }).join('') + '</div>';
+  html += '<div class="bs2-sec" style="margin-top:16px">Forme delle borse (donna)</div><div class="ric-table">' + d.borse_forme.map(function (x) { return '<div class="ric-row ric-3"><span><b>' + bsEsc(x.forma) + '</b></span><span>' + x.quota + '% <small>medio ' + bsEur(x.prezzo) + '</small></span><span>' + ricYoy(x.yoy) + '</span></div>'; }).join('') + '</div>';
+  html += '<div class="bs2-sec" style="margin-top:16px">Modelli più venduti su Miinto</div><ul class="ric-list">' + d.modelli_top.map(function (x) { return '<li>' + bsEsc(x) + '</li>'; }).join('') + '</ul>';
+  html += '<div class="bs2-sec">Brand emergenti da valutare</div><div class="ric-tags">' + d.emergenti.map(function (x) { return '<span class="bs2-ch">' + bsEsc(x) + '</span>'; }).join('') + '</div>';
+  html += '<div class="alerts-meta" style="margin-top:12px">Quota e crescita = GMV su Miinto. "n.d." = segno della crescita non leggibile nel PDF. TLuxy = vendite su tutti i canali negli ultimi 180 giorni e prodotti attivi su Shopify. Analizzati ' + d.ordini_analizzati + ' ordini · <a href="#" onclick="caricaRicerche(true);return false;">aggiorna</a></div>';
+  el.innerHTML = html;
+}
 setTimeout(caricaOggiBox, 200);
 setTimeout(function () { fetch('/api/setup-webhooks').catch(function () {}); }, 4000);
 </script>
@@ -4164,7 +4305,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.32', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.33', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -4404,6 +4545,37 @@ export default async function handler(req, res) {
         if (!o) return res.json({ success: false, error: 'Nessun ordine trovato' });
         const m = await margineOrdineSingolo(o);
         return res.json({ success: true, prova: true, ...(await inviaNotificaDuo(o, m)) });
+      } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
+    }
+
+    if (req.method === 'GET' && path === '/api/ricerche-miinto') {
+      try {
+        if (CACHE_RICERCHE && Date.now() - CACHE_RICERCHE.t < 3600000 && query.get('refresh') !== '1') return res.json(CACHE_RICERCHE.d);
+        const brands = [...new Set(MIINTO_SS27.brand.map(b => b.brand))];
+        // Prodotti attivi su Shopify per brand
+        const attivi = {};
+        for (let i = 0; i < brands.length; i += 25) {
+          const chunk = brands.slice(i, i + 25);
+          const q = '{ ' + chunk.map((b, k) => 'b' + k + ': productsCount(query: ' + JSON.stringify("status:active AND vendor:'" + b.replace(/'/g, "\\'") + "'") + ') { count }').join(' ') + ' }';
+          try { const d = await shopifyGraphQL(q); chunk.forEach((b, k) => { attivi[normBrand(b)] = d['b' + k] ? d['b' + k].count : 0; }); } catch (e) { console.log('[ricerche] count errore', e.message); }
+        }
+        // Vendite TLuxy ultimi 180 giorni per brand
+        const oggi = new Date(); const da = new Date(oggi.getTime() - 180 * 86400000);
+        const ymdS = d => d.toISOString().slice(0, 10);
+        const ordini = await getShopifyOrders('custom', ymdS(da), ymdS(oggi));
+        const vend = {};
+        ordini.forEach(o => { if (o.cancelled_at) return; const cur = o.currency || SHOP_CURRENCY; const mp = riconosciMarketplace(o).key; (o.line_items || []).forEach(li => { const k = normBrand(li.vendor); if (!k) return; const q = parseInt(li.quantity) || 0; if (!vend[k]) vend[k] = { pezzi: 0, fatturato: 0, sito: 0 }; const eur = toEurAmount(li.price_set, li.price, cur) * q; vend[k].pezzi += q; vend[k].fatturato += eur; if (mp === 'TLUXY_SITE') vend[k].sito += eur; }); });
+        const righe = MIINTO_SS27.brand.map(b => {
+          const k = normBrand(b.brand), v = vend[k] || { pezzi: 0, fatturato: 0, sito: 0 }, a = attivi[k] || 0;
+          let segnale = 'neutro';
+          if (b.yoy !== null && b.yoy < 0) segnale = a > 30 ? 'attenzione' : 'in calo';
+          else if (b.yoy !== null && b.yoy >= 40) segnale = (a < 10 && v.pezzi < 5) ? 'opportunita' : 'rafforza';
+          else if (v.pezzi >= 5) segnale = 'tieni';
+          return { ...b, tluxy_attivi: a, tluxy_pezzi_180g: v.pezzi, tluxy_fatturato_180g: Math.round(v.fatturato), tluxy_sito_180g: Math.round(v.sito), segnale };
+        });
+        const out = { success: true, generato_il: new Date().toISOString(), ordini_analizzati: ordini.length, fonte: MIINTO_SS27.fonte, sintesi: MIINTO_SS27.sintesi, brand: righe, borse_forme: MIINTO_SS27.borse_forme, modelli_top: MIINTO_SS27.modelli_top, emergenti: MIINTO_SS27.emergenti };
+        CACHE_RICERCHE = { t: Date.now(), d: out };
+        return res.json(out);
       } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
     }
 
@@ -5697,6 +5869,11 @@ Regole:
             input_schema: { type: 'object', properties: {} }
           },
           {
+            name: 'get_ricerche_miinto',
+            description: 'Ricerche di mercato: Miinto SS27 Buying Guidelines (brand in crescita/calo su Miinto, forme, colori, modelli top, brand emergenti) incrociate con vendite TLuxy 180 giorni e prodotti attivi per brand. Usalo per domande su cosa comprare, trend, brand da spingere o ridurre.',
+            input_schema: { type: 'object', properties: {} }
+          },
+          {
             name: 'get_marketplaces_config',
             description: 'Ottieni la configurazione dei marketplace (commissioni, sconti, modalità pagamento).',
             input_schema: { type: 'object', properties: {} }
@@ -5726,6 +5903,9 @@ Regole:
               case 'get_marketplaces_config':
                 url = `${baseUrl}/api/marketplaces`;
                 break;
+              case 'get_ricerche_miinto':
+                url = `${baseUrl}/api/ricerche-miinto`;
+                break;
               default:
                 return { error: 'Tool sconosciuto: ' + toolName };
             }
@@ -5754,7 +5934,7 @@ Regole:
               };
             }
             if (toolName === 'get_bestsellers' && d.success) {
-              return { totale: d.totale_prodotti_unici, prodotti: (d.prodotti || []).slice(0, 10).map(p => ({ titolo: p.titolo, sku: p.sku, fatturato: Math.round(p.fatturato_lordo), pezzi: p.quantita_venduta, ricavo: Math.round(p.ricavo_stimato) })) };
+              return { totali: d.totali, brand: (d.brand || []).slice(0, 10), modelli: (d.modelli || []).slice(0, 15).map(m => ({ titolo: m.titolo, brand: m.brand, pezzi: m.pezzi, fatturato: m.fatturato, margine_pct: m.margine_pct, canali: m.canali.map(c => c.nome + ' ' + c.pezzi).join(', ') })) };
             }
             if (toolName === 'get_forecast' && d.success) {
               return {
