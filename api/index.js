@@ -1707,55 +1707,55 @@ const MIINTO_SS27 = {
     'Regola di acquisto: 70% modelli già provati, 30% novità SS27.'
   ],
   brand: [
-    { brand: 'Jacquemus', cat: 'Borse', quota: 9.8, prezzo: 613, sconto: 92, yoy: null, nota: 'n.1 borse; Le Grand Bambino nero n.1 per GMV e pezzi' },
-    { brand: 'Saint Laurent', cat: 'Borse', quota: 9.2, prezzo: 1939, sconto: 65, yoy: 170, nota: 'Lou Camera, Envelope, Cassandra; sell-through 100% su più modelli' },
-    { brand: 'Marc Jacobs', cat: 'Borse', quota: 4.9, prezzo: 258, sconto: 90, yoy: -48, nota: 'tote in tela, volume ma in calo' },
-    { brand: 'Mulberry', cat: 'Borse', quota: 3.3, prezzo: 1083, sconto: 49, yoy: -29, nota: 'ridurre' },
-    { brand: 'Chloé', cat: 'Borse', quota: 2.9, prezzo: 1067, sconto: 75, yoy: null, nota: 'core in Germania/Olanda' },
-    { brand: 'Gucci', cat: 'Borse', quota: 2.9, prezzo: 1440, sconto: 73, yoy: 74, nota: 'Dionysus ricerche +400%' },
-    { brand: 'Ganni', cat: 'Borse', quota: 2.8, prezzo: 342, sconto: 61, yoy: 103, nota: 'Bou Bag' },
-    { brand: 'Coach', cat: 'Borse', quota: 2.6, prezzo: 405, sconto: 35, yoy: 40, nota: 'Tabby' },
+    { brand: 'Jacquemus', cat: 'Borse', quota: 9.8, prezzo: 613, sconto: 92, yoy: null, nota: 'n.1 borse; Le Grand Bambino nero n.1 per GMV e pezzi', modelli: ['Le Grand Bambino nero · €652 · sell-through 61%', 'The Large Bambino nero · €612'] },
+    { brand: 'Saint Laurent', cat: 'Borse', quota: 9.2, prezzo: 1939, sconto: 65, yoy: 170, nota: 'Lou Camera, Envelope, Cassandra; sell-through 100% su più modelli', modelli: ['Envelope Medium nero · €2.376 · sell-through 100%', 'Le 5 à 7 Supple Small nero · €2.817'] },
+    { brand: 'Marc Jacobs', cat: 'Borse', quota: 4.9, prezzo: 258, sconto: 90, yoy: -48, nota: 'tote in tela, volume ma in calo', modelli: ['The Medium Tote nero · €170', 'The Leather Mini Bag nero · €167'] },
+    { brand: 'Mulberry', cat: 'Borse', quota: 3.3, prezzo: 1083, sconto: 49, yoy: -29, nota: 'ridurre', modelli: ['Lily'] },
+    { brand: 'Chloé', cat: 'Borse', quota: 2.9, prezzo: 1067, sconto: 75, yoy: null, nota: 'core in Germania/Olanda', modelli: ['Marcie Mini · €1.450'] },
+    { brand: 'Gucci', cat: 'Borse', quota: 2.9, prezzo: 1440, sconto: 73, yoy: 74, nota: 'Dionysus ricerche +400%', modelli: ['Dionysus (ricerche +400%)'] },
+    { brand: 'Ganni', cat: 'Borse', quota: 2.8, prezzo: 342, sconto: 61, yoy: 103, nota: 'Bou Bag', modelli: ['Suede Bou Bag · €475', 'Mini Bou Bag · €345'] },
+    { brand: 'Coach', cat: 'Borse', quota: 2.6, prezzo: 405, sconto: 35, yoy: 40, nota: 'Tabby', modelli: ['Tabby Shoulder · €495', 'Field Tote 22 · €425'] },
     { brand: 'Balenciaga', cat: 'Borse', quota: 2.6, prezzo: 2150, sconto: 58, yoy: 66, nota: '' },
-    { brand: 'Isabel Marant', cat: 'Borse', quota: 2.3, prezzo: 371, sconto: 75, yoy: 40, nota: '' },
-    { brand: 'Tory Burch', cat: 'Borse', quota: 2.0, prezzo: 428, sconto: 87, yoy: null, nota: '' },
-    { brand: 'Celine', cat: 'Borse', quota: 1.7, prezzo: 2114, sconto: 50, yoy: -19, nota: 'ridurre acquisti; Triomphe resta desiderata in Polonia' },
-    { brand: 'Burberry', cat: 'Borse', quota: 1.6, prezzo: 861, sconto: 90, yoy: null, nota: '' },
+    { brand: 'Isabel Marant', cat: 'Borse', quota: 2.3, prezzo: 371, sconto: 75, yoy: 40, nota: '', modelli: ['Oscan Soft Zip · €850', 'Bahia · €550'] },
+    { brand: 'Tory Burch', cat: 'Borse', quota: 2.0, prezzo: 428, sconto: 87, yoy: null, nota: '', modelli: ['Ella Patent Tote · €345'] },
+    { brand: 'Celine', cat: 'Borse', quota: 1.7, prezzo: 2114, sconto: 50, yoy: -19, nota: 'ridurre acquisti; Triomphe resta desiderata in Polonia', modelli: ['Triomphe (la più desiderata in Polonia)', 'Luggage (ricerche +245%)'] },
+    { brand: 'Burberry', cat: 'Borse', quota: 1.6, prezzo: 861, sconto: 90, yoy: null, nota: '', modelli: ['Borsa a spalla check beige · €815 · sell-through 100%'] },
     { brand: 'Valentino Garavani', cat: 'Borse', quota: 1.6, prezzo: 1398, sconto: 81, yoy: null, nota: '' },
-    { brand: 'Toteme', cat: 'Borse', quota: 1.5, prezzo: 840, sconto: 71, yoy: 878, nota: 'T-Lock: nuovo eroe quiet luxury' },
-    { brand: 'Dragon Diffusion', cat: 'Borse', quota: 1.5, prezzo: 386, sconto: 47, yoy: 55, nota: 'intrecciato, Sud Europa' },
+    { brand: 'Toteme', cat: 'Borse', quota: 1.5, prezzo: 840, sconto: 71, yoy: 878, nota: 'T-Lock: nuovo eroe quiet luxury', modelli: ['T-Lock Top-Handle · €890'] },
+    { brand: 'Dragon Diffusion', cat: 'Borse', quota: 1.5, prezzo: 386, sconto: 47, yoy: 55, nota: 'intrecciato, Sud Europa', modelli: ['Santa Croce Small · €432', 'Half Moon Tote · €495'] },
     { brand: 'Dolce & Gabbana', cat: 'Borse', quota: 1.4, prezzo: 1254, sconto: 79, yoy: -17, nota: 'ridurre' },
-    { brand: 'Prada', cat: 'Borse', quota: 1.2, prezzo: 1709, sconto: 66, yoy: 71, nota: 'Re-Edition' },
-    { brand: 'Fendi', cat: 'Borse', quota: 1.2, prezzo: 1680, sconto: 54, yoy: null, nota: 'Baguette e Spy in forte domanda nel resale' },
+    { brand: 'Prada', cat: 'Borse', quota: 1.2, prezzo: 1709, sconto: 66, yoy: 71, nota: 'Re-Edition', modelli: ['Re-Edition 2005'] },
+    { brand: 'Fendi', cat: 'Borse', quota: 1.2, prezzo: 1680, sconto: 54, yoy: null, nota: 'Baguette e Spy in forte domanda nel resale', modelli: ['Baguette', 'Spy'] },
     { brand: "Tod's", cat: 'Borse', quota: 1.1, prezzo: 1309, sconto: 83, yoy: null, nota: '' },
-    { brand: 'Michael Kors', cat: 'Borse', quota: 1.1, prezzo: 210, sconto: 88, yoy: 31, nota: '' },
-    { brand: 'Yuzefi', cat: 'Borse', quota: 1.0, prezzo: 596, sconto: 39, yoy: 1841, nota: 'Fortune Cookie Hobo' },
-    { brand: 'DeMellier', cat: 'Borse', quota: 1.0, prezzo: 559, sconto: 56, yoy: 655, nota: 'New York Tote, Alexandria' },
-    { brand: 'Acne Studios', cat: 'Borse', quota: 0.8, prezzo: 1288, sconto: 42, yoy: 51, nota: 'Musubi' },
-    { brand: 'Diesel', cat: 'Borse', quota: null, prezzo: 450, sconto: null, yoy: 161, nota: 'volume driver' },
-    { brand: 'Bottega Veneta', cat: 'Borse', quota: null, prezzo: null, sconto: null, yoy: null, nota: 'intrecciato: icona SS27 artigianale; Veneta Hobo ricerche +146%' },
-    { brand: 'Miu Miu', cat: 'Borse', quota: null, prezzo: null, sconto: null, yoy: null, nota: 'Aventure (intrecciato) tra i riferimenti SS27' },
-    { brand: 'UGG', cat: 'Scarpe', quota: 8.7, prezzo: 162, sconto: 13, yoy: null, nota: 'Tasman/Tazz: pantofole +101% donna, +120% uomo' },
-    { brand: 'Golden Goose', cat: 'Scarpe', quota: 8.6, prezzo: 486, sconto: 9, yoy: 21, nota: 'Super-Star; uomo 6,5% +19%' },
-    { brand: 'Autry', cat: 'Scarpe', quota: 4.7, prezzo: 168, sconto: 16, yoy: 32, nota: 'Medalist; n.1 uomo 7,5%' },
-    { brand: 'Hogan', cat: 'Scarpe', quota: 3.7, prezzo: 348, sconto: 20, yoy: null, nota: 'core Centro Europa' },
-    { brand: 'Moon Boot', cat: 'Scarpe', quota: 3.2, prezzo: 194, sconto: 17, yoy: 38, nota: '' },
-    { brand: 'Philippe Model', cat: 'Scarpe', quota: 5.6, prezzo: 218, sconto: 30, yoy: 46, nota: 'uomo: PRSX n.1' },
-    { brand: 'Premiata', cat: 'Scarpe', quota: 1.8, prezzo: 232, sconto: 15, yoy: null, nota: '' },
-    { brand: 'Christian Louboutin', cat: 'Scarpe', quota: 1.2, prezzo: 726, sconto: 8, yoy: 169, nota: 'Kate 100; Polonia +349%' },
-    { brand: 'Inuikii', cat: 'Scarpe', quota: 1.1, prezzo: 223, sconto: 23, yoy: 130, nota: '' },
-    { brand: 'ALOHAS', cat: 'Scarpe', quota: 1.0, prezzo: 166, sconto: 9, yoy: 71, nota: '' },
+    { brand: 'Michael Kors', cat: 'Borse', quota: 1.1, prezzo: 210, sconto: 88, yoy: 31, nota: '', modelli: ['Parker Crossbody · €375'] },
+    { brand: 'Yuzefi', cat: 'Borse', quota: 1.0, prezzo: 596, sconto: 39, yoy: 1841, nota: 'Fortune Cookie Hobo', modelli: ['Fortune Cookie Hobo · €449'] },
+    { brand: 'DeMellier', cat: 'Borse', quota: 1.0, prezzo: 559, sconto: 56, yoy: 655, nota: 'New York Tote, Alexandria', modelli: ['New York Tote · €560', 'Mini Alexandria · €375'] },
+    { brand: 'Acne Studios', cat: 'Borse', quota: 0.8, prezzo: 1288, sconto: 42, yoy: 51, nota: 'Musubi', modelli: ['Musubi Tote in pelle · €1.500'] },
+    { brand: 'Diesel', cat: 'Borse', quota: null, prezzo: 450, sconto: null, yoy: 161, nota: 'volume driver', modelli: ['Camera Bag · €450'] },
+    { brand: 'Bottega Veneta', cat: 'Borse', quota: null, prezzo: null, sconto: null, yoy: null, nota: 'intrecciato: icona SS27 artigianale; Veneta Hobo ricerche +146%', modelli: ['Intrecciato Cabat / Andiamo · €3.800', 'Veneta Hobo (ricerche +146%)'] },
+    { brand: 'Miu Miu', cat: 'Borse', quota: null, prezzo: null, sconto: null, yoy: null, nota: 'Aventure (intrecciato) tra i riferimenti SS27', modelli: ['Aventure · €2.500'] },
+    { brand: 'UGG', cat: 'Scarpe', quota: 8.7, prezzo: 162, sconto: 13, yoy: null, nota: 'Tasman/Tazz: pantofole +101% donna, +120% uomo', modelli: ['Tasman II / Tazz II · €150', 'Classic Ultra Mini · €168'] },
+    { brand: 'Golden Goose', cat: 'Scarpe', quota: 8.6, prezzo: 486, sconto: 9, yoy: 21, nota: 'Super-Star; uomo 6,5% +19%', modelli: ['Super-Star bianca · €520', 'Ball Star bianca · €488'] },
+    { brand: 'Autry', cat: 'Scarpe', quota: 4.7, prezzo: 168, sconto: 16, yoy: 32, nota: 'Medalist; n.1 uomo 7,5%', modelli: ['Medalist Low · €195'] },
+    { brand: 'Hogan', cat: 'Scarpe', quota: 3.7, prezzo: 348, sconto: 20, yoy: null, nota: 'core Centro Europa', modelli: ['H461'] },
+    { brand: 'Moon Boot', cat: 'Scarpe', quota: 3.2, prezzo: 194, sconto: 17, yoy: 38, nota: '', modelli: ['Icon Nylon nero · €182', 'Icon Low nero · €160'] },
+    { brand: 'Philippe Model', cat: 'Scarpe', quota: 5.6, prezzo: 218, sconto: 30, yoy: 46, nota: 'uomo: PRSX n.1', modelli: ['PRSX Basic bianca · €306', 'PRSX Tennis blu · €209'] },
+    { brand: 'Premiata', cat: 'Scarpe', quota: 1.8, prezzo: 232, sconto: 15, yoy: null, nota: '', modelli: ['Belle · €280', 'Lus · €290'] },
+    { brand: 'Christian Louboutin', cat: 'Scarpe', quota: 1.2, prezzo: 726, sconto: 8, yoy: 169, nota: 'Kate 100; Polonia +349%', modelli: ['Kate 100 nera · €741'] },
+    { brand: 'Inuikii', cat: 'Scarpe', quota: 1.1, prezzo: 223, sconto: 23, yoy: 130, nota: '', modelli: ['Classic Low suede · €285'] },
+    { brand: 'ALOHAS', cat: 'Scarpe', quota: 1.0, prezzo: 166, sconto: 9, yoy: 71, nota: '', modelli: ['Cassidy Mule · €195'] },
     { brand: 'Prada', cat: 'Scarpe', quota: 0.8, prezzo: 803, sconto: 18, yoy: 142, nota: '' },
-    { brand: 'Gucci', cat: 'Scarpe', quota: 1.9, prezzo: 608, sconto: 29, yoy: 138, nota: 'uomo' },
-    { brand: 'Dior', cat: 'Scarpe', quota: 1.0, prezzo: 812, sconto: 24, yoy: 115, nota: 'uomo; B22' },
-    { brand: 'Red Wing Shoes', cat: 'Scarpe', quota: 1.3, prezzo: 307, sconto: 18, yoy: 374, nota: 'uomo, Iron Ranger' },
-    { brand: 'Timberland', cat: 'Scarpe', quota: 1.2, prezzo: 167, sconto: 20, yoy: 101, nota: 'uomo, 6-Inch' },
-    { brand: 'Santoni', cat: 'Scarpe', quota: 2.6, prezzo: 552, sconto: 20, yoy: 30, nota: 'uomo' },
-    { brand: 'Maison Margiela', cat: 'Scarpe', quota: 1.2, prezzo: 607, sconto: 9, yoy: 36, nota: 'uomo, Replica/Tabi' },
-    { brand: 'Axel Arigato', cat: 'Scarpe', quota: 3.4, prezzo: 238, sconto: 10, yoy: -55, nota: 'ridurre' },
+    { brand: 'Gucci', cat: 'Scarpe', quota: 1.9, prezzo: 608, sconto: 29, yoy: 138, nota: 'uomo', modelli: ['Mocassino (Polonia)'] },
+    { brand: 'Dior', cat: 'Scarpe', quota: 1.0, prezzo: 812, sconto: 24, yoy: 115, nota: 'uomo; B22', modelli: ['B22'] },
+    { brand: 'Red Wing Shoes', cat: 'Scarpe', quota: 1.3, prezzo: 307, sconto: 18, yoy: 374, nota: 'uomo, Iron Ranger', modelli: ['Iron Ranger · €380'] },
+    { brand: 'Timberland', cat: 'Scarpe', quota: 1.2, prezzo: 167, sconto: 20, yoy: 101, nota: 'uomo, 6-Inch', modelli: ['Premium 6-Inch marrone · €210'] },
+    { brand: 'Santoni', cat: 'Scarpe', quota: 2.6, prezzo: 552, sconto: 20, yoy: 30, nota: 'uomo', modelli: ['Carlo suede loafer · €890'] },
+    { brand: 'Maison Margiela', cat: 'Scarpe', quota: 1.2, prezzo: 607, sconto: 9, yoy: 36, nota: 'uomo, Replica/Tabi', modelli: ['Replica', 'Tabi'] },
+    { brand: 'Axel Arigato', cat: 'Scarpe', quota: 3.4, prezzo: 238, sconto: 10, yoy: -55, nota: 'ridurre', modelli: ['Clean 90 · €230'] },
     { brand: 'Off White', cat: 'Scarpe', quota: 2.0, prezzo: 407, sconto: 16, yoy: -39, nota: 'ridurre' },
-    { brand: 'Stuart Weitzman', cat: 'Scarpe', quota: 0.8, prezzo: 344, sconto: 34, yoy: -40, nota: 'ridurre' },
-    { brand: 'Salomon', cat: 'Scarpe', quota: null, prezzo: 160, sconto: null, yoy: null, nota: 'XT-6: trail sneaker, forte in UK/USA' },
-    { brand: 'New Balance', cat: 'Scarpe', quota: 2.1, prezzo: 152, sconto: 15, yoy: null, nota: '550/327, 1906R' }
+    { brand: 'Stuart Weitzman', cat: 'Scarpe', quota: 0.8, prezzo: 344, sconto: 34, yoy: -40, nota: 'ridurre', modelli: ['Nudistia · €425'] },
+    { brand: 'Salomon', cat: 'Scarpe', quota: null, prezzo: 160, sconto: null, yoy: null, nota: 'XT-6: trail sneaker, forte in UK/USA', modelli: ['XT-6 · €160'] },
+    { brand: 'New Balance', cat: 'Scarpe', quota: 2.1, prezzo: 152, sconto: 15, yoy: null, nota: '550/327, 1906R', modelli: ['1906R · €175', '550 / 327'] }
   ],
   borse_forme: [
     { forma: 'Borse a mano', quota: 33.1, prezzo: 540, yoy: null }, { forma: 'Borse a spalla', quota: 28.9, prezzo: 523, yoy: null },
@@ -1975,7 +1975,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .ric-row small { display: block; font-size: 0.66rem; color: var(--gray-500); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ric-row b { font-weight: 500; } .ric-row > span:not(:first-child) { text-align: right; }
   .ric-h { border-top: none; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray-500); }
-  .ric-na { font-size: 0.66rem; color: var(--gray-300); } .ric-tags { margin-bottom: 8px; }
+  .ric-na { font-size: 0.66rem; color: var(--gray-300); }
+  .ric-exp > summary { list-style: none; cursor: pointer; } .ric-exp > summary::-webkit-details-marker { display: none; }
+  .ric-exp[open] > summary { background: var(--gray-100); }
+  .ric-det { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; padding: 8px 4px 12px; font-size: 0.8rem; background: var(--gray-100); border-radius: 0 0 10px 10px; margin-bottom: 4px; }
+  .ric-det .bs2-l { display: block; margin-bottom: 3px; } .ric-nota { grid-column: 1 / -1; font-size: 0.74rem; color: var(--gray-500); }
+  @media (max-width: 640px) { .ric-det { grid-template-columns: 1fr; } } .ric-tags { margin-bottom: 8px; }
   @media (max-width: 640px) { .ric-row { grid-template-columns: minmax(0,1.3fr) 62px minmax(0,1fr) 78px; } .ric-row > span:nth-child(2) { display: none; } .ric-row.ric-3 { grid-template-columns: minmax(0,1.2fr) minmax(0,1fr) 62px; } .ric-row.ric-3 > span:nth-child(2) { display: block; } }
   .bs-empty { text-align: center; padding: 80px 20px; color: var(--gray-500); font-style: italic; grid-column: 1 / -1; }
   .confronto-form { background: var(--cream); padding: 24px; border-radius: var(--radius-md); margin-bottom: 24px; border: 1px solid var(--gray-200); }
@@ -2135,7 +2140,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.33</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.34</p>
       </div>
     </div>
     <div class="header-right">
@@ -4021,12 +4026,15 @@ function renderRicerche(d) {
   var rows = d.brand.filter(function (b) { return RIC_FILTRO === 'tutti' || b.cat === RIC_FILTRO; });
   html += '<div class="ric-table"><div class="ric-row ric-h"><span>Brand</span><span>Miinto</span><span>Crescita</span><span>TLuxy 180 gg</span><span>Segnale</span></div>' + rows.map(function (b) {
     var sg = RIC_SEGNALI[b.segnale] || ['—', ''];
-    return '<div class="ric-row"><span><b>' + bsEsc(b.brand) + '</b><small>' + b.cat + (b.nota ? ' · ' + bsEsc(b.nota) : '') + '</small></span><span>' + (b.quota !== null ? b.quota + '%' : '—') + '<small>' + (b.prezzo ? 'medio ' + bsEur(b.prezzo) : '') + '</small></span><span>' + ricYoy(b.yoy) + '</span><span>' + bsEur(b.tluxy_fatturato_180g) + '<small>' + b.tluxy_pezzi_180g + ' pz · ' + b.tluxy_attivi + ' attivi</small></span><span>' + (sg[1] ? '<span class="bs2-m ' + sg[1] + '">' + sg[0] + '</span>' : sg[0]) + '</span></div>';
+    var det = '<div class="ric-det"><div><span class="bs2-l">Più venduti su Miinto</span>' + ((b.modelli && b.modelli.length) ? b.modelli.slice(0, 2).map(function (m, i) { return '<div>' + (i + 1) + '. ' + bsEsc(m) + '</div>'; }).join('') : '<div class="ric-na">non indicati nel report</div>') + '</div>'
+      + '<div><span class="bs2-l">Più venduti da noi (180 gg)</span>' + ((b.tluxy_top && b.tluxy_top.length) ? b.tluxy_top.map(function (m, i) { return '<div>' + (i + 1) + '. ' + bsEsc(m.titolo) + ' · ' + m.pezzi + ' pz · ' + bsEur(m.fatturato) + '</div>'; }).join('') : '<div class="ric-na">nessuna vendita</div>') + '</div>'
+      + (b.nota ? '<div class="ric-nota">' + bsEsc(b.nota) + '</div>' : '') + '</div>';
+    return '<details class="ric-exp"><summary class="ric-row"><span><b>' + bsEsc(b.brand) + '</b><small>' + b.cat + (b.nota ? ' · ' + bsEsc(b.nota) : '') + '</small></span><span>' + (b.quota !== null ? b.quota + '%' : '—') + '<small>' + (b.prezzo ? 'medio ' + bsEur(b.prezzo) : '') + '</small></span><span>' + ricYoy(b.yoy) + '</span><span>' + bsEur(b.tluxy_fatturato_180g) + '<small>' + b.tluxy_pezzi_180g + ' pz · ' + b.tluxy_attivi + ' attivi</small></span><span>' + (sg[1] ? '<span class="bs2-m ' + sg[1] + '">' + sg[0] + '</span>' : sg[0]) + '</span></summary>' + det + '</details>';
   }).join('') + '</div>';
   html += '<div class="bs2-sec" style="margin-top:16px">Forme delle borse (donna)</div><div class="ric-table">' + d.borse_forme.map(function (x) { return '<div class="ric-row ric-3"><span><b>' + bsEsc(x.forma) + '</b></span><span>' + x.quota + '% <small>medio ' + bsEur(x.prezzo) + '</small></span><span>' + ricYoy(x.yoy) + '</span></div>'; }).join('') + '</div>';
   html += '<div class="bs2-sec" style="margin-top:16px">Modelli più venduti su Miinto</div><ul class="ric-list">' + d.modelli_top.map(function (x) { return '<li>' + bsEsc(x) + '</li>'; }).join('') + '</ul>';
   html += '<div class="bs2-sec">Brand emergenti da valutare</div><div class="ric-tags">' + d.emergenti.map(function (x) { return '<span class="bs2-ch">' + bsEsc(x) + '</span>'; }).join('') + '</div>';
-  html += '<div class="alerts-meta" style="margin-top:12px">Quota e crescita = GMV su Miinto. "n.d." = segno della crescita non leggibile nel PDF. TLuxy = vendite su tutti i canali negli ultimi 180 giorni e prodotti attivi su Shopify. Analizzati ' + d.ordini_analizzati + ' ordini · <a href="#" onclick="caricaRicerche(true);return false;">aggiorna</a></div>';
+  html += '<div class="alerts-meta" style="margin-top:12px">Tocca un brand per vedere i 2 modelli più venduti su Miinto e da noi. Quota e crescita = GMV su Miinto. "n.d." = segno della crescita non leggibile nel PDF. TLuxy = vendite su tutti i canali negli ultimi 180 giorni e prodotti attivi su Shopify. Analizzati ' + d.ordini_analizzati + ' ordini · <a href="#" onclick="caricaRicerche(true);return false;">aggiorna</a></div>';
   el.innerHTML = html;
 }
 setTimeout(caricaOggiBox, 200);
@@ -4305,7 +4313,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.33', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.34', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -4550,7 +4558,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET' && path === '/api/ricerche-miinto') {
       try {
-        if (CACHE_RICERCHE && Date.now() - CACHE_RICERCHE.t < 3600000 && query.get('refresh') !== '1') return res.json(CACHE_RICERCHE.d);
+        if (CACHE_RICERCHE && CACHE_RICERCHE.v === 2 && Date.now() - CACHE_RICERCHE.t < 3600000 && query.get('refresh') !== '1') return res.json(CACHE_RICERCHE.d);
         const brands = [...new Set(MIINTO_SS27.brand.map(b => b.brand))];
         // Prodotti attivi su Shopify per brand
         const attivi = {};
@@ -4563,18 +4571,20 @@ export default async function handler(req, res) {
         const oggi = new Date(); const da = new Date(oggi.getTime() - 180 * 86400000);
         const ymdS = d => d.toISOString().slice(0, 10);
         const ordini = await getShopifyOrders('custom', ymdS(da), ymdS(oggi));
-        const vend = {};
-        ordini.forEach(o => { if (o.cancelled_at) return; const cur = o.currency || SHOP_CURRENCY; const mp = riconosciMarketplace(o).key; (o.line_items || []).forEach(li => { const k = normBrand(li.vendor); if (!k) return; const q = parseInt(li.quantity) || 0; if (!vend[k]) vend[k] = { pezzi: 0, fatturato: 0, sito: 0 }; const eur = toEurAmount(li.price_set, li.price, cur) * q; vend[k].pezzi += q; vend[k].fatturato += eur; if (mp === 'TLUXY_SITE') vend[k].sito += eur; }); });
+        const vend = {}, modTL = {};
+        ordini.forEach(o => { if (o.cancelled_at) return; const cur = o.currency || SHOP_CURRENCY; const mp = riconosciMarketplace(o).key; (o.line_items || []).forEach(li => { const k = normBrand(li.vendor); if (!k) return; const q = parseInt(li.quantity) || 0; if (!vend[k]) vend[k] = { pezzi: 0, fatturato: 0, sito: 0 }; const eur = toEurAmount(li.price_set, li.price, cur) * q; vend[k].pezzi += q; vend[k].fatturato += eur; if (mp === 'TLUXY_SITE') vend[k].sito += eur;
+          const t = String(li.title || '').trim(); if (!modTL[k]) modTL[k] = {}; if (!modTL[k][t]) modTL[k][t] = { titolo: t, pezzi: 0, fatturato: 0 }; modTL[k][t].pezzi += q; modTL[k][t].fatturato += eur; }); });
         const righe = MIINTO_SS27.brand.map(b => {
           const k = normBrand(b.brand), v = vend[k] || { pezzi: 0, fatturato: 0, sito: 0 }, a = attivi[k] || 0;
           let segnale = 'neutro';
           if (b.yoy !== null && b.yoy < 0) segnale = a > 30 ? 'attenzione' : 'in calo';
           else if (b.yoy !== null && b.yoy >= 40) segnale = (a < 10 && v.pezzi < 5) ? 'opportunita' : 'rafforza';
           else if (v.pezzi >= 5) segnale = 'tieni';
-          return { ...b, tluxy_attivi: a, tluxy_pezzi_180g: v.pezzi, tluxy_fatturato_180g: Math.round(v.fatturato), tluxy_sito_180g: Math.round(v.sito), segnale };
+          const tluxy_top = Object.values(modTL[k] || {}).sort((x, y) => y.fatturato - x.fatturato).slice(0, 2).map(x => ({ titolo: x.titolo, pezzi: x.pezzi, fatturato: Math.round(x.fatturato) }));
+          return { ...b, tluxy_top, tluxy_attivi: a, tluxy_pezzi_180g: v.pezzi, tluxy_fatturato_180g: Math.round(v.fatturato), tluxy_sito_180g: Math.round(v.sito), segnale };
         });
         const out = { success: true, generato_il: new Date().toISOString(), ordini_analizzati: ordini.length, fonte: MIINTO_SS27.fonte, sintesi: MIINTO_SS27.sintesi, brand: righe, borse_forme: MIINTO_SS27.borse_forme, modelli_top: MIINTO_SS27.modelli_top, emergenti: MIINTO_SS27.emergenti };
-        CACHE_RICERCHE = { t: Date.now(), d: out };
+        CACHE_RICERCHE = { v: 2, t: Date.now(), d: out };
         return res.json(out);
       } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
     }
