@@ -1979,7 +1979,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .ric-exp > summary { list-style: none; cursor: pointer; } .ric-exp > summary::-webkit-details-marker { display: none; }
   .ric-exp[open] > summary { background: var(--gray-100); }
   .ric-det { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; padding: 8px 4px 12px; font-size: 0.8rem; background: var(--gray-100); border-radius: 0 0 10px 10px; margin-bottom: 4px; }
-  .ric-det .bs2-l { display: block; margin-bottom: 3px; } .ric-nota { grid-column: 1 / -1; font-size: 0.74rem; color: var(--gray-500); }
+  .ric-det .bs2-l { display: block; margin-bottom: 3px; }
+  .ric-it { display: grid; grid-template-columns: 44px minmax(0,1fr); gap: 8px; align-items: center; margin-bottom: 6px; } .ric-it small { display: block; font-size: 0.68rem; color: var(--gray-500); }
+  .ric-img { width: 44px; height: 44px; border-radius: 6px; background: #fff; overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--gray-300); } .ric-img img { width: 100%; height: 100%; object-fit: cover; } .ric-nota { grid-column: 1 / -1; font-size: 0.74rem; color: var(--gray-500); }
   @media (max-width: 640px) { .ric-det { grid-template-columns: 1fr; } } .ric-tags { margin-bottom: 8px; }
   @media (max-width: 640px) { .ric-row { grid-template-columns: minmax(0,1.3fr) 62px minmax(0,1fr) 78px; } .ric-row > span:nth-child(2) { display: none; } .ric-row.ric-3 { grid-template-columns: minmax(0,1.2fr) minmax(0,1fr) 62px; } .ric-row.ric-3 > span:nth-child(2) { display: block; } }
   .bs-empty { text-align: center; padding: 80px 20px; color: var(--gray-500); font-style: italic; grid-column: 1 / -1; }
@@ -2140,7 +2142,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.34</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.35</p>
       </div>
     </div>
     <div class="header-right">
@@ -4002,6 +4004,7 @@ function caricaMeseStrip() {
 var RIC_DATA = null, RIC_FILTRO = 'tutti';
 function ricYoy(v) { if (v === null || v === undefined) return '<span class="ric-na">n.d.</span>'; return '<span class="bs2-m ' + (v >= 40 ? 'ok' : (v < 0 ? 'low' : 'mid')) + '">' + (v > 0 ? '+' : '') + v + '%</span>'; }
 var RIC_SEGNALI = { opportunita: ['Opportunità', 'ok'], rafforza: ['Rafforza', 'ok'], tieni: ['Tieni', 'mid'], neutro: ['—', ''], 'in calo': ['In calo', 'low'], attenzione: ['Attenzione', 'low'] };
+function ricItem(foto, testo, sotto) { return '<div class="ric-it"><span class="ric-img">' + (foto ? '<img src="' + bsEsc(foto) + (foto.indexOf('?') > -1 ? '&' : '?') + 'width=120" loading="lazy" alt="">' : '◇') + '</span><span>' + testo + (sotto ? '<small>' + sotto + '</small>' : '') + '</span></div>'; }
 function ricFiltro(f) { RIC_FILTRO = f; renderRicerche(RIC_DATA); }
 function caricaRicerche(refresh) {
   var el = document.getElementById('ric-content');
@@ -4026,8 +4029,8 @@ function renderRicerche(d) {
   var rows = d.brand.filter(function (b) { return RIC_FILTRO === 'tutti' || b.cat === RIC_FILTRO; });
   html += '<div class="ric-table"><div class="ric-row ric-h"><span>Brand</span><span>Miinto</span><span>Crescita</span><span>TLuxy 180 gg</span><span>Segnale</span></div>' + rows.map(function (b) {
     var sg = RIC_SEGNALI[b.segnale] || ['—', ''];
-    var det = '<div class="ric-det"><div><span class="bs2-l">Più venduti su Miinto</span>' + ((b.modelli && b.modelli.length) ? b.modelli.slice(0, 2).map(function (m, i) { return '<div>' + (i + 1) + '. ' + bsEsc(m) + '</div>'; }).join('') : '<div class="ric-na">non indicati nel report</div>') + '</div>'
-      + '<div><span class="bs2-l">Più venduti da noi (180 gg)</span>' + ((b.tluxy_top && b.tluxy_top.length) ? b.tluxy_top.map(function (m, i) { return '<div>' + (i + 1) + '. ' + bsEsc(m.titolo) + ' · ' + m.pezzi + ' pz · ' + bsEur(m.fatturato) + '</div>'; }).join('') : '<div class="ric-na">nessuna vendita</div>') + '</div>'
+    var det = '<div class="ric-det"><div><span class="bs2-l">Più venduti su Miinto</span>' + ((b.modelli && b.modelli.length) ? b.modelli.slice(0, 2).map(function (m, i) { return ricItem((b.modelli_foto || [])[i], (i + 1) + '. ' + bsEsc(m), (b.modelli_foto || [])[i] ? 'foto dal nostro catalogo' : ''); }).join('') : '<div class="ric-na">non indicati nel report</div>') + '</div>'
+      + '<div><span class="bs2-l">Più venduti da noi (180 gg)</span>' + ((b.tluxy_top && b.tluxy_top.length) ? b.tluxy_top.map(function (m, i) { return ricItem(m.foto, (i + 1) + '. ' + bsEsc(m.titolo) + (m.colore ? ' – ' + bsEsc(m.colore) : ''), m.pezzi + ' pz · ' + bsEur(m.fatturato)); }).join('') : '<div class="ric-na">nessuna vendita</div>') + '</div>'
       + (b.nota ? '<div class="ric-nota">' + bsEsc(b.nota) + '</div>' : '') + '</div>';
     return '<details class="ric-exp"><summary class="ric-row"><span><b>' + bsEsc(b.brand) + '</b><small>' + b.cat + (b.nota ? ' · ' + bsEsc(b.nota) : '') + '</small></span><span>' + (b.quota !== null ? b.quota + '%' : '—') + '<small>' + (b.prezzo ? 'medio ' + bsEur(b.prezzo) : '') + '</small></span><span>' + ricYoy(b.yoy) + '</span><span>' + bsEur(b.tluxy_fatturato_180g) + '<small>' + b.tluxy_pezzi_180g + ' pz · ' + b.tluxy_attivi + ' attivi</small></span><span>' + (sg[1] ? '<span class="bs2-m ' + sg[1] + '">' + sg[0] + '</span>' : sg[0]) + '</span></summary>' + det + '</details>';
   }).join('') + '</div>';
@@ -4313,7 +4316,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.34', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.35', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -4558,7 +4561,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET' && path === '/api/ricerche-miinto') {
       try {
-        if (CACHE_RICERCHE && CACHE_RICERCHE.v === 2 && Date.now() - CACHE_RICERCHE.t < 3600000 && query.get('refresh') !== '1') return res.json(CACHE_RICERCHE.d);
+        if (CACHE_RICERCHE && CACHE_RICERCHE.v === 3 && Date.now() - CACHE_RICERCHE.t < 3600000 && query.get('refresh') !== '1') return res.json(CACHE_RICERCHE.d);
         const brands = [...new Set(MIINTO_SS27.brand.map(b => b.brand))];
         // Prodotti attivi su Shopify per brand
         const attivi = {};
@@ -4573,18 +4576,36 @@ export default async function handler(req, res) {
         const ordini = await getShopifyOrders('custom', ymdS(da), ymdS(oggi));
         const vend = {}, modTL = {};
         ordini.forEach(o => { if (o.cancelled_at) return; const cur = o.currency || SHOP_CURRENCY; const mp = riconosciMarketplace(o).key; (o.line_items || []).forEach(li => { const k = normBrand(li.vendor); if (!k) return; const q = parseInt(li.quantity) || 0; if (!vend[k]) vend[k] = { pezzi: 0, fatturato: 0, sito: 0 }; const eur = toEurAmount(li.price_set, li.price, cur) * q; vend[k].pezzi += q; vend[k].fatturato += eur; if (mp === 'TLUXY_SITE') vend[k].sito += eur;
-          const t = String(li.title || '').trim(); if (!modTL[k]) modTL[k] = {}; if (!modTL[k][t]) modTL[k][t] = { titolo: t, pezzi: 0, fatturato: 0 }; modTL[k][t].pezzi += q; modTL[k][t].fatturato += eur; }); });
+          const t = String(li.title || '').trim(); const col = String(li.variant_title || '').split(' / ')[0].trim(); const kk = t + '|' + col; if (!modTL[k]) modTL[k] = {}; if (!modTL[k][kk]) modTL[k][kk] = { titolo: t, colore: col, variant_id: li.variant_id, pezzi: 0, fatturato: 0 }; modTL[k][kk].pezzi += q; modTL[k][kk].fatturato += eur; }); });
+        // Foto: modelli TLuxy (variante venduta) + modelli Miinto cercati nel nostro catalogo
+        const topPerBrand = {};
+        Object.keys(modTL).forEach(k => { topPerBrand[k] = Object.values(modTL[k]).sort((x, y) => y.fatturato - x.fatturato).slice(0, 2); });
+        const vidsFoto = [];
+        MIINTO_SS27.brand.forEach(b => (topPerBrand[normBrand(b.brand)] || []).forEach(m => { if (m.variant_id && !MEM_VARIANT_IMG.has(String(m.variant_id))) vidsFoto.push(m.variant_id); }));
+        if (vidsFoto.length) await infoVariantiGraphQL(vidsFoto);
+        const ricMiinto = [];
+        MIINTO_SS27.brand.forEach(b => (b.modelli || []).slice(0, 2).forEach(m => {
+          const kw = m.split(' · ')[0].replace(/\(.*?\)/g, '').replace(/\b(nero|nera|bianca|bianco|beige|marrone|blu|in pelle)\b/gi, '').replace(/[\/]/g, ' ').replace(/\s+/g, ' ').trim();
+          if (kw) ricMiinto.push({ key: b.brand + '|' + m, q: 'vendor:"' + b.brand.replace(/"/g, '') + '" ' + kw.replace(/"/g, '') });
+        }));
+        const fotoMiinto = {};
+        for (let i = 0; i < ricMiinto.length; i += 20) {
+          const chunk = ricMiinto.slice(i, i + 20);
+          const gq = '{ ' + chunk.map((r, j) => 'm' + j + ': products(first: 1, sortKey: RELEVANCE, query: ' + JSON.stringify(r.q) + ') { nodes { featuredImage { url } } }').join(' ') + ' }';
+          try { const d = await shopifyGraphQL(gq); chunk.forEach((r, j) => { const n = d['m' + j] && d['m' + j].nodes && d['m' + j].nodes[0]; if (n && n.featuredImage) fotoMiinto[r.key] = n.featuredImage.url; }); } catch (e) { console.log('[ricerche] foto errore', e.message); }
+        }
         const righe = MIINTO_SS27.brand.map(b => {
           const k = normBrand(b.brand), v = vend[k] || { pezzi: 0, fatturato: 0, sito: 0 }, a = attivi[k] || 0;
           let segnale = 'neutro';
           if (b.yoy !== null && b.yoy < 0) segnale = a > 30 ? 'attenzione' : 'in calo';
           else if (b.yoy !== null && b.yoy >= 40) segnale = (a < 10 && v.pezzi < 5) ? 'opportunita' : 'rafforza';
           else if (v.pezzi >= 5) segnale = 'tieni';
-          const tluxy_top = Object.values(modTL[k] || {}).sort((x, y) => y.fatturato - x.fatturato).slice(0, 2).map(x => ({ titolo: x.titolo, pezzi: x.pezzi, fatturato: Math.round(x.fatturato) }));
-          return { ...b, tluxy_top, tluxy_attivi: a, tluxy_pezzi_180g: v.pezzi, tluxy_fatturato_180g: Math.round(v.fatturato), tluxy_sito_180g: Math.round(v.sito), segnale };
+          const tluxy_top = (topPerBrand[k] || []).map(x => ({ titolo: x.titolo, colore: x.colore, pezzi: x.pezzi, fatturato: Math.round(x.fatturato), foto: x.variant_id ? (MEM_VARIANT_IMG.get(String(x.variant_id)) || null) : null }));
+          const modelli_foto = (b.modelli || []).slice(0, 2).map(m => fotoMiinto[b.brand + '|' + m] || null);
+          return { ...b, tluxy_top, modelli_foto, tluxy_attivi: a, tluxy_pezzi_180g: v.pezzi, tluxy_fatturato_180g: Math.round(v.fatturato), tluxy_sito_180g: Math.round(v.sito), segnale };
         });
         const out = { success: true, generato_il: new Date().toISOString(), ordini_analizzati: ordini.length, fonte: MIINTO_SS27.fonte, sintesi: MIINTO_SS27.sintesi, brand: righe, borse_forme: MIINTO_SS27.borse_forme, modelli_top: MIINTO_SS27.modelli_top, emergenti: MIINTO_SS27.emergenti };
-        CACHE_RICERCHE = { v: 2, t: Date.now(), d: out };
+        CACHE_RICERCHE = { v: 3, t: Date.now(), d: out };
         return res.json(out);
       } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
     }
