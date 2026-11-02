@@ -1007,9 +1007,23 @@ function calcolaPannelloCanali(ordini) {
   sito.filter(r => r.t >= now - 7 * D).forEach(r => { const f = fonteOrdineSito(r.o); fonti7[f] = fonti7[f] || { fonte: f, ordini: 0, fatturato: 0 }; fonti7[f].ordini++; fonti7[f].fatturato += r.eur; });
   const fontiOggi = {};
   sito.filter(r => r.t >= inizioOggi).forEach(r => { const f = fonteOrdineSito(r.o); fontiOggi[f] = (fontiOggi[f] || 0) + 1; });
+  const meseADataSito = () => {
+    const [yy, mm, dd] = romaOggi.split('-').map(Number);
+    const inizioMese = romeDateTimeToUTC(`${yy}-${String(mm).padStart(2, '0')}-01`, '00:00:00').getTime();
+    const py = mm === 1 ? yy - 1 : yy, pm = mm === 1 ? 12 : mm - 1;
+    const giorniPrec = new Date(Date.UTC(py, pm, 0)).getUTCDate();
+    const inizioPrec = romeDateTimeToUTC(`${py}-${String(pm).padStart(2, '0')}-01`, '00:00:00').getTime();
+    const ddPrec = Math.min(dd, giorniPrec);
+    const fineGiornoPrec = romeDateTimeToUTC(`${py}-${String(pm).padStart(2, '0')}-${String(ddPrec).padStart(2, '0')}`, '00:00:00').getTime() + (now - inizioOggi);
+    const nomi = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
+    const corrente = somma(sito.filter(r => r.t >= inizioMese && r.t < now));
+    const precedente = somma(sito.filter(r => r.t >= inizioPrec && r.t < fineGiornoPrec));
+    return { mese: nomi[mm - 1], mese_prec: nomi[pm - 1], corrente, precedente, variazione_pct: varPct(corrente.fatturato, precedente.fatturato) };
+  };
   sezioni.push({ key: 'TLUXY_SITE', nome: 'TLuxy diretto', confronto: 'Oggi vs ieri alla stessa ora', stato: 'info',
     oggi, ieri_stessa_ora: ieriStessaOra, variazione_pct: varPct(oggi.fatturato, ieriStessaOra.fatturato), ieri, altro_ieri: altroIeri, variazione_ieri_pct: varPct(ieri.fatturato, altroIeri.fatturato),
     settimana: settimana('TLUXY_SITE'),
+    mese: meseADataSito(),
     fonti_7gg: Object.values(fonti7).map(f => ({ ...f, fatturato: Math.round(f.fatturato) })).sort((a, b) => b.fatturato - a.fatturato),
     fonti_oggi: fontiOggi });
 
@@ -2144,7 +2158,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.38</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.39</p>
       </div>
     </div>
     <div class="header-right">
@@ -3894,7 +3908,8 @@ function caricaAlertCanali(refresh) {
         if (s.giorno && (s.giorno.oggi.ordini || s.giorno.ieri_stessa_ora.ordini)) main = rigaConfronto('Oggi finora', s.giorno.oggi, 'Ieri stessa ora', s.giorno.ieri_stessa_ora, s.giorno.variazione_oggi_pct) + main;
         if (s.ultima_vendita) det = '<div class="ch-note">Ultima: ' + dataBreve(s.ultima_vendita.dal) + '–' + dataBreve(s.ultima_vendita.al) + ' · ' + eur0(s.ultima_vendita.fatturato) + ' (' + s.ultima_vendita.ordini + ' ordini)' + (s.vendita_precedente ? '<br>Precedente: ' + dataBreve(s.vendita_precedente.dal) + '–' + dataBreve(s.vendita_precedente.al) + ' · ' + eur0(s.vendita_precedente.fatturato) + ' (' + s.vendita_precedente.ordini + ' ordini)' : '') + '</div>';
       } else if (s.key === 'TLUXY_SITE') {
-        main = rigaConfronto('Oggi finora', s.oggi, 'Ieri stessa ora', s.ieri_stessa_ora, s.variazione_pct) + rigaConfronto('Ultimi 7 giorni', s.settimana.corrente, '7 precedenti', s.settimana.precedente, s.settimana.variazione_pct);
+        main = rigaConfronto('Oggi finora', s.oggi, 'Ieri stessa ora', s.ieri_stessa_ora, s.variazione_pct) + rigaConfronto('Ultimi 7 giorni', s.settimana.corrente, '7 precedenti', s.settimana.precedente, s.settimana.variazione_pct)
+          + (s.mese ? rigaConfronto('Dal 1° ' + s.mese.mese, s.mese.corrente, 'Stesso periodo ' + s.mese.mese_prec, s.mese.precedente, s.mese.variazione_pct) : '');
         det = rigaConfronto('Ieri', s.ieri, 'L’altro ieri', s.altro_ieri, s.variazione_ieri_pct);
         if (s.fonti_7gg && s.fonti_7gg.length) {
           var maxF = Math.max.apply(null, s.fonti_7gg.map(function (f) { return f.fatturato; })) || 1;
@@ -4346,7 +4361,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.38', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.39', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -4922,7 +4937,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && path === '/api/alerts') {
       try {
         const refresh = query.get('refresh') === '1';
-        const cacheKey = 'pannello_canali_v526';
+        const cacheKey = 'pannello_canali_v539';
         if (!refresh && KV_ENABLED) {
           try { const c = await kvGet(cacheKey); if (c) { const obj = JSON.parse(c); if (Date.now() - new Date(obj.generato_il).getTime() < 15 * 60000) return res.json({ success: true, cached: true, ...obj }); } } catch (e) {}
         }
