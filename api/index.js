@@ -1052,9 +1052,18 @@ function calcolaPannelloCanali(ordini) {
   // 5) Altri canali — sett/sett, compatti
   const principali = new Set(['MIINTO', 'TLUXY_SITE', 'WINKELSTRAAT', 'THE_BRADERY']);
   const altriKeys = [...new Set(righe.filter(r => !principali.has(r.key) && r.t >= now - 28 * D).map(r => r.key))];
-  const altri = altriKeys.map(k => { const w = settimana(k); const nome = (MARKETPLACE_CONFIGS[k] && MARKETPLACE_CONFIGS[k].nome) || k; return { key: k, nome, ...w }; })
-    .sort((a, b) => (b.corrente.fatturato + b.precedente.fatturato) - (a.corrente.fatturato + a.precedente.fatturato));
-  return { generato_il: new Date().toISOString(), alerts, sezioni, altri };
+  const tuttiAltri = altriKeys.map(k => { const w = settimana(k); const nome = (MARKETPLACE_CONFIGS[k] && MARKETPLACE_CONFIGS[k].nome) || k; return { key: k, nome, ...w }; });
+  // v5.40: un canale "altro" oltre €2000 negli ultimi 7 giorni diventa una card grande
+  const SOGLIA_CARD = 2000;
+  tuttiAltri.filter(a => a.corrente.fatturato > SOGLIA_CARD).forEach(a => sezioni.push({ ...a, confronto: 'Ultimi 7 giorni vs 7 precedenti', stato: 'ok', giorno: giorno(a.key) }));
+  const altri = tuttiAltri.filter(a => a.corrente.fatturato <= SOGLIA_CARD)
+    .sort((a, b) => (b.corrente.fatturato - a.corrente.fatturato) || (b.precedente.fatturato - a.precedente.fatturato));
+  // ordine card: per incasso ultimi 7 giorni, TLuxy diretto sempre seconda
+  sezioni.forEach(x => { x.incasso_7gg = x.key === 'TLUXY_SITE' ? x.settimana.corrente.fatturato : (x.corrente ? x.corrente.fatturato : settimana(x.key).corrente.fatturato); });
+  const sito7 = sezioni.find(x => x.key === 'TLUXY_SITE');
+  const ordinate = sezioni.filter(x => x.key !== 'TLUXY_SITE').sort((a, b) => b.incasso_7gg - a.incasso_7gg);
+  if (sito7) ordinate.splice(Math.min(1, ordinate.length), 0, sito7);
+  return { generato_il: new Date().toISOString(), alerts, sezioni: ordinate, altri };
 }
 
 // ============ ALERT CANALI LENTI (v5.14) ============
@@ -2158,7 +2167,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.39</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.40</p>
       </div>
     </div>
     <div class="header-right">
@@ -4361,7 +4370,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.39', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.40', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -4937,7 +4946,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && path === '/api/alerts') {
       try {
         const refresh = query.get('refresh') === '1';
-        const cacheKey = 'pannello_canali_v539';
+        const cacheKey = 'pannello_canali_v540';
         if (!refresh && KV_ENABLED) {
           try { const c = await kvGet(cacheKey); if (c) { const obj = JSON.parse(c); if (Date.now() - new Date(obj.generato_il).getTime() < 15 * 60000) return res.json({ success: true, cached: true, ...obj }); } } catch (e) {}
         }
