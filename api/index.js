@@ -1520,6 +1520,55 @@ function calcolaBestSellers(ordini, top = 20, variantCosts = {}) {
 }
 
 // v5.27: Best seller per modello (colori raggruppati), per brand e per canale
+// ============ VENDITE DUOMO (v5.42) ============
+// Pezzi DUOMO venduti oggi / 7 / 30 giorni con margine netto dopo tutti i costi (stessa logica di Best Seller).
+let CACHE_DUO_VENDITE = null;
+function calcolaVenditeDuo(ordini, variantCosts) {
+  const D = 86400000, now = Date.now();
+  const inizioOggi = romeDateTimeToUTC(getRomeDateString(), '00:00:00').getTime();
+  const fin = { oggi: inizioOggi, giorni7: now - 7 * D, giorni30: now - 30 * D };
+  const out = {}; Object.keys(fin).forEach(k => { out[k] = { pezzi: 0, ordini: 0, fatturato: 0, margine: 0, lordo_con_costo: 0, senza_costo: 0 }; });
+  for (const ordine of ordini) {
+    if (ordine.cancelled_at || getOrderRefundInfo(ordine).isFullRefund) continue;
+    const t = new Date(ordine.created_at).getTime(); if (isNaN(t) || t < fin.giorni30) continue;
+    const items = ordine.line_items || [];
+    if (!items.some(it => isDuoSku(it.sku))) continue;
+    const ordCurrency = ordine.currency || SHOP_CURRENCY;
+    const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
+    const ivaPerc = getIvaPerPaese(country);
+    const mp = riconosciMarketplace(ordine); const chKey = mp.key;
+    const lineeLordo = items.map(it => toEurAmount(it.price_set, it.price, ordCurrency) * (parseInt(it.quantity) || 0));
+    const sommaLinee = lineeLordo.reduce((a, b) => a + b, 0);
+    let incassoNettoOrd = null;
+    if (chKey !== 'MARK_FOYS' && mp.config && sommaLinee > 0) {
+      const curI = getOrderCurrencyInfo(ordine), refI = getOrderRefundInfo(ordine);
+      const lordoOrd = Math.max(0, (curI.eurTotal || 0) - (refI.totalRefundedEur || 0));
+      const sped = (ordine.shipping_lines || []).reduce((s2, l) => s2 + toEurAmount(l.price_set, l.price, curI.originalCurrency), 0);
+      const tax = toEurAmount(ordine.total_tax_set, ordine.total_tax, curI.originalCurrency);
+      const ivaO = chKey === 'POIZON' ? 22 : ivaPerc;
+      const ivaOrd = tax > 0 ? tax * (curI.eurTotal > 0 ? lordoOrd / curI.eurTotal : 1) : (lordoOrd - lordoOrd / (1 + ivaO / 100));
+      incassoNettoOrd = calcolaMarginalita(lordoOrd, ivaOrd, 0, sped, mp.config, chKey).margine_netto;
+    }
+    const contati = new Set();
+    items.forEach((item, idx) => {
+      if (!isDuoSku(item.sku)) return;
+      const q = parseInt(item.quantity) || 0; if (!q) return;
+      const mfP = chKey === 'MARK_FOYS' ? mfPrezzoRiga(item, ordine, variantCosts) : null;
+      const lordo = mfP !== null ? mfP * q : lineeLordo[idx];
+      const netto = mfP !== null ? lordo : (incassoNettoOrd !== null ? incassoNettoOrd * (lineeLordo[idx] / sommaLinee) : lordo / (1 + ivaPerc / 100));
+      const cu = item.variant_id && variantCosts[item.variant_id] != null ? variantCosts[item.variant_id] : null;
+      Object.keys(fin).forEach(k => {
+        if (t < fin[k]) return;
+        const w = out[k]; w.pezzi += q; w.fatturato += lordo;
+        if (!contati.has(k)) { w.ordini++; contati.add(k); }
+        if (cu !== null) { w.margine += netto - cu * q; w.lordo_con_costo += lordo; } else w.senza_costo += q;
+      });
+    });
+  }
+  Object.values(out).forEach(w => { w.margine_pct = w.lordo_con_costo > 0 ? Math.round(w.margine / w.lordo_con_costo * 1000) / 10 : 0; w.fatturato = Math.round(w.fatturato); w.margine = Math.round(w.margine); delete w.lordo_con_costo; });
+  return { generato_il: new Date().toISOString(), ...out };
+}
+
 function calcolaBestSellersModelli(ordini, variantCosts = {}) {
   const modelli = {}, brand = {}, canaliTot = {};
   let tot = { pezzi: 0, fatturato: 0, netto: 0, ncc: 0, lcc: 0, costo: 0, ordini: 0, senza_costo: 0 };
@@ -2183,7 +2232,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.41</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.42</p>
       </div>
     </div>
     <div class="header-right">
@@ -2208,6 +2257,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <div id="analytics-tab" class="tab-content active">
     <div id="oggi-box" class="alerts-banner"></div>
     <div id="alerts-banner" class="alerts-banner"></div>
+    <div id="duo-vendite" class="alerts-banner"></div>
     <div id="duo-alerts" class="alerts-banner"></div>
     <div class="section">
       <div class="section-header"><div><div class="section-title">Performance</div><div class="section-subtitle">Analisi vendite e marginalità in tempo reale</div></div></div>
@@ -3955,6 +4005,31 @@ function caricaAlertCanali(refresh) {
 }
 setTimeout(function () { caricaAlertCanali(false); }, 400);
 
+// ===== v5.42 Vendite DUOMO oggi / 7 / 30 giorni =====
+function caricaDuoVendite(refresh) {
+  var box = document.getElementById('duo-vendite'); if (!box) return;
+  var head = '<div class="alerts-head"><div class="alerts-title">Vendite DUOMO</div><button class="alerts-refresh" onclick="caricaDuoVendite(true)">Aggiorna</button></div>';
+  box.innerHTML = head + '<div class="alerts-meta">Calcolo vendite DUOMO…</div>';
+  fetch('/api/duo-vendite' + (refresh ? '?refresh=1' : '')).then(function (r) { return r.json(); }).then(function (d) {
+    if (!d || !d.success) { box.innerHTML = head + '<div class="alerts-meta">Dato non disponibile' + (d && d.error ? ': ' + escAlert(d.error) : '') + '</div>'; return; }
+    var eu = function (n) { return '€' + Math.round(n || 0).toLocaleString('it-IT'); };
+    var cella = function (lab, w) {
+      var col = w.margine < 0 ? '#B42318' : 'var(--gray-900)';
+      return '<div style="flex:1;min-width:0;padding:10px 8px;border:1px solid var(--gray-200);border-radius:12px;">'
+        + '<div class="ch-lab">' + lab + '</div>'
+        + '<div style="font-size:1.25rem;font-weight:600;margin:2px 0;">' + w.pezzi + ' <span style="font-size:0.75rem;font-weight:400;color:var(--gray-500);">pz</span></div>'
+        + '<div style="font-size:0.8rem;color:var(--gray-700);">' + eu(w.fatturato) + '</div>'
+        + '<div style="font-size:0.8rem;color:' + col + ';">margine ' + eu(w.margine) + ' · ' + w.margine_pct + '%</div>'
+        + (w.senza_costo ? '<div style="font-size:0.7rem;color:var(--gray-500);">' + w.senza_costo + ' pz senza costo</div>' : '')
+        + '</div>';
+    };
+    var ora = new Date(d.generato_il).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    box.innerHTML = head + '<div style="display:flex;gap:8px;">' + cella('Oggi', d.oggi) + cella('Ultimi 7 gg', d.giorni7) + cella('Ultimi 30 gg', d.giorni30) + '</div>'
+      + '<div class="alerts-meta">Margine netto dopo IVA, commissioni, spedizione e costo · % sul lordo · aggiornato ' + ora + '</div>';
+  }).catch(function () { box.innerHTML = head + '<div class="alerts-meta">Dato non disponibile.</div>'; });
+}
+setTimeout(function () { caricaDuoVendite(false); }, 600);
+
 // ===== v5.15 Controllo margini DUOMO =====
 var duoPollN = 0;
 function duoRiga(x, extra) { return '<div class="alert-item critico"><span class="alert-dot"></span><div><strong>' + escAlert(x.brand) + '</strong> · ' + escAlert(x.titolo) + '<br><span style="color:var(--gray-500);font-size:0.78rem;">' + extra + ' · costo €' + Math.round(x.costo) + ' · stock ' + x.stock + '</span></div></div>'; }
@@ -4386,7 +4461,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.41', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.42', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -4922,6 +4997,23 @@ export default async function handler(req, res) {
     // ============ FORECAST INCASSI ============
     // Calcola pagamenti previsti per il mese corrente + mese prossimo (default)
     // Cache KV 24h come /api/inventory-discovery. ?refresh=1 per forzare ricalcolo
+    if (req.method === 'GET' && path === '/api/duo-vendite') {
+      try {
+        const refresh = query.get('refresh') === '1';
+        if (!refresh && CACHE_DUO_VENDITE && Date.now() - new Date(CACHE_DUO_VENDITE.generato_il).getTime() < 10 * 60000) return res.json({ success: true, cached: true, ...CACHE_DUO_VENDITE });
+        const oggiS = getRomeDateString();
+        const da = getRomeDateString(new Date(Date.now() - 31 * 86400000));
+        let ordini = await getShopifyOrders('custom', da, oggiS);
+        ordini = await processOrders(ordini);
+        const vids = new Set(), pids = new Set();
+        ordini.forEach(o => (o.line_items || []).forEach(it => { if (isDuoSku(it.sku)) { if (it.variant_id) vids.add(it.variant_id); if (it.product_id) pids.add(it.product_id); } }));
+        const variantCosts = vids.size ? (await fetchVariantCosts([...vids], [...pids])).costs : {};
+        await caricaPrezziMarkFoy(ordini);
+        CACHE_DUO_VENDITE = calcolaVenditeDuo(ordini, variantCosts);
+        return res.json({ success: true, cached: false, ...CACHE_DUO_VENDITE });
+      } catch (e) { return res.json({ success: false, error: e.message }); }
+    }
+
     if (req.method === 'GET' && path === '/api/duo-alerts') {
       try {
         if (!KV_ENABLED) return res.json({ success: false, error: 'KV non configurato' });
