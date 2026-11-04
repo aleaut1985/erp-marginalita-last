@@ -661,7 +661,7 @@ const MARKETPLACE_CONFIGS = {
   'SECRET_SALES': { nome: 'Secret Sales', sconto_percentuale: 0, fee_principale: 20, fee_secondaria: 0, fee_fissa_trasporto: 2, fee_fissa_packaging: 2, pagamento: 'Prima metà mese+2', payment_policy: { type: 'monthly_mid', month_offset: 2, payout_day: 15 } },
   'FASHION_TAMERS': { nome: 'Fashion Tamers', sconto_percentuale: 0, fee_principale: 32, fee_secondaria: 0, fee_accessoria: 2, fee_fissa_trasporto: 15, fee_fissa_packaging: 6, pagamento: 'Prima metà mese+2', payment_policy: { type: 'monthly_mid', month_offset: 2, payout_day: 15 } },
   'INTRA_MIRROR': { nome: 'Intra Mirror', sconto_percentuale: 15, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', month_offset: 2, payout_day: 10 } },
-  'BALARDI': { nome: 'Balardi', sconto_percentuale: 35, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Prepagato (wallet)', payment_policy: { type: 'prepaid_balance' }, iva_esente: true, prezzo_ordine_netto: true, nota_regole: 'Paga RRP −35% senza IVA; il prezzo ordine Shopify è già l\'incasso. Spedizione rimborsata a parte (copre il corriere).' },
+  'BALARDI': { nome: 'Balardi', sconto_percentuale: 35, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Prepagato (wallet)', payment_policy: { type: 'prepaid_balance' }, iva_esente: true, prezzo_ordine_netto: true, nota_regole: 'Paga il prezzo di vendita TLuxy −35%, senza IVA; il prezzo ordine Shopify è già l\'incasso. Spedizione rimborsata a parte (copre il corriere).' },
   // v5.12: anticipo Bradery portato da 80% a 90% (accordo con facturation@thebradery.com, 22/09/2026) - ordini fino al 31/08/2026 restano 80/20
   'THE_BRADERY': { nome: 'The Bradery', sconto_percentuale: 5, fee_principale: 17, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 2, pagamento: 'Split 90/10 (mese+1 / mese+2)', payment_policy: { type: 'split', parts: [{ pct: 90, month_offset: 1, payout_day: 10 }, { pct: 10, month_offset: 2, payout_day: 10 }] },
     storico: [{ fino_al: '2026-08-31', pagamento: 'Split 80/20 (mese+1 / mese+2)', payment_policy: { type: 'split', parts: [{ pct: 80, month_offset: 1, payout_day: 10 }, { pct: 20, month_offset: 2, payout_day: 10 }] } }] },
@@ -3418,7 +3418,7 @@ async function handleBatchFile(file) {
 function batchCalcMargine(listino, costo, mpKey, iva, retail) {
   const mp = MARKETPLACES[mpKey];
   if (!mp) return null;
-  if (mp.iva_esente) iva = 0; // Balardi: RRP −35% senza scorporo IVA
+  if (mp.iva_esente) iva = 0; // Balardi: prezzo di vendita −35% senza scorporo IVA
   const nettoIva = listino / (1 + iva / 100);
   const dopoSconto = nettoIva * (1 - mp.sconto_percentuale / 100);
   const feeShop = mpKey === 'TLUXY_SITE' ? dopoSconto * 0.0015 : 0;
