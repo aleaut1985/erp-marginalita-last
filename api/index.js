@@ -661,7 +661,7 @@ const MARKETPLACE_CONFIGS = {
   'SECRET_SALES': { nome: 'Secret Sales', sconto_percentuale: 0, fee_principale: 20, fee_secondaria: 0, fee_fissa_trasporto: 2, fee_fissa_packaging: 2, pagamento: 'Prima metà mese+2', payment_policy: { type: 'monthly_mid', month_offset: 2, payout_day: 15 } },
   'FASHION_TAMERS': { nome: 'Fashion Tamers', sconto_percentuale: 0, fee_principale: 32, fee_secondaria: 0, fee_accessoria: 2, fee_fissa_trasporto: 15, fee_fissa_packaging: 6, pagamento: 'Prima metà mese+2', payment_policy: { type: 'monthly_mid', month_offset: 2, payout_day: 15 } },
   'INTRA_MIRROR': { nome: 'Intra Mirror', sconto_percentuale: 15, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Prima decade mese+2', payment_policy: { type: 'monthly_decade', month_offset: 2, payout_day: 10 } },
-  'BALARDI': { nome: 'Balardi', sconto_percentuale: 35, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Prepagato (wallet)', payment_policy: { type: 'prepaid_balance' } },
+  'BALARDI': { nome: 'Balardi', sconto_percentuale: 35, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 3, pagamento: 'Prepagato (wallet)', payment_policy: { type: 'prepaid_balance' }, iva_esente: true, prezzo_ordine_netto: true, nota_regole: 'Paga RRP −35% senza IVA; il prezzo ordine Shopify è già l\'incasso. Spedizione rimborsata a parte (copre il corriere).' },
   // v5.12: anticipo Bradery portato da 80% a 90% (accordo con facturation@thebradery.com, 22/09/2026) - ordini fino al 31/08/2026 restano 80/20
   'THE_BRADERY': { nome: 'The Bradery', sconto_percentuale: 5, fee_principale: 17, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 2, pagamento: 'Split 90/10 (mese+1 / mese+2)', payment_policy: { type: 'split', parts: [{ pct: 90, month_offset: 1, payout_day: 10 }, { pct: 10, month_offset: 2, payout_day: 10 }] },
     storico: [{ fino_al: '2026-08-31', pagamento: 'Split 80/20 (mese+1 / mese+2)', payment_policy: { type: 'split', parts: [{ pct: 80, month_offset: 1, payout_day: 10 }, { pct: 20, month_offset: 2, payout_day: 10 }] } }] },
@@ -1369,8 +1369,10 @@ function calcolaFeesShopify(prezzo_netto, mpKey) {
 }
 
 function calcolaMarginalita(prezzo_lordo, iva_scorporata, costo_merce, spedizione, mp, mpKey) {
+  // v5.43: Balardi (iva_esente + prezzo_ordine_netto) → il prezzo dell'ordine Shopify è già l'incasso: niente IVA, niente sconto
+  if (mp.iva_esente) iva_scorporata = 0;
   const prezzo_netto_iva = prezzo_lordo - iva_scorporata;
-  const prezzo_netto_marketplace = prezzo_netto_iva * (1 - mp.sconto_percentuale / 100);
+  const prezzo_netto_marketplace = prezzo_netto_iva * (1 - (mp.prezzo_ordine_netto ? 0 : mp.sconto_percentuale) / 100);
   const fees_shopify = calcolaFeesShopify(prezzo_netto_marketplace, mpKey);
   const fee_principale = prezzo_netto_marketplace * (mp.fee_principale / 100);
   const fee_secondaria = prezzo_netto_marketplace * ((mp.fee_secondaria || 0) / 100);
@@ -1494,7 +1496,7 @@ function calcolaBestSellers(ordini, top = 20, variantCosts = {}) {
   const prodotti = {};
   ordini.forEach(ordine => {
     const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
-    const ivaPerc = getIvaPerPaese(country);
+    const ivaPerc = (riconosciMarketplace(ordine).config || {}).iva_esente ? 0 : getIvaPerPaese(country);
     const ordCurrency = ordine.currency || SHOP_CURRENCY;
     (ordine.line_items || []).forEach(item => {
       const productId = item.product_id || item.variant_id || item.title;
@@ -2232,7 +2234,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.42</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.43</p>
       </div>
     </div>
     <div class="header-right">
@@ -2745,7 +2747,7 @@ function confronta() {
   const spedizione = parseFloat(document.getElementById('c-spedizione').value) || 0;
   const prezzoNettoIva = prezzoLordo / (1 + ivaPerc / 100);
   const risultati = Object.entries(MARKETPLACES).map(([key, mp]) => {
-    const prezzoNetto = prezzoNettoIva * (1 - mp.sconto_percentuale / 100);
+    const prezzoNetto = (mp.iva_esente ? prezzoLordo : prezzoNettoIva) * (1 - mp.sconto_percentuale / 100);
     const feesShop = key === 'TLUXY_SITE' ? prezzoNetto * 0.0015 : 0;
     const feeP = prezzoNetto * (mp.fee_principale / 100); const feeS = prezzoNetto * ((mp.fee_secondaria || 0) / 100); const feeA = prezzoNetto * ((mp.fee_accessoria || 0) / 100);
     const feesMp = feeP + feeS + feeA + (mp.fee_fissa_trasporto || 0) + (mp.fee_fissa_packaging || 0);
@@ -2773,7 +2775,7 @@ function calcola() {
   const spedizione = parseFloat(document.getElementById('spedizione').value) || 0;
   const mpKey = document.getElementById('mp-select').value;
   const mp = MARKETPLACES[mpKey];
-  const prezzoNettoIva = prezzoLordo / (1 + ivaPerc / 100); const ivaScorporata = prezzoLordo - prezzoNettoIva;
+  const prezzoNettoIva = mp.iva_esente ? prezzoLordo : prezzoLordo / (1 + ivaPerc / 100); const ivaScorporata = prezzoLordo - prezzoNettoIva;
   const prezzoNetto = prezzoNettoIva * (1 - mp.sconto_percentuale / 100);
   const feesShop = mpKey === 'TLUXY_SITE' ? prezzoNetto * 0.0015 : 0;
   const feeP = prezzoNetto * (mp.fee_principale / 100); const feeS = prezzoNetto * ((mp.fee_secondaria || 0) / 100); const feeA = prezzoNetto * ((mp.fee_accessoria || 0) / 100);
@@ -2809,7 +2811,7 @@ let duoProducts = [];
 function calcolaMargineDUO(prezzoLordo, costo, mpKey, ivaPerc) {
   if (!prezzoLordo || !mpKey) return null;
   const mp = MARKETPLACES[mpKey]; if (!mp) return null;
-  const prezzoNettoIva = prezzoLordo / (1 + ivaPerc / 100);
+  const prezzoNettoIva = mp.iva_esente ? prezzoLordo : prezzoLordo / (1 + ivaPerc / 100);
   const ivaScorp = prezzoLordo - prezzoNettoIva;
   const prezzoNetto = prezzoNettoIva * (1 - mp.sconto_percentuale / 100);
   const feesShop = mpKey === 'TLUXY_SITE' ? prezzoNetto * 0.0015 : 0;
@@ -2835,7 +2837,7 @@ function prezzoMinimoPerMargine(costo, mpKey, ivaPerc, margineTargetPerc) {
   // margineTarget = margineTargetPerc/100 * X
   // X/(1+iva)*(1-sconto)*(1-totalFee) - costo - feeFissa = margineTargetPerc/100 * X
   // X * [(1-sconto)*(1-totalFee)/(1+iva) - margineTargetPerc/100] = costo + feeFissa
-  const coef = (1 - scontoPerc) * (1 - totalPercFee) / (1 + ivaPerc / 100) - margineTargetPerc / 100;
+  const coef = (1 - scontoPerc) * (1 - totalPercFee) / (1 + (mp.iva_esente ? 0 : ivaPerc) / 100) - margineTargetPerc / 100;
   if (coef <= 0) return Infinity; // impossibile raggiungere quel margine
   return (costo + feeFissa) / coef;
 }
@@ -3416,6 +3418,7 @@ async function handleBatchFile(file) {
 function batchCalcMargine(listino, costo, mpKey, iva, retail) {
   const mp = MARKETPLACES[mpKey];
   if (!mp) return null;
+  if (mp.iva_esente) iva = 0; // Balardi: RRP −35% senza scorporo IVA
   const nettoIva = listino / (1 + iva / 100);
   const dopoSconto = nettoIva * (1 - mp.sconto_percentuale / 100);
   const feeShop = mpKey === 'TLUXY_SITE' ? dopoSconto * 0.0015 : 0;
@@ -4461,7 +4464,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.42', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.43', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -5191,8 +5194,8 @@ export default async function handler(req, res) {
           const cfg = mp.config;
           const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
           const ivaPerc = mp.key === 'POIZON' ? 22 : getIvaPerPaese(country);
-          const prezzoNettoIva = prezzoLordo / (1 + ivaPerc / 100);
-          const prezzoDopoSconto = prezzoNettoIva * (1 - (cfg.sconto_percentuale || 0) / 100);
+          const prezzoNettoIva = cfg.iva_esente ? prezzoLordo : prezzoLordo / (1 + ivaPerc / 100);
+          const prezzoDopoSconto = prezzoNettoIva * (1 - (cfg.prezzo_ordine_netto ? 0 : (cfg.sconto_percentuale || 0)) / 100);
           const feesMP = prezzoDopoSconto * ((cfg.fee_principale || 0) / 100)
                        + prezzoDopoSconto * ((cfg.fee_secondaria || 0) / 100)
                        + prezzoDopoSconto * ((cfg.fee_accessoria || 0) / 100);
@@ -5205,12 +5208,12 @@ export default async function handler(req, res) {
           // Se è Balardi, traccia come consumo wallet (non genera incasso)
           if (policy.type === 'prepaid_balance') {
             balardiConsumo.count++;
-            balardiConsumo.importo_eur += nettoFromMP;
+            balardiConsumo.importo_eur += prezzoLordo; // v5.43: il credito scala il prezzo articoli (spedizione esclusa: non è su Shopify)
             balardiConsumo.ordini.push({
               order_number: ordine.order_number,
               name: ordine.name,
               created_at: ordine.created_at,
-              importo_consumato: nettoFromMP,
+              importo_consumato: prezzoLordo,
               prezzo_lordo: prezzoLordo
             });
             return;
