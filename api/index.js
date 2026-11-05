@@ -679,6 +679,8 @@ const MARKETPLACE_CONFIGS = {
   'BRANDSGATEWAY': { nome: 'Brandsgateway', sconto_percentuale: 13, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 0, pagamento: '45gg data ordine', payment_policy: { type: 'fixed_days', days_offset: 45 } },
   'TLUXY_SITE': { nome: 'T. Luxy (proprio)', sconto_percentuale: 10, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1, pagamento: 'Immediato (Shopify +2gg)', payment_policy: { type: 'fixed_days', days_offset: 2 } },
   'MARK_FOYS': { nome: 'Mark Foy', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Prepagato immediato', payment_policy: { type: 'immediate' } },
+  'REFLAUNT': { nome: 'Reflaunt', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: '14gg reso + report + fattura (~30gg)', payment_policy: { type: 'fixed_days', days_offset: 30 },
+    nota_regole: 'Dropship: l\'ordine arriva su Shopify al payout (metafield custom.reflaunt_payout) = incasso, senza IVA né commissioni; etichetta di spedizione fornita da Reflaunt' },
   'GIGLIO': { nome: 'GIGLIO.COM', sconto_percentuale: 0, fee_principale: 30, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'TBD (prepagato per ora)', payment_policy: { type: 'immediate' } }
 };
 
@@ -777,6 +779,11 @@ function riconosciMarketplaceBase(ordine) {
     return { key: 'BRANDSGATEWAY', config: MARKETPLACE_CONFIGS.BRANDSGATEWAY };
   }
   
+  // PRIORITÀ 1b: Reflaunt (dropship) — app "Reflaunt T-Luxy App", tag ordine REFLAUNT, email admin@reflaunt.com
+  if (rawSource === '253898227713' || /(^|,\s*)reflaunt(\s*,|$)/.test(tags) || email === 'admin@reflaunt.com') {
+    return { key: 'REFLAUNT', config: MARKETPLACE_CONFIGS.REFLAUNT };
+  }
+
   // PRIORITÀ 2: Winkelstraat via Copernicus (import da external) - multi-criterio
   const wsMatch = isWinkelstraatOrder(ordine);
   if (wsMatch) {
@@ -1547,7 +1554,7 @@ function calcolaVenditeDuo(ordini, variantCosts) {
       const lordoOrd = Math.max(0, (curI.eurTotal || 0) - (refI.totalRefundedEur || 0));
       const sped = (ordine.shipping_lines || []).reduce((s2, l) => s2 + toEurAmount(l.price_set, l.price, curI.originalCurrency), 0);
       const tax = toEurAmount(ordine.total_tax_set, ordine.total_tax, curI.originalCurrency);
-      const ivaO = chKey === 'POIZON' ? 22 : ivaPerc;
+      const ivaO = chKey === 'POIZON' ? 22 : (chKey === 'REFLAUNT' ? 0 : ivaPerc);
       const ivaOrd = tax > 0 ? tax * (curI.eurTotal > 0 ? lordoOrd / curI.eurTotal : 1) : (lordoOrd - lordoOrd / (1 + ivaO / 100));
       incassoNettoOrd = calcolaMarginalita(lordoOrd, ivaOrd, 0, sped, mp.config, chKey).margine_netto;
     }
@@ -1592,7 +1599,7 @@ function calcolaBestSellersModelli(ordini, variantCosts = {}) {
       const curI = getOrderCurrencyInfo(ordine), refI = getOrderRefundInfo(ordine);
       const lordoOrd = Math.max(0, (curI.eurTotal || 0) - (refI.totalRefundedEur || 0));
       const sped = (ordine.shipping_lines || []).reduce((s2, l) => s2 + toEurAmount(l.price_set, l.price, curI.originalCurrency), 0);
-      const ivaO = chKey === 'POIZON' ? 22 : ivaPerc;
+      const ivaO = chKey === 'POIZON' ? 22 : (chKey === 'REFLAUNT' ? 0 : ivaPerc);
       const tax = toEurAmount(ordine.total_tax_set, ordine.total_tax, curI.originalCurrency);
       const ivaOrd = tax > 0 ? tax * (curI.eurTotal > 0 ? lordoOrd / curI.eurTotal : 1) : (lordoOrd - lordoOrd / (1 + ivaO / 100));
       incassoNettoOrd = calcolaMarginalita(lordoOrd, ivaOrd, 0, sped, mp.config, chKey).margine_netto;
@@ -1742,7 +1749,7 @@ async function margineOrdineSingolo(ordineRaw) {
   const lordo = cur.eurTotal;
   const sped = (ordine.shipping_lines || []).reduce((s2, l) => s2 + toEurAmount(l.price_set, l.price, cur.originalCurrency), 0);
   const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
-  const ivaPerc = mp.key === 'POIZON' ? 22 : getIvaPerPaese(country);
+  const ivaPerc = mp.key === 'POIZON' ? 22 : (mp.key === 'REFLAUNT' ? 0 : getIvaPerPaese(country));
   const tax = toEurAmount(ordine.total_tax_set, ordine.total_tax, cur.originalCurrency);
   const iva = tax > 0 ? tax : (lordo - lordo / (1 + ivaPerc / 100));
   const ris = calcolaMarginalita(lordo, iva, costo, sped, mp.config, mp.key);
@@ -2234,7 +2241,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.43</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.44</p>
       </div>
     </div>
     <div class="header-right">
@@ -2523,8 +2530,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   </div>
 </div>
 <script>
-const MARKETPLACES = ${JSON.stringify(MARKETPLACE_CONFIGS)};
-const MP_COLORS = { TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC', MARK_FOYS:'#2E5F8F', GIGLIO:'#7B4F8A' };
+const MARKETPLACES = ${JSON.stringify(Object.fromEntries(Object.entries(MARKETPLACE_CONFIGS).filter(([k]) => k !== 'REFLAUNT')))};
+const MP_COLORS = { REFLAUNT:'#6E8B74', TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC', MARK_FOYS:'#2E5F8F', GIGLIO:'#7B4F8A' };
 
 function setActiveButton(selector, btn) { document.querySelectorAll(selector).forEach(b => b.classList.remove('active')); if (btn) btn.classList.add('active'); }
 async function fetchNoCache(url) { const sep = url.includes('?') ? '&' : '?'; const res = await fetch(url + sep + '_=' + Date.now(), { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } }); return res.json(); }
@@ -4464,7 +4471,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.43', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.44', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -4530,7 +4537,7 @@ export default async function handler(req, res) {
           const prezzo_lordo = Math.max(0, prezzo_lordo_originale - refundInfo.totalRefundedEur); // sottrae i refund
           const spedizione = (ordine.shipping_lines || []).reduce((sum, line) => sum + toEurAmount(line.price_set, line.price, currencyInfo.originalCurrency), 0);
           const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
-          const ivaPerc = mp.key === 'POIZON' ? 22 : getIvaPerPaese(country);
+          const ivaPerc = mp.key === 'POIZON' ? 22 : (mp.key === 'REFLAUNT' ? 0 : getIvaPerPaese(country));
           const shopifyTaxEur = toEurAmount(ordine.total_tax_set, ordine.total_tax, currencyInfo.originalCurrency);
           const iva_scorporata = shopifyTaxEur > 0 ? shopifyTaxEur : (prezzo_lordo - prezzo_lordo / (1 + ivaPerc / 100));
           
@@ -5057,7 +5064,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && path === '/api/alerts') {
       try {
         const refresh = query.get('refresh') === '1';
-        const cacheKey = 'pannello_canali_v540';
+        const cacheKey = 'pannello_canali_v544';
         if (!refresh && KV_ENABLED) {
           try { const c = await kvGet(cacheKey); if (c) { const obj = JSON.parse(c); if (Date.now() - new Date(obj.generato_il).getTime() < 15 * 60000) return res.json({ success: true, cached: true, ...obj }); } } catch (e) {}
         }
@@ -5076,8 +5083,8 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && path === '/api/forecast') {
       try {
         const forceRefresh = query.get('refresh') === '1';
-        const FORECAST_CACHE_KEY = 'forecast_cache_v529';
-        const FORECAST_META_KEY = 'forecast_cache_meta_v529';
+        const FORECAST_CACHE_KEY = 'forecast_cache_v544';
+        const FORECAST_META_KEY = 'forecast_cache_meta_v544';
         const FORECAST_TTL_HOURS = 24;
         
         // 1) Prova cache KV (se non force refresh)
@@ -5193,7 +5200,7 @@ export default async function handler(req, res) {
           // Il "netto da incassare dal MP" = prezzo_lordo - sconto - fee_mp - fee_accessoria (NON include costo merce: quello è tuo)
           const cfg = mp.config;
           const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
-          const ivaPerc = mp.key === 'POIZON' ? 22 : getIvaPerPaese(country);
+          const ivaPerc = mp.key === 'POIZON' ? 22 : (mp.key === 'REFLAUNT' ? 0 : getIvaPerPaese(country));
           const prezzoNettoIva = cfg.iva_esente ? prezzoLordo : prezzoLordo / (1 + ivaPerc / 100);
           const prezzoDopoSconto = prezzoNettoIva * (1 - (cfg.prezzo_ordine_netto ? 0 : (cfg.sconto_percentuale || 0)) / 100);
           const feesMP = prezzoDopoSconto * ((cfg.fee_principale || 0) / 100)
