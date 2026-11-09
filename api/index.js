@@ -2241,7 +2241,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.44</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.45</p>
       </div>
     </div>
     <div class="header-right">
@@ -2543,7 +2543,7 @@ function showTab(name) {
   const tabBtn = document.querySelector('.tab[data-tab="' + name + '"]'); if (tabBtn) tabBtn.classList.add('active');
   if (name === 'compare' && !document.getElementById('compare-body').children.length) confronta();
   if (name === 'ricerche' && !RIC_DATA) caricaRicerche(false);
-  if (name === 'bestsellers') { const bsContent = document.getElementById('bs-content'); if (bsContent.querySelector('.bs-empty')) { const activeBtn = document.querySelector('[data-bs-periods] .period-btn.active') || document.querySelector('[data-bs-periods] .period-btn[data-period="month"]'); loadBestSellers(activeBtn ? activeBtn.dataset.period : 'month', activeBtn); } }
+  if (name === 'bestsellers') { const bsContent = document.getElementById('bs-content'); if (bsContent.querySelector('.bs-empty') && !bsContent.querySelector('.bs-loading')) { const activeBtn = document.querySelector('[data-bs-periods] .period-btn.active') || document.querySelector('[data-bs-periods] .period-btn[data-period="month"]'); loadBestSellers(activeBtn ? activeBtn.dataset.period : 'month', activeBtn); } }
 }
 
 function renderErrors(ordiniConErrori) {
@@ -2693,17 +2693,19 @@ async function applyCustomRange() {
 }
 async function loadBestSellers(p, btn) {
   setActiveButton('[data-bs-periods] .period-btn', btn);
-  const cont = document.getElementById('bs-content'); cont.innerHTML = '<div class="bs-empty">Caricamento prodotti...</div>';
-  try { const data = await fetchNoCache('/api/bestsellers?periodo=' + p); if (data.success && data.modelli && data.modelli.length > 0) { renderBestSellers2(data); return; } cont.innerHTML = '<div class="bs-empty">' + (data.success ? 'Nessun prodotto venduto nel periodo.' : 'Errore: ' + (data.error || '')) + '</div>'; } catch(e) { cont.innerHTML = '<div class="bs-empty">Errore: ' + e.message + '</div>'; }
+  const cont = document.getElementById('bs-content'); cont.innerHTML = '<div class="bs-empty bs-loading">Caricamento prodotti...</div>';
+  const req = ++BS_REQ;
+  try { const data = await fetchNoCache('/api/bestsellers?periodo=' + p); if (req !== BS_REQ) return; if (data.success && data.modelli && data.modelli.length > 0) { renderBestSellers2(data); return; } cont.innerHTML = '<div class="bs-empty">' + (data.success ? 'Nessun prodotto venduto nel periodo.' : 'Errore: ' + (data.error || '')) + '</div>'; } catch(e) { if (req === BS_REQ) cont.innerHTML = '<div class="bs-empty">Errore: ' + e.message + '</div>'; }
 }
 async function applyBsCustomRange() {
   const from = document.getElementById('bs-date-from').value; const to = document.getElementById('bs-date-to').value;
   if (!from || !to) { alert('Seleziona date'); return; } if (from > to) { alert('Da deve precedere A'); return; }
   setActiveButton('[data-bs-periods] .period-btn', null);
-  const cont = document.getElementById('bs-content'); cont.innerHTML = '<div class="bs-empty">Caricamento...</div>';
-  try { const data = await fetchNoCache('/api/bestsellers?from=' + from + '&to=' + to); if (data.success && data.modelli && data.modelli.length > 0) { renderBestSellers2(data); return; } cont.innerHTML = '<div class="bs-empty">' + (data.success ? 'Nessun prodotto venduto nel periodo.' : 'Errore: ' + (data.error || '')) + '</div>'; } catch(e) { cont.innerHTML = '<div class="bs-empty">Errore: ' + e.message + '</div>'; }
+  const cont = document.getElementById('bs-content'); cont.innerHTML = '<div class="bs-empty bs-loading">Caricamento...</div>';
+  const req = ++BS_REQ;
+  try { const data = await fetchNoCache('/api/bestsellers?from=' + from + '&to=' + to); if (req !== BS_REQ) return; if (data.success && data.modelli && data.modelli.length > 0) { renderBestSellers2(data); return; } cont.innerHTML = '<div class="bs-empty">' + (data.success ? 'Nessun prodotto venduto nel periodo.' : 'Errore: ' + (data.error || '')) + '</div>'; } catch(e) { if (req === BS_REQ) cont.innerHTML = '<div class="bs-empty">Errore: ' + e.message + '</div>'; }
 }
-var BS_DATA = null, BS_FILTRO = 'tutti';
+var BS_DATA = null, BS_FILTRO = 'tutti', BS_REQ = 0; // v5.45: BS_REQ scarta risposte vecchie (cambio periodo durante il caricamento)
 function bsEsc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function bsEur(n) { return '€' + Math.round(n || 0).toLocaleString('it-IT'); }
 function bsMargCls(m) { return m >= 30 ? 'ok' : (m >= 15 ? 'mid' : 'low'); }
@@ -4471,7 +4473,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.44', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.45', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
