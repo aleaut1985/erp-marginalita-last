@@ -585,6 +585,12 @@ function calcolaPagamentiPrevisti(dataOrdine, policy, nettoIncassato) {
       result.push({ data: target, importo_eur: nettoIncassato, nota: `Prima decade mese+${policy.month_offset}`, parte: 1 });
       break;
     }
+    case 'monthly_end': {
+      // Ordini del mese M fatturati a fine mese, pagati a fine mese M + month_offset (es. Giglio 30DFFM)
+      const target = new Date(orderDate.getFullYear(), orderDate.getMonth() + (policy.month_offset || 1) + 1, 0);
+      result.push({ data: target, importo_eur: nettoIncassato, nota: `Fine mese+${policy.month_offset || 1}`, parte: 1 });
+      break;
+    }
     case 'monthly_mid': {
       const target = new Date(orderDate.getFullYear(), orderDate.getMonth() + (policy.month_offset || 2), policy.payout_day || 15);
       result.push({ data: target, importo_eur: nettoIncassato, nota: `Prima metà mese+${policy.month_offset}`, parte: 1 });
@@ -681,7 +687,9 @@ const MARKETPLACE_CONFIGS = {
   'MARK_FOYS': { nome: 'Mark Foy', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Prepagato immediato', payment_policy: { type: 'immediate' } },
   'REFLAUNT': { nome: 'Reflaunt', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: '14gg reso + report + fattura (~30gg)', payment_policy: { type: 'fixed_days', days_offset: 30 },
     nota_regole: 'Dropship: l\'ordine arriva su Shopify al payout (metafield custom.reflaunt_payout) = incasso, senza IVA né commissioni; etichetta di spedizione fornita da Reflaunt' },
-  'GIGLIO': { nome: 'GIGLIO.COM', sconto_percentuale: 0, fee_principale: 30, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'TBD (prepagato per ora)', payment_policy: { type: 'immediate' } }
+  // v5.47: contratto Giglio 29/10/2024 — sconto base 31% sul prezzo finale senza IVA + 2,5% per pagamento 30DFFM = 33,5%;
+  // contributo spedizione €3,60 (applicato per ordine); penali KPI mensili NON incluse (arrivano dal rendiconto Giglio)
+  'GIGLIO': { nome: 'GIGLIO.COM', sconto_percentuale: 0, fee_principale: 33.5, fee_secondaria: 0, fee_fissa_trasporto: 3.6, fee_fissa_packaging: 0, pagamento: '30gg data fattura fine mese (fine mese+1)', payment_policy: { type: 'monthly_end', month_offset: 1 }, nota_regole: 'Commissione 31% + 2,5% (pagamento 30DFFM) = 33,5% sul prezzo pagato dal cliente senza IVA. Contributo spedizione €3,60 a pezzo. Penali KPI (no-stock/ritardi) a parte, dal rendiconto mensile.' }
 };
 
 // Normalizza source_name per matching più robusto: lowercase + spazi→trattini
@@ -2241,7 +2249,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.46</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.47</p>
       </div>
     </div>
     <div class="header-right">
@@ -4474,7 +4482,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.46', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.47', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
