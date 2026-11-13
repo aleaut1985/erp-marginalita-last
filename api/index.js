@@ -1797,9 +1797,9 @@ async function assicuraWebhookOrdini() {
 const LT_TAG = 'LORDANDTAYLOR';
 const LT_WEBHOOK_PATH = '/api/webhooks/products-lt';
 const LT_SYNC_PATH = '/api/cron/lord-taylor';
-const LT_TOPICS = ['products/create', 'products/update'];
+const LT_TOPICS = ['products/create', 'products/update', 'inventory_levels/update'];
 const CRON_SECRET = process.env.CRON_SECRET || '';
-const LT_FIELDS = `id title status tags variants(first: 20) { edges { node { price } } } metafield(namespace: "custom", key: "lord_taylor_cost") { id value }`;
+const LT_FIELDS = `id title status tags totalInventory tracksInventory variants(first: 20) { edges { node { price } } } metafield(namespace: "custom", key: "lord_taylor_cost") { id value }`;
 
 function ltCosto(prezzo) {
   const cent = Math.round(parseFloat(prezzo) * 100);
@@ -1815,6 +1815,8 @@ function ltAzioni(p) {
   const mf = p.metafield;
   if (ltEscluso(p)) return { rimuoviTag: haTag, cancellaMf: !!mf, motivo: 'escluso' };
   if (p.status !== 'ACTIVE') return { motivo: 'non attivo' };
+  // v5.49: senza disponibilità (inventario tracciato a zero) → via il tag, così L&T non riceve prodotti esauriti
+  if (p.tracksInventory !== false && (p.totalInventory || 0) <= 0) return { rimuoviTag: haTag, motivo: 'esaurito' };
   const prezzi = [...new Set(p.variants.edges.map(e => parseFloat(e.node.price)).filter(x => x > 0))];
   if (prezzi.length !== 1) return { motivo: 'prezzi varianti diversi' };
   const valore = ltCosto(prezzi[0]);
@@ -1824,7 +1826,7 @@ async function ltApplica(prodotti) {
   const ops = [], mfs = [], esito = { tag_aggiunti: 0, tag_rimossi: 0, mf_scritti: 0, mf_cancellati: 0, saltati: {} };
   for (const p of prodotti) {
     const a = ltAzioni(p);
-    if (a.motivo !== 'incluso' && a.motivo !== 'escluso') esito.saltati[a.motivo] = (esito.saltati[a.motivo] || 0) + 1;
+    if (!['incluso', 'escluso', 'esaurito'].includes(a.motivo)) esito.saltati[a.motivo] = (esito.saltati[a.motivo] || 0) + 1;
     if (a.aggiungiTag) { ops.push(`tagsAdd(id: ${JSON.stringify(p.id)}, tags: ["${LT_TAG}"]) { userErrors { message } }`); esito.tag_aggiunti++; }
     if (a.rimuoviTag) { ops.push(`tagsRemove(id: ${JSON.stringify(p.id)}, tags: ["${LT_TAG}"]) { userErrors { message } }`); esito.tag_rimossi++; }
     if (a.cancellaMf) { ops.push(`metafieldsDelete(metafields: [{ ownerId: ${JSON.stringify(p.id)}, namespace: "custom", key: "lord_taylor_cost" }]) { userErrors { message } }`); esito.mf_cancellati++; }
@@ -1847,7 +1849,7 @@ async function ltSincronizzaProdotto(gid) {
 // Recupero: prodotti attivi senza tag (nuovi o persi) + prodotti esclusi che hanno ancora il tag.
 async function ltSincronizzaTutto(budgetMs = 50000) {
   const t0 = Date.now(), tot = { tag_aggiunti: 0, tag_rimossi: 0, mf_scritti: 0, mf_cancellati: 0, saltati: {}, controllati: 0, completo: true };
-  const ricerche = [`status:active AND -tag:${LT_TAG} AND -tag:'TLX_PRODUCT:DUO' AND -tag:DIFETTO`, `tag:${LT_TAG} AND (tag:'TLX_PRODUCT:DUO' OR tag:DIFETTO)`];
+  const ricerche = [`status:active AND inventory_total:>0 AND -tag:${LT_TAG} AND -tag:'TLX_PRODUCT:DUO' AND -tag:DIFETTO`, `tag:${LT_TAG} AND (tag:'TLX_PRODUCT:DUO' OR tag:DIFETTO)`, `tag:${LT_TAG} AND inventory_total:<=0`];
   for (const q of ricerche) {
     let after = null, giri = 0;
     while (true) {
@@ -4352,7 +4354,12 @@ export default async function handler(req, res) {
       if (!ok) { console.log('[lord-taylor webhook] HMAC non valido'); return res.status(401).json({ ok: false }); }
       try {
         const p = JSON.parse(raw);
-        const gid = p.admin_graphql_api_id || ('gid://shopify/Product/' + p.id);
+        let gid;
+        if (String(req.headers['x-shopify-topic'] || '').startsWith('inventory_levels')) {
+          const d = await shopifyGraphQL(`query($id: ID!) { inventoryItem(id: $id) { variant { product { id } } } }`, { id: 'gid://shopify/InventoryItem/' + p.inventory_item_id });
+          gid = d?.inventoryItem?.variant?.product?.id;
+          if (!gid) return res.status(200).json({ ok: true });
+        } else gid = p.admin_graphql_api_id || ('gid://shopify/Product/' + p.id);
         const e = await ltSincronizzaProdotto(gid);
         if (e && (e.tag_aggiunti || e.tag_rimossi || e.mf_scritti || e.mf_cancellati)) console.log('[lord-taylor webhook]', gid, JSON.stringify(e));
       } catch (e) { console.log('[lord-taylor webhook] errore', e.message); }
@@ -4596,7 +4603,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.48', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.49', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
