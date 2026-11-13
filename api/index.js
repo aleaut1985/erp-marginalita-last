@@ -1790,6 +1790,97 @@ async function assicuraWebhookOrdini() {
   return { creato: c.ok, status: c.status, risposta: cj };
 }
 
+// ============ v5.48 LORD & TAYLOR: tag LORDANDTAYLOR + metafield custom.lord_taylor_cost ============
+// Regola: prodotti ATTIVI, esclusi DUOMO (tag TLX_PRODUCT:DUO) e DIFETTO (tag o titolo).
+// lord_taylor_cost = prezzo scontato (variant price) × 0,76 arrotondato per eccesso all'euro (.00).
+// Se le varianti hanno prezzi diversi il prodotto non viene toccato (caso anomalo da verificare a mano).
+const LT_TAG = 'LORDANDTAYLOR';
+const LT_WEBHOOK_PATH = '/api/webhooks/products-lt';
+const LT_SYNC_PATH = '/api/cron/lord-taylor';
+const LT_TOPICS = ['products/create', 'products/update'];
+const CRON_SECRET = process.env.CRON_SECRET || '';
+const LT_FIELDS = `id title status tags variants(first: 20) { edges { node { price } } } metafield(namespace: "custom", key: "lord_taylor_cost") { id value }`;
+
+function ltCosto(prezzo) {
+  const cent = Math.round(parseFloat(prezzo) * 100);
+  return (Math.ceil((cent * 76) / 10000)).toFixed(2); // aritmetica intera: niente errori float (es. 25 × 0,76)
+}
+function ltEscluso(p) {
+  const tags = (p.tags || []).map(t => String(t).toUpperCase());
+  return tags.includes('TLX_PRODUCT:DUO') || tags.includes('DIFETTO') || /DIFETTO/i.test(p.title || '');
+}
+// Ritorna le operazioni necessarie per un prodotto (vuoto se già allineato: evita loop di webhook).
+function ltAzioni(p) {
+  const haTag = (p.tags || []).includes(LT_TAG);
+  const mf = p.metafield;
+  if (ltEscluso(p)) return { rimuoviTag: haTag, cancellaMf: !!mf, motivo: 'escluso' };
+  if (p.status !== 'ACTIVE') return { motivo: 'non attivo' };
+  const prezzi = [...new Set(p.variants.edges.map(e => parseFloat(e.node.price)).filter(x => x > 0))];
+  if (prezzi.length !== 1) return { motivo: 'prezzi varianti diversi' };
+  const valore = ltCosto(prezzi[0]);
+  return { aggiungiTag: !haTag, valore: (!mf || parseFloat(mf.value) !== parseFloat(valore)) ? valore : null, motivo: 'incluso' };
+}
+async function ltApplica(prodotti) {
+  const ops = [], mfs = [], esito = { tag_aggiunti: 0, tag_rimossi: 0, mf_scritti: 0, mf_cancellati: 0, saltati: {} };
+  for (const p of prodotti) {
+    const a = ltAzioni(p);
+    if (a.motivo !== 'incluso' && a.motivo !== 'escluso') esito.saltati[a.motivo] = (esito.saltati[a.motivo] || 0) + 1;
+    if (a.aggiungiTag) { ops.push(`tagsAdd(id: ${JSON.stringify(p.id)}, tags: ["${LT_TAG}"]) { userErrors { message } }`); esito.tag_aggiunti++; }
+    if (a.rimuoviTag) { ops.push(`tagsRemove(id: ${JSON.stringify(p.id)}, tags: ["${LT_TAG}"]) { userErrors { message } }`); esito.tag_rimossi++; }
+    if (a.cancellaMf) { ops.push(`metafieldsDelete(metafields: [{ ownerId: ${JSON.stringify(p.id)}, namespace: "custom", key: "lord_taylor_cost" }]) { userErrors { message } }`); esito.mf_cancellati++; }
+    if (a.valore) { mfs.push({ ownerId: p.id, namespace: 'custom', key: 'lord_taylor_cost', value: a.valore }); esito.mf_scritti++; }
+  }
+  for (let i = 0; i < ops.length; i += 50) {
+    const blocco = ops.slice(i, i + 50).map((o, k) => `o${k}: ${o}`).join('\n');
+    await shopifyGraphQL(`mutation { ${blocco} }`);
+  }
+  for (let i = 0; i < mfs.length; i += 25) {
+    const d = await shopifyGraphQL(`mutation($m: [MetafieldsSetInput!]!) { metafieldsSet(metafields: $m) { userErrors { message } } }`, { m: mfs.slice(i, i + 25) });
+    const err = d?.metafieldsSet?.userErrors || []; if (err.length) console.log('[lord-taylor] metafieldsSet', JSON.stringify(err).slice(0, 300));
+  }
+  return esito;
+}
+async function ltSincronizzaProdotto(gid) {
+  const d = await shopifyGraphQL(`query($id: ID!) { product(id: $id) { ${LT_FIELDS} } }`, { id: gid });
+  return d?.product ? ltApplica([d.product]) : null;
+}
+// Recupero: prodotti attivi senza tag (nuovi o persi) + prodotti esclusi che hanno ancora il tag.
+async function ltSincronizzaTutto(budgetMs = 50000) {
+  const t0 = Date.now(), tot = { tag_aggiunti: 0, tag_rimossi: 0, mf_scritti: 0, mf_cancellati: 0, saltati: {}, controllati: 0, completo: true };
+  const ricerche = [`status:active AND -tag:${LT_TAG} AND -tag:'TLX_PRODUCT:DUO' AND -tag:DIFETTO`, `tag:${LT_TAG} AND (tag:'TLX_PRODUCT:DUO' OR tag:DIFETTO)`];
+  for (const q of ricerche) {
+    let after = null, giri = 0;
+    while (true) {
+      if (Date.now() - t0 > budgetMs) { tot.completo = false; return tot; }
+      // Dopo le modifiche la ricerca non restituisce più i prodotti sistemati: si riparte sempre dall'inizio,
+      // avanzando col cursore solo se nella pagina c'erano soltanto prodotti da saltare.
+      const d = await shopifyGraphQL(`query($q: String!, $a: String) { products(first: 30, query: $q, after: $a) { pageInfo { hasNextPage endCursor } nodes { ${LT_FIELDS} } } }`, { q, a: after });
+      const pag = d.products; tot.controllati += pag.nodes.length;
+      const e = await ltApplica(pag.nodes);
+      for (const k of ['tag_aggiunti', 'tag_rimossi', 'mf_scritti', 'mf_cancellati']) tot[k] += e[k];
+      for (const [k, v] of Object.entries(e.saltati)) tot.saltati[k] = (tot.saltati[k] || 0) + v;
+      const modificati = e.tag_aggiunti + e.tag_rimossi;
+      if (!pag.pageInfo.hasNextPage) break;
+      if (modificati === 0) after = pag.pageInfo.endCursor; // pagina di soli saltati: vai avanti
+      if (++giri > 200) break;
+      if (modificati > 0) await new Promise(r => setTimeout(r, 1500)); // lascia aggiornare l'indice di ricerca
+    }
+  }
+  return tot;
+}
+async function assicuraWebhookLordTaylor() {
+  const token = await getShopifyAccessToken();
+  const address = ERP_PUBLIC_URL + LT_WEBHOOK_PATH, out = {};
+  for (const topic of LT_TOPICS) {
+    const r = await fetch(`https://${SHOPIFY_STORE}/admin/api/2024-01/webhooks.json?topic=${topic}`, { headers: { 'X-Shopify-Access-Token': token } });
+    const j = await r.json();
+    if ((j.webhooks || []).some(w => w.address === address)) { out[topic] = 'gia_presente'; continue; }
+    const c = await fetch(`https://${SHOPIFY_STORE}/admin/api/2024-01/webhooks.json`, { method: 'POST', headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' }, body: JSON.stringify({ webhook: { topic, address, format: 'json' } }) });
+    out[topic] = c.ok ? 'creato' : ('errore ' + c.status + ' ' + JSON.stringify(await c.json()).slice(0, 200));
+  }
+  return out;
+}
+
 
 // ============ v5.33 RICERCHE: Miinto SS27 Buying Guidelines (maggio-giugno 2026) ============
 // Fonte: email di Lethicia Miranda (Miinto) del 19/06/2026 — file Drive "Miinto SS27 Buying Journey_May26", "SS27_CategoryInsights_Bags", "SS27_CategoryInsights_Shoes".
@@ -4252,6 +4343,29 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // ============ WEBHOOK PRODOTTI → LORD & TAYLOR (v5.48, HMAC) ============
+    if (req.method === 'POST' && path === LT_WEBHOOK_PATH) {
+      let raw = ''; await new Promise((resolve, reject) => { req.on('data', c => raw += c); req.on('end', resolve); req.on('error', reject); });
+      const hmac = req.headers['x-shopify-hmac-sha256'] || '';
+      const atteso = crypto.createHmac('sha256', SHOPIFY_CLIENT_SECRET).update(raw, 'utf8').digest('base64');
+      const ok = hmac && atteso.length === String(hmac).length && crypto.timingSafeEqual(Buffer.from(atteso), Buffer.from(String(hmac)));
+      if (!ok) { console.log('[lord-taylor webhook] HMAC non valido'); return res.status(401).json({ ok: false }); }
+      try {
+        const p = JSON.parse(raw);
+        const gid = p.admin_graphql_api_id || ('gid://shopify/Product/' + p.id);
+        const e = await ltSincronizzaProdotto(gid);
+        if (e && (e.tag_aggiunti || e.tag_rimossi || e.mf_scritti || e.mf_cancellati)) console.log('[lord-taylor webhook]', gid, JSON.stringify(e));
+      } catch (e) { console.log('[lord-taylor webhook] errore', e.message); }
+      return res.status(200).json({ ok: true });
+    }
+    // Sincronizzazione completa (cron Vercel giornaliero, o chiamata con Bearer CRON_SECRET / utente loggato)
+    if (req.method === 'GET' && path === LT_SYNC_PATH) {
+      const bearer = String(req.headers['authorization'] || '');
+      if (!((CRON_SECRET && bearer === 'Bearer ' + CRON_SECRET) || getAuthenticatedUser(req))) return res.status(401).json({ ok: false });
+      try { return res.json({ ok: true, webhook: await assicuraWebhookLordTaylor(), sync: await ltSincronizzaTutto() }); }
+      catch (e) { return res.status(500).json({ ok: false, error: e.message }); }
+    }
+
     // ============ LOGIN UTENTE + PASSWORD (v5.22) ============
     if (PASSWORD_AUTH && path === '/login') {
       res.setHeader('Cache-Control', 'no-store');
@@ -4482,7 +4596,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.47', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.48', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
@@ -4710,7 +4824,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api/setup-webhooks') {
-      try { return res.json({ success: true, ntfy: !!NTFY_TOPIC, email: !!(RESEND_API_KEY && DUO_NOTIFY_EMAIL), webhook: await assicuraWebhookOrdini() }); }
+      try { return res.json({ success: true, ntfy: !!NTFY_TOPIC, email: !!(RESEND_API_KEY && DUO_NOTIFY_EMAIL), webhook: await assicuraWebhookOrdini(), webhook_lord_taylor: await assicuraWebhookLordTaylor().catch(e => 'errore ' + e.message) }); }
       catch (e) { return res.status(500).json({ success: false, error: e.message }); }
     }
     if (req.method === 'GET' && path === '/api/test-notifica-duo') {
