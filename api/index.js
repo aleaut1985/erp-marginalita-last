@@ -2251,6 +2251,20 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .kpi-more-val { font-weight: 600; color: #00704a; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .kpi-more[open] > summary { border-bottom: 1px solid var(--gray-200, #e8e2d6); }
   .kpi-more .kpi-grid { padding: 12px; margin-bottom: 0; }
+  .last-orders { margin: -12px 0 24px; border: 1px solid var(--gray-200, #e8e2d6); border-radius: 14px; background: #fff; overflow: hidden; }
+  .lo-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; font-size: 0.8rem; color: var(--gray-700); letter-spacing: 0.02em; border-bottom: 1px solid var(--gray-200, #e8e2d6); }
+  .lo-count { font-size: 0.72rem; color: var(--gray-500); }
+  .lo-list { max-height: 204px; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; scroll-snap-type: y proximity; }
+  .lo-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 9px 16px; border-bottom: 1px solid #f1ede5; scroll-snap-align: start; min-height: 68px; box-sizing: border-box; }
+  .lo-row:last-child { border-bottom: 0; }
+  .lo-top { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; min-width: 0; }
+  .lo-num { font-weight: 700; }
+  .lo-time { color: var(--gray-500); font-size: 0.72rem; }
+  .lo-mp { display: inline-block; color: #fff; font-size: 0.62rem; font-weight: 600; padding: 2px 7px; border-radius: 10px; white-space: nowrap; }
+  .lo-items { grid-column: 1; font-size: 0.74rem; color: var(--gray-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lo-price { grid-column: 2; grid-row: 1; text-align: right; font-weight: 600; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+  .lo-marg { grid-column: 2; grid-row: 2; text-align: right; font-size: 0.74rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .lo-marg.pos { color: #00704a; } .lo-marg.neg { color: var(--red, #bf4747); }
   .fx-det { background: #FFF8E6; border-left: 3px solid #E8C77A; border-radius: 8px; margin-bottom: 12px; font-size: 0.78rem; color: #6B4E0E; }
   .fx-det > summary { list-style: none; cursor: pointer; padding: 7px 12px; } .fx-det > summary::before { content: '+ '; } .fx-det[open] > summary::before { content: '− '; }
   .fx-det .fx-body { padding: 0 12px 8px; }
@@ -2394,6 +2408,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="kpi gold"><div class="kpi-label">Margine %</div><div class="kpi-value" id="margine">—</div><div class="kpi-sub">Su lordo</div></div>
       </div>
       </details>
+      <div class="last-orders" id="last-orders" hidden><div class="lo-head"><span>Ordini</span><span class="lo-count" id="lo-count"></span></div><div class="lo-list" id="lo-list"></div></div>
       <div id="refunds-panel"></div>
       <div id="foreign-currency-panel"></div>
       <div id="errors-panel"></div>
@@ -2697,6 +2712,32 @@ function renderRefunds(resi) {
   '</div>';
 }
 
+// v5.50: lista compatta degli ordini del periodo sotto "Costi e margine" (si vedono ~3 righe, poi si scorre)
+function renderLastOrders(breakdown) {
+  const box = document.getElementById('last-orders'); const list = document.getElementById('lo-list'); const cnt = document.getElementById('lo-count');
+  if (!box || !list) return;
+  const righe = [];
+  Object.keys(breakdown || {}).forEach(function (k) { (breakdown[k].dettaglio_ordini || []).forEach(function (o) { righe.push({ k: k, nome: breakdown[k].nome, o: o }); }); });
+  if (!righe.length) { box.hidden = true; list.innerHTML = ''; return; }
+  righe.sort(function (a, b) { return new Date(b.o.created_at || 0) - new Date(a.o.created_at || 0); });
+  const oggi = new Date().toDateString();
+  const esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  list.innerHTML = righe.map(function (r) {
+    const o = r.o; const d = o.created_at ? new Date(o.created_at) : null;
+    const quando = d ? (d.toDateString() === oggi ? d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })) : '';
+    const art = (o.articoli || []).filter(function (a) { return a.quantity > 0; });
+    const testo = art.length ? art.map(function (a) { return (a.quantity > 1 ? a.quantity + '× ' : '') + a.title; }).join(' · ') : '—';
+    const m = o.margine_netto || 0; const cls = m >= 0 ? 'pos' : 'neg';
+    const reso = o.refund_status === 'partial' ? ' ↩️' : '';
+    return '<div class="lo-row"><div class="lo-top"><span class="lo-num">' + esc(o.name || ('#' + o.order_number)) + '</span><span class="lo-mp" style="background:' + (MP_COLORS[r.k] || '#8E8E8E') + '">' + esc(r.nome) + '</span><span class="lo-time">' + quando + reso + '</span></div>' +
+      '<div class="lo-price">€' + Math.round(o.fatturato || 0).toLocaleString('it-IT') + '</div>' +
+      '<div class="lo-items" title="' + esc(testo) + '">' + esc(testo) + '</div>' +
+      '<div class="lo-marg ' + cls + '">' + (m >= 0 ? '+' : '−') + '€' + Math.abs(Math.round(m)).toLocaleString('it-IT') + ' · ' + (o.margine_percentuale || 0).toFixed(1) + '%</div></div>';
+  }).join('');
+  if (cnt) cnt.textContent = righe.length > 3 ? righe.length + ' · scorri per vederli tutti' : String(righe.length);
+  list.scrollTop = 0; box.hidden = false;
+}
+
 function renderBreakdown(breakdown) {
   const body = document.getElementById('breakdown-body'); const foot = document.getElementById('breakdown-foot');
   if (!breakdown || Object.keys(breakdown).length === 0) { body.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--gray-500); font-style:italic;">Nessun ordine.</td></tr>'; foot.innerHTML = ''; return; }
@@ -2756,7 +2797,7 @@ async function fetchAnalytics(url) {
   ['lordo','iva','costi','netto','margine'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '...'; });
   document.getElementById('ordini-count').textContent = 'Caricamento (leggo costi reali)...';
   document.getElementById('breakdown-body').innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--gray-500); font-style:italic;">Caricamento...</td></tr>';
-  document.getElementById('breakdown-foot').innerHTML = ''; document.getElementById('errors-panel').innerHTML = '';
+  document.getElementById('breakdown-foot').innerHTML = ''; document.getElementById('errors-panel').innerHTML = ''; var loBox = document.getElementById('last-orders'); if (loBox) loBox.hidden = true;
   try {
     const data = await fetchNoCache(url);
     if (data.success) {
@@ -2774,6 +2815,7 @@ async function fetchAnalytics(url) {
       const countLabel = data.ordini_con_errori_count > 0 ? data.ordini_totali + ' validi (' + data.ordini_con_errori_count + ' esclusi)' : data.ordini_totali + ' ordini';
       document.getElementById('ordini-count').textContent = countLabel;
       renderBreakdown(data.breakdown_marketplace);
+      renderLastOrders(data.breakdown_marketplace);
       renderErrors(data.ordini_con_errori || []);
       renderForeignCurrency(data.ordini_valuta_estera || []);
       renderRefunds(data.resi || null);
@@ -4603,7 +4645,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.49', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.50', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
