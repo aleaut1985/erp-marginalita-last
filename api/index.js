@@ -1770,7 +1770,7 @@ async function inviaNotificaDuo(ordine, m) {
   const testo = '#' + ordine.order_number + '\n' + (ordine.line_items || []).map(li => '• ' + li.title + (li.variant_title ? ' – ' + li.variant_title : '') + ' ×' + li.quantity + (isDuoSku(li.sku) ? ' (DUOMO)' : '')).join('\n');
   const esiti = [];
   if (NTFY_TOPIC) {
-    try { const r = await fetch('https://ntfy.sh/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: NTFY_TOPIC, title: titolo, message: testo, tags: [m.margine < 0 ? 'red_circle' : (haDuo ? 'large_orange_diamond' : 'shopping_bags')], priority: (m.margine < 0 || haDuo) ? 4 : 3, click: ERP_PUBLIC_URL }) }); esiti.push('ntfy ' + r.status); } catch (e) { esiti.push('ntfy errore ' + e.message); }
+    try { const r = await fetch('https://ntfy.sh/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: NTFY_TOPIC, title: titolo, message: testo, tags: [m.margine < 0 ? 'red_circle' : (haDuo ? 'large_orange_diamond' : 'shopping_bags')], priority: (m.margine < 0 || haDuo) ? 4 : 3, click: ERP_PUBLIC_URL + '/?ordine=' + encodeURIComponent(ordine.order_number) + '#ordini' }) }); esiti.push('ntfy ' + r.status); } catch (e) { esiti.push('ntfy errore ' + e.message); }
   }
   if (RESEND_API_KEY && DUO_NOTIFY_EMAIL) {
     try { const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { 'Authorization': 'Bearer ' + RESEND_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: MAIL_FROM, to: [DUO_NOTIFY_EMAIL], subject: titolo, text: testo + '\n\n' + ERP_PUBLIC_URL }) }); esiti.push('email ' + r.status); } catch (e) { esiti.push('email errore ' + e.message); }
@@ -2254,7 +2254,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .last-orders { margin: -12px 0 24px; border: 1px solid var(--gray-200, #e8e2d6); border-radius: 14px; background: #fff; overflow: hidden; }
   .lo-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; font-size: 0.8rem; color: var(--gray-700); letter-spacing: 0.02em; border-bottom: 1px solid var(--gray-200, #e8e2d6); }
   .lo-count { font-size: 0.72rem; color: var(--gray-500); }
-  .lo-list { max-height: 204px; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; scroll-snap-type: y proximity; }
+  .lo-list { position: relative; max-height: 204px; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; scroll-snap-type: y proximity; }
   .lo-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 9px 16px; border-bottom: 1px solid #f1ede5; scroll-snap-align: start; min-height: 68px; box-sizing: border-box; }
   .lo-row:last-child { border-bottom: 0; }
   .lo-top { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; min-width: 0; }
@@ -2264,6 +2264,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .lo-items { grid-column: 1; font-size: 0.74rem; color: var(--gray-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lo-price { grid-column: 2; grid-row: 1; text-align: right; font-weight: 600; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
   .lo-marg { grid-column: 2; grid-row: 2; text-align: right; font-size: 0.74rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .lo-row.lo-hit { background: #FFF6DC; transition: background .6s; }
   .lo-marg.pos { color: #00704a; } .lo-marg.neg { color: var(--red, #bf4747); }
   .fx-det { background: #FFF8E6; border-left: 3px solid #E8C77A; border-radius: 8px; margin-bottom: 12px; font-size: 0.78rem; color: #6B4E0E; }
   .fx-det > summary { list-style: none; cursor: pointer; padding: 7px 12px; } .fx-det > summary::before { content: '+ '; } .fx-det[open] > summary::before { content: '− '; }
@@ -2729,13 +2730,31 @@ function renderLastOrders(breakdown) {
     const testo = art.length ? art.map(function (a) { return (a.quantity > 1 ? a.quantity + '× ' : '') + a.title; }).join(' · ') : '—';
     const m = o.margine_netto || 0; const cls = m >= 0 ? 'pos' : 'neg';
     const reso = o.refund_status === 'partial' ? ' ↩️' : '';
-    return '<div class="lo-row"><div class="lo-top"><span class="lo-num">' + esc(o.name || ('#' + o.order_number)) + '</span><span class="lo-mp" style="background:' + (MP_COLORS[r.k] || '#8E8E8E') + '">' + esc(r.nome) + '</span><span class="lo-time">' + quando + reso + '</span></div>' +
+    return '<div class="lo-row" data-ord="' + esc(String(o.order_number || '')) + '"><div class="lo-top"><span class="lo-num">' + esc(o.name || ('#' + o.order_number)) + '</span><span class="lo-mp" style="background:' + (MP_COLORS[r.k] || '#8E8E8E') + '">' + esc(r.nome) + '</span><span class="lo-time">' + quando + reso + '</span></div>' +
       '<div class="lo-price">€' + Math.round(o.fatturato || 0).toLocaleString('it-IT') + '</div>' +
       '<div class="lo-items" title="' + esc(testo) + '">' + esc(testo) + '</div>' +
       '<div class="lo-marg ' + cls + '">' + (m >= 0 ? '+' : '−') + '€' + Math.abs(Math.round(m)).toLocaleString('it-IT') + ' · ' + (o.margine_percentuale || 0).toFixed(1) + '%</div></div>';
   }).join('');
   if (cnt) cnt.textContent = righe.length > 3 ? righe.length + ' · scorri per vederli tutti' : String(righe.length);
   list.scrollTop = 0; box.hidden = false;
+  focusOrdineDaNotifica();
+}
+// v5.51: dalla notifica ntfy (?ordine=12345#ordini) si apre Analytics, si scorre al riquadro Ordini e si evidenzia l'ordine
+var ORD_FOCUS_FATTO = false;
+function focusOrdineDaNotifica() {
+  if (ORD_FOCUS_FATTO) return;
+  var qs = new URLSearchParams(location.search); var num = qs.get('ordine');
+  if (!num && location.hash !== '#ordini') return;
+  ORD_FOCUS_FATTO = true;
+  var box = document.getElementById('last-orders'); if (!box) return;
+  if (!document.getElementById('analytics-tab').classList.contains('active')) showTab('analytics');
+  setTimeout(function () {
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!num) return;
+    var row = document.querySelector('#lo-list .lo-row[data-ord="' + String(num).replace(/[^0-9A-Za-z_-]/g, '') + '"]');
+    if (row) { var list = document.getElementById('lo-list'); list.scrollTop = row.offsetTop; row.classList.add('lo-hit'); setTimeout(function () { row.classList.remove('lo-hit'); }, 4000); }
+  }, 250);
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
 }
 
 function renderBreakdown(breakdown) {
@@ -4645,7 +4664,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.50', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.51', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
