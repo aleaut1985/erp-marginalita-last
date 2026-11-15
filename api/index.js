@@ -2251,6 +2251,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .kpi-more-val { font-weight: 600; color: #00704a; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .kpi-more[open] > summary { border-bottom: 1px solid var(--gray-200, #e8e2d6); }
   .kpi-more .kpi-grid { padding: 12px; margin-bottom: 0; }
+  .perf-grid { margin: 0 0 4px; } #perf-ieri { margin: 8px 0 12px; } #perf-ieri:empty { display: none; } .perf-range { margin-bottom: 14px; }
   .last-orders { margin: -12px 0 24px; border: 1px solid var(--gray-200, #e8e2d6); border-radius: 14px; background: #fff; overflow: hidden; }
   .lo-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; font-size: 0.8rem; color: var(--gray-700); letter-spacing: 0.02em; border-bottom: 1px solid var(--gray-200, #e8e2d6); }
   .lo-count { font-size: 0.72rem; color: var(--gray-500); }
@@ -2357,7 +2358,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.47</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.52</p>
       </div>
     </div>
     <div class="header-right">
@@ -2380,13 +2381,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     </div>
   </div>
   <div id="analytics-tab" class="tab-content active">
-    <div id="oggi-box" class="alerts-banner"></div>
-    <div id="alerts-banner" class="alerts-banner"></div>
-    <div id="duo-vendite" class="alerts-banner"></div>
-    <div id="duo-alerts" class="alerts-banner"></div>
     <div class="section">
-      <div class="section-header"><div><div class="section-title">Performance</div><div class="section-subtitle">Analisi vendite e marginalità in tempo reale</div></div></div>
-      <div class="info-box">Fuso orario Europa/Roma reale. Costo merce letto da Shopify. Ordini senza "Cost per item" segnalati sotto.</div>
+      <div class="section-header"><div><div class="section-title">Incassi e margine</div><div class="section-subtitle">Tutti i canali · margine netto dopo IVA, commissioni, spedizione e costo merce</div></div></div>
       <div class="filter-bar">
         <div class="period-selector" data-analytics-periods>
           <button class="period-btn active" data-period="today">Oggi</button>
@@ -2396,23 +2392,28 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           <button class="period-btn" data-period="quarter">Trimestre</button>
           <button class="period-btn" data-period="year">Anno</button>
         </div>
-        <div class="custom-range"><label>Da</label><input type="date" id="date-from"><label>A</label><input type="date" id="date-to"><button class="apply-btn" id="analytics-apply">Applica</button></div>
       </div>
-      <div class="kpi-grid">
-        <div class="kpi primary"><div class="kpi-label">Lordo IVA inclusa</div><div class="kpi-value" id="lordo">—</div><div class="kpi-sub" id="ordini-count">— ordini</div></div>
-        <div class="kpi"><div class="kpi-label">IVA Scorporata</div><div class="kpi-value" id="iva">—</div><div class="kpi-sub">Da versare</div></div>
+      <div class="oggi-grid perf-grid">
+        <div class="oggi-kpi dark"><div class="ch-lab">Incassato</div><div class="oggi-val" id="lordo">—</div><div class="oggi-sub" id="ordini-count">— ordini</div></div>
+        <div class="oggi-kpi pos" id="kpi-netto-box"><div class="ch-lab">Margine netto</div><div class="oggi-val" id="netto">—</div><div class="oggi-sub" id="margine-sub">—</div></div>
       </div>
-      <details class="kpi-more"><summary><span>Costi e margine</span><span class="kpi-more-val" id="kpi-more-val"></span></summary>
+      <div class="oggi-ieri" id="perf-ieri"></div>
+      <details class="kpi-more"><summary><span>IVA e costi</span><span class="kpi-more-val" id="kpi-more-val" style="color:var(--gray-700)"></span></summary>
       <div class="kpi-grid">
+        <div class="kpi"><div class="kpi-label">IVA scorporata</div><div class="kpi-value" id="iva">—</div><div class="kpi-sub">Da versare</div></div>
         <div class="kpi"><div class="kpi-label">Costi Totali</div><div class="kpi-value" id="costi">—</div><div class="kpi-split" id="costi-split" style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.08); font-size:0.78rem; line-height:1.5;"><div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-700);">Merce</span><span id="costi-merce" style="font-weight:600; font-variant-numeric:tabular-nums;">—</span></div><div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-700);">Fees + sped.</span><span id="costi-fees" style="font-weight:600; font-variant-numeric:tabular-nums;">—</span></div></div></div>
-        <div class="kpi green"><div class="kpi-label">Margine Netto</div><div class="kpi-value" id="netto">—</div><div class="kpi-sub">Profitto reale</div></div>
         <div class="kpi gold"><div class="kpi-label">Margine %</div><div class="kpi-value" id="margine">—</div><div class="kpi-sub">Su lordo</div></div>
       </div>
       </details>
       <div class="last-orders" id="last-orders" hidden><div class="lo-head"><span>Ordini</span><span class="lo-count" id="lo-count"></span></div><div class="lo-list" id="lo-list"></div></div>
+      <div id="mese-strip" class="mese-strip"><span class="ch-lab">Calcolo il mese…</span></div>
+      <div class="filter-bar perf-range">
+        <div class="custom-range"><label>Da</label><input type="date" id="date-from"><label>A</label><input type="date" id="date-to"><button class="apply-btn" id="analytics-apply">Applica</button></div>
+      </div>
       <div id="refunds-panel"></div>
       <div id="foreign-currency-panel"></div>
       <div id="errors-panel"></div>
+      <div class="alerts-meta" style="margin:-6px 0 14px">Fuso orario Europa/Roma. Costo merce letto da Shopify; gli ordini senza "Cost per item" sono segnalati qui sopra.</div>
       <div class="breakdown-section">
         <div class="breakdown-title">Breakdown per Marketplace</div>
         <div class="breakdown-sub">Clicca su un marketplace per vedere il dettaglio di tutti gli ordini</div>
@@ -2425,6 +2426,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
     </div>
+    <div id="alerts-banner" class="alerts-banner"></div>
+    <div id="duo-vendite" class="alerts-banner"></div>
+    <div id="duo-alerts" class="alerts-banner"></div>
   </div>
   <div id="bestsellers-tab" class="tab-content">
     <div class="section">
@@ -2813,7 +2817,7 @@ function renderBreakdown(breakdown) {
 }
 
 async function fetchAnalytics(url) {
-  ['lordo','iva','costi','netto','margine'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '...'; });
+  ['lordo','iva','costi','netto','margine'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '...'; }); var msub = document.getElementById('margine-sub'); if (msub) msub.textContent = '…';
   document.getElementById('ordini-count').textContent = 'Caricamento (leggo costi reali)...';
   document.getElementById('breakdown-body').innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--gray-500); font-style:italic;">Caricamento...</td></tr>';
   document.getElementById('breakdown-foot').innerHTML = ''; document.getElementById('errors-panel').innerHTML = ''; var loBox = document.getElementById('last-orders'); if (loBox) loBox.hidden = true;
@@ -2830,8 +2834,10 @@ async function fetchAnalytics(url) {
       document.getElementById('costi-fees').textContent = '€' + Math.round(fees).toLocaleString('it-IT');
       document.getElementById('netto').textContent = '€' + Math.round(data.margine_netto).toLocaleString('it-IT');
       document.getElementById('margine').textContent = data.margine_percentuale.toFixed(1) + '%';
-      var kmv = document.getElementById('kpi-more-val'); if (kmv) kmv.textContent = '€' + Math.round(data.margine_netto).toLocaleString('it-IT') + ' · ' + data.margine_percentuale.toFixed(1) + '%';
-      const countLabel = data.ordini_con_errori_count > 0 ? data.ordini_totali + ' validi (' + data.ordini_con_errori_count + ' esclusi)' : data.ordini_totali + ' ordini';
+      var kmv = document.getElementById('kpi-more-val'); if (kmv) kmv.textContent = 'IVA €' + Math.round(data.iva_totale).toLocaleString('it-IT') + ' · costi €' + Math.round(data.costi_totali).toLocaleString('it-IT');
+      var msub = document.getElementById('margine-sub'); if (msub) msub.textContent = data.margine_percentuale.toFixed(1) + '% sul lordo';
+      var nb = document.getElementById('kpi-netto-box'); if (nb) nb.className = 'oggi-kpi ' + (data.margine_netto < 0 ? 'neg' : 'pos');
+      const countLabel = (data.ordini_con_errori_count > 0 ? data.ordini_totali + ' validi (' + data.ordini_con_errori_count + ' esclusi)' : data.ordini_totali + ' ordini') + ' · IVA inclusa';
       document.getElementById('ordini-count').textContent = countLabel;
       renderBreakdown(data.breakdown_marketplace);
       renderLastOrders(data.breakdown_marketplace);
@@ -2847,7 +2853,16 @@ async function fetchAnalytics(url) {
   return false;
 }
 
-async function setPeriod(p, btn) { setActiveButton('[data-analytics-periods] .period-btn', btn); await fetchAnalytics('/api/analytics?periodo=' + p); }
+async function setPeriod(p, btn) { setActiveButton('[data-analytics-periods] .period-btn', btn); var pi = document.getElementById('perf-ieri'); if (pi) pi.innerHTML = ''; var ok = await fetchAnalytics('/api/analytics?periodo=' + p); if (p === 'today') caricaIeriRiga(); return ok; }
+// v5.52: riga "Ieri" sotto i KPI quando il periodo è Oggi (prima stava in un box separato duplicato)
+function caricaIeriRiga() {
+  var el = document.getElementById('perf-ieri'); if (!el) return;
+  fetch('/api/analytics?periodo=yesterday').then(function (r) { return r.json(); }).then(function (y) {
+    var attivo = document.querySelector('[data-analytics-periods] .period-btn.active');
+    if (!y || !y.success || !attivo || attivo.dataset.period !== 'today') return;
+    el.innerHTML = 'Ieri: €' + Math.round(y.lordo_iva_inclusa).toLocaleString('it-IT') + ' incassati · margine €' + Math.round(y.margine_netto).toLocaleString('it-IT') + ' (' + (y.margine_percentuale || 0).toFixed(1) + '%) · ' + (y.ordini_totali || 0) + ' ordini';
+  }).catch(function () {});
+}
 async function applyCustomRange() {
   const from = document.getElementById('date-from').value; const to = document.getElementById('date-to').value;
   if (!from || !to) { alert('Seleziona date'); return; } if (from > to) { alert('Da deve precedere A'); return; }
@@ -4360,7 +4375,7 @@ function renderRicerche(d) {
   html += '<div class="alerts-meta" style="margin-top:12px">Tocca un brand per vedere i 2 modelli più venduti su Miinto e da noi. Quota e crescita = GMV su Miinto. "n.d." = segno della crescita non leggibile nel PDF. TLuxy = vendite su tutti i canali negli ultimi 180 giorni e prodotti attivi su Shopify. Analizzati ' + d.ordini_analizzati + ' ordini · <a href="#" onclick="caricaRicerche(true);return false;">aggiorna</a></div>';
   el.innerHTML = html;
 }
-setTimeout(caricaOggiBox, 200);
+setTimeout(caricaMeseStrip, 200);
 setTimeout(function () { fetch('/api/setup-webhooks').catch(function () {}); }, 4000);
 </script>
 </body>
@@ -4664,7 +4679,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.51', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.52', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
