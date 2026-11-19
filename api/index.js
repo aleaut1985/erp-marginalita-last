@@ -4445,6 +4445,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && path === LT_SYNC_PATH) {
       const bearer = String(req.headers['authorization'] || '');
       if (!((CRON_SECRET && bearer === 'Bearer ' + CRON_SECRET) || getAuthenticatedUser(req))) return res.status(401).json({ ok: false });
+      cachedToken = null; tokenExpiry = null; // token fresco: prende subito eventuali nuovi permessi dell'app
       try { return res.json({ ok: true, webhook: await assicuraWebhookLordTaylor(), sync: await ltSincronizzaTutto() }); }
       catch (e) { return res.status(500).json({ ok: false, error: e.message }); }
     }
