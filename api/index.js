@@ -2341,12 +2341,33 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     .breakdown-table th:first-child, .breakdown-table td:first-child { position: sticky; left: 0; background: inherit; z-index: 1; }
     .breakdown-table tbody td:first-child { background: var(--white); }
     .breakdown-table thead th:first-child { background: #1A1A1A; }
-    .breakdown-table .mp-badge { font-size: 0.64rem; padding: 3px 8px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+    .breakdown-table .mp-badge { font-size: 0.7rem; padding: 3px 8px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
     .breakdown-table .toggle-arrow { width: 10px; margin-right: 0; }
     .breakdown-table td:first-child, .breakdown-table th:first-child { box-shadow: 1px 0 0 var(--gray-200); }
     .results, .mp-grid, .duo-grid, .form-grid { grid-template-columns: 1fr; }
     .results { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .btn-primary { padding: 14px 20px; }
+  }
+
+  /* v5.53 HIG Apple: contrasto (>= 4.5:1) e tap target (>= 44x44 pt) */
+  :root { --gray-500: #6B6B6B; }
+  .apply-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; background: var(--black); color: var(--white); border: none; padding: 10px 18px; border-radius: 50px; font-family: var(--font-main); font-size: 0.78rem; font-weight: 600; letter-spacing: 0.04em; cursor: pointer; transition: filter 0.2s; }
+  .apply-btn:hover { filter: brightness(1.2); }
+  .tab, .period-btn, .inv-filter, .alerts-refresh, #logoutBtn, summary { min-height: 44px; }
+  .tab, .period-btn, .inv-filter { display: inline-flex; align-items: center; justify-content: center; }
+  summary { display: flex; align-items: center; }
+  .alerts-refresh { padding: 10px 16px; }
+  .header-info p { opacity: 1; }
+  .kpi-label, .ch-lab, .result-label { font-size: 0.72rem; }
+  .lo-mp { font-size: 0.7rem; font-weight: 700; padding: 3px 8px; }
+  @media (max-width: 768px) {
+    .header-info p { opacity: 1; font-size: 0.72rem; }
+    .tab { min-height: 44px; padding: 10px 16px; }
+    .period-btn { min-height: 44px; padding: 10px 16px; }
+    #logoutBtn { min-height: 44px !important; min-width: 44px; padding: 10px 14px !important; }
+    input, select { min-height: 44px; font-size: 16px; }
+    .custom-range .apply-btn { min-height: 44px; }
+    .kpi-label { font-size: 0.72rem; }
   }
 </style>
 </head>
@@ -2358,7 +2379,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.52</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.53</p>
       </div>
     </div>
     <div class="header-right">
@@ -2652,6 +2673,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 </div>
 <script>
 const MARKETPLACES = ${JSON.stringify(Object.fromEntries(Object.entries(MARKETPLACE_CONFIGS).filter(([k]) => k !== 'REFLAUNT')))};
+function mpTextColor(hex){ var h=(hex||'#8E8E8E').replace('#',''); var c=[0,2,4].map(function(i){ var v=parseInt(h.substr(i,2),16)/255; return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4); }); var L=0.2126*c[0]+0.7152*c[1]+0.0722*c[2]; return (1.05/(L+0.05)) >= 4.5 ? '#FFFFFF' : '#1A1A1A'; }
 const MP_COLORS = { REFLAUNT:'#6E8B74', TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC', MARK_FOYS:'#2E5F8F', GIGLIO:'#7B4F8A' };
 
 function setActiveButton(selector, btn) { document.querySelectorAll(selector).forEach(b => b.classList.remove('active')); if (btn) btn.classList.add('active'); }
@@ -2734,7 +2756,7 @@ function renderLastOrders(breakdown) {
     const testo = art.length ? art.map(function (a) { return (a.quantity > 1 ? a.quantity + '× ' : '') + a.title; }).join(' · ') : '—';
     const m = o.margine_netto || 0; const cls = m >= 0 ? 'pos' : 'neg';
     const reso = o.refund_status === 'partial' ? ' ↩️' : '';
-    return '<div class="lo-row" data-ord="' + esc(String(o.order_number || '')) + '"><div class="lo-top"><span class="lo-num">' + esc(o.name || ('#' + o.order_number)) + '</span><span class="lo-mp" style="background:' + (MP_COLORS[r.k] || '#8E8E8E') + '">' + esc(r.nome) + '</span><span class="lo-time">' + quando + reso + '</span></div>' +
+    return '<div class="lo-row" data-ord="' + esc(String(o.order_number || '')) + '"><div class="lo-top"><span class="lo-num">' + esc(o.name || ('#' + o.order_number)) + '</span><span class="lo-mp" style="background:' + (MP_COLORS[r.k] || '#8E8E8E') + ';color:' + mpTextColor(MP_COLORS[r.k]) + '">' + esc(r.nome) + '</span><span class="lo-time">' + quando + reso + '</span></div>' +
       '<div class="lo-price">€' + Math.round(o.fatturato || 0).toLocaleString('it-IT') + '</div>' +
       '<div class="lo-items" title="' + esc(testo) + '">' + esc(testo) + '</div>' +
       '<div class="lo-marg ' + cls + '">' + (m >= 0 ? '+' : '−') + '€' + Math.abs(Math.round(m)).toLocaleString('it-IT') + ' · ' + (o.margine_percentuale || 0).toFixed(1) + '%</div></div>';
@@ -2772,7 +2794,7 @@ function renderBreakdown(breakdown) {
     const marginCls = r.margine >= 0 ? 'margin-pos' : 'margin-neg';
     const color = MP_COLORS[r.key] || '#8E8E8E';
     // Riga principale cliccabile + riga dettagli nascosta
-    const mainRow = '<tr class="mp-row" data-mp-key="' + r.key + '" style="cursor:pointer"><td><span class="toggle-arrow" id="arrow-' + r.key + '">▶</span>&nbsp;<span class="mp-badge" style="background:' + color + '">' + r.nome + '</span></td><td class="num">' + r.ordini + '</td><td class="num">€' + Math.round(r.fatturato).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(r.iva || 0).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(r.costo_merce || 0).toLocaleString('it-IT') + '</td><td class="num ' + marginCls + '">€' + Math.round(r.margine).toLocaleString('it-IT') + '</td><td class="num ' + marginCls + '">' + marginePerc.toFixed(1) + '%</td></tr>';
+    const mainRow = '<tr class="mp-row" data-mp-key="' + r.key + '" style="cursor:pointer"><td><span class="toggle-arrow" id="arrow-' + r.key + '">▶</span>&nbsp;<span class="mp-badge" style="background:' + color + ';color:' + mpTextColor(color) + '">' + r.nome + '</span></td><td class="num">' + r.ordini + '</td><td class="num">€' + Math.round(r.fatturato).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(r.iva || 0).toLocaleString('it-IT') + '</td><td class="num">€' + Math.round(r.costo_merce || 0).toLocaleString('it-IT') + '</td><td class="num ' + marginCls + '">€' + Math.round(r.margine).toLocaleString('it-IT') + '</td><td class="num ' + marginCls + '">' + marginePerc.toFixed(1) + '%</td></tr>';
     // Dettaglio ordini (nascosto default)
     const detailRow = '<tr class="mp-detail" id="detail-' + r.key + '" style="display:none;"><td colspan="7" style="padding:0; background:var(--cream);"><div style="padding:16px;"><table class="detail-table"><thead><tr><th>Ordine</th><th>Data</th><th>Paese</th><th>Articoli</th><th class="num">Fatturato</th><th class="num">IVA</th><th class="num">Costo</th><th class="num">Fees MP</th><th class="num">Margine €</th><th class="num">%</th></tr></thead><tbody>' + 
       (r.dettaglio_ordini || []).map(o => {
@@ -3306,7 +3328,7 @@ function renderForecast(data) {
       return '<div style="background:var(--white); border:1px solid var(--gray-200); border-radius:12px; padding:14px 18px;">' +
         '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:10px; border-bottom:1px solid var(--gray-100);">' +
           '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">' +
-            '<span class="mp-badge" style="background:' + color + '; font-size:0.8rem;">' + mp.nome + '</span>' +
+            '<span class="mp-badge" style="background:' + color + '; font-size:0.8rem;color:' + mpTextColor(color) + '">' + mp.nome + '</span>' +
             '<span style="font-size:0.78rem; color:var(--gray-700); font-style:italic;">' + (mp.pagamento_desc || '') + '</span>' +
           '</div>' +
           '<div style="font-size:1.05rem; font-weight:800;">Totale <span style="color:var(--black);">' + fmtEur(totaleFuturo) + '</span></div>' +
@@ -4684,7 +4706,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.52', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.53', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
