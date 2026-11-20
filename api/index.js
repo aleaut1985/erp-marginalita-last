@@ -2393,6 +2393,50 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     .tab:active, .period-btn:active, .btn-primary:active, .apply-btn:active, .mp-card:active { transform: none; }
     html { scroll-behavior: auto; }
   }
+
+  /* v5.55 calendario intervallo tipo Booking */
+  .custom-range.rp-wrap { padding: 0; border: none; background: transparent; }
+  .apply-btn[hidden] { display: none !important; }
+  .custom-range.rp-wrap { display: block; }
+  .rp-trigger { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 12px 18px; border: 1.5px solid var(--gray-200); border-radius: 50px; background: var(--white); font-family: var(--font-main); font-size: 0.9rem; font-weight: 600; color: var(--black); cursor: pointer; text-align: left; }
+  .rp-trigger .rp-label { flex: 1; }
+  .rp-trigger .rp-chev { color: var(--gray-500); font-size: 1.2rem; }
+  .rp-trigger:active { transform: scale(0.98); }
+  .rp-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 1000; display: none; align-items: flex-end; justify-content: center; }
+  .rp-overlay.open { display: flex; }
+  .rp-sheet { background: var(--white); width: 100%; max-width: 480px; max-height: 88vh; border-radius: 22px 22px 0 0; display: flex; flex-direction: column; box-shadow: 0 -10px 40px rgba(0,0,0,0.15); animation: rp-up 220ms cubic-bezier(0.23,1,0.32,1); }
+  @media (min-width: 769px) { .rp-overlay { align-items: center; } .rp-sheet { border-radius: 22px; } }
+  @keyframes rp-up { from { transform: translateY(24px); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .rp-sheet { animation: none; } }
+  .rp-head { padding: 18px 20px 10px; border-bottom: 1px solid var(--gray-200); }
+  .rp-title { display: flex; justify-content: space-between; align-items: center; }
+  .rp-title b { font-family: var(--font-display); font-size: 1.35rem; font-weight: 500; }
+  .rp-x { width: 44px; height: 44px; border: none; background: var(--gray-100); border-radius: 50%; font-size: 1.1rem; cursor: pointer; }
+  .rp-sel { margin-top: 10px; display: flex; gap: 8px; align-items: center; font-size: 0.9rem; }
+  .rp-sel span { flex: 1; padding: 10px 12px; border-radius: 12px; background: var(--gray-100); color: var(--gray-700); }
+  .rp-sel span.on { background: #E8F4F0; color: var(--green-dark); font-weight: 700; box-shadow: inset 0 0 0 1.5px var(--green-primary); }
+  .rp-chips { display: flex; gap: 8px; overflow-x: auto; padding: 12px 0 2px; scrollbar-width: none; }
+  .rp-chips::-webkit-scrollbar { display: none; }
+  .rp-chip { flex: 0 0 auto; min-height: 36px; padding: 8px 14px; border: 1.5px solid var(--gray-200); border-radius: 50px; background: var(--white); font-family: var(--font-main); font-size: 0.78rem; font-weight: 600; color: var(--black); cursor: pointer; white-space: nowrap; }
+  .rp-dow { display: grid; grid-template-columns: repeat(7, 1fr); padding: 8px 14px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; color: var(--gray-500); text-align: center; border-bottom: 1px solid var(--gray-200); }
+  .rp-body { overflow-y: auto; padding: 0 14px 10px; -webkit-overflow-scrolling: touch; }
+  .rp-month h4 { font-family: var(--font-main); font-size: 0.95rem; font-weight: 700; margin: 18px 6px 8px; text-transform: capitalize; }
+  .rp-grid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 4px; }
+  .rp-d { position: relative; height: 46px; border: none; background: transparent; font-family: var(--font-main); font-size: 0.95rem; color: var(--black); cursor: pointer; padding: 0; }
+  .rp-d span { position: relative; z-index: 1; display: inline-flex; width: 42px; height: 42px; align-items: center; justify-content: center; border-radius: 50%; }
+  .rp-d.today span { box-shadow: inset 0 0 0 1.5px var(--gray-500); }
+  .rp-d.in { background: #E8F4F0; }
+  .rp-d.start, .rp-d.end { background: linear-gradient(90deg, transparent 50%, #E8F4F0 50%); }
+  .rp-d.end { background: linear-gradient(90deg, #E8F4F0 50%, transparent 50%); }
+  .rp-d.start.end { background: transparent; }
+  .rp-d.start span, .rp-d.end span { background: var(--black); color: var(--white); font-weight: 700; }
+  .rp-d:disabled { color: #C4C4C4; cursor: default; }
+  .rp-d.empty { visibility: hidden; }
+  .rp-foot { display: flex; gap: 10px; padding: 12px 20px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--gray-200); }
+  .rp-foot button { flex: 1; min-height: 50px; border-radius: 50px; font-family: var(--font-main); font-size: 0.85rem; font-weight: 700; letter-spacing: 0.04em; cursor: pointer; }
+  .rp-reset { background: var(--white); border: 1.5px solid var(--gray-200); color: var(--black); }
+  .rp-ok { background: var(--black); border: none; color: var(--white); }
+  .rp-ok:disabled { opacity: 0.4; }
 </style>
 </head>
 <body>
@@ -2403,7 +2447,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.54</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.55</p>
       </div>
     </div>
     <div class="header-right">
@@ -2453,7 +2497,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="last-orders" id="last-orders" hidden><div class="lo-head"><span>Ordini</span><span class="lo-count" id="lo-count"></span></div><div class="lo-list" id="lo-list"></div></div>
       <div id="mese-strip" class="mese-strip"><span class="ch-lab">Calcolo il mese…</span></div>
       <div class="filter-bar perf-range">
-        <div class="custom-range"><label>Da</label><input type="date" id="date-from"><label>A</label><input type="date" id="date-to"><button class="apply-btn" id="analytics-apply">Applica</button></div>
+        <div class="custom-range rp-wrap"><button type="button" class="rp-trigger" data-from="date-from" data-to="date-to" data-apply="analytics-apply"><span class="rp-ico">📅</span><span class="rp-label">Scegli le date</span><span class="rp-chev">›</span></button><input type="hidden" id="date-from"><input type="hidden" id="date-to"><button class="apply-btn" id="analytics-apply" hidden>Applica</button></div>
       </div>
       <div id="refunds-panel"></div>
       <div id="foreign-currency-panel"></div>
@@ -2487,7 +2531,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           <button class="period-btn" data-period="quarter">Trimestre</button>
           <button class="period-btn" data-period="year">Anno</button>
         </div>
-        <div class="custom-range"><label>Da</label><input type="date" id="bs-date-from"><label>A</label><input type="date" id="bs-date-to"><button class="apply-btn" id="bs-apply">Applica</button></div>
+        <div class="custom-range rp-wrap"><button type="button" class="rp-trigger" data-from="bs-date-from" data-to="bs-date-to" data-apply="bs-apply"><span class="rp-ico">📅</span><span class="rp-label">Scegli le date</span><span class="rp-chev">›</span></button><input type="hidden" id="bs-date-from"><input type="hidden" id="bs-date-to"><button class="apply-btn" id="bs-apply" hidden>Applica</button></div>
       </div>
       <div id="bs-content" class="bs-grid"><div class="bs-empty">Caricamento prodotti...</div></div>
     </div>
@@ -4053,6 +4097,110 @@ async function chatSend(message) {
   }
 }
 
+
+// v5.55: calendario intervallo tipo Booking (un solo calendario: tocchi il giorno di inizio e quello di fine)
+const RP_MESI = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
+const RP_MESI_B = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+const rpFmt = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+const rpParse = s => { if (!s) return null; const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const rpShort = d => d.getDate() + ' ' + RP_MESI_B[d.getMonth()];
+let rpState = { trig: null, start: null, end: null };
+function rpLabel(trig) {
+  const a = rpParse(document.getElementById(trig.dataset.from).value), b = rpParse(document.getElementById(trig.dataset.to).value);
+  const lab = trig.querySelector('.rp-label');
+  if (!a) { lab.textContent = 'Scegli le date'; return; }
+  if (!b || +a === +b) { lab.textContent = rpShort(a) + ' ' + a.getFullYear(); return; }
+  const n = Math.round((b - a) / 86400000) + 1;
+  lab.textContent = rpShort(a) + ' → ' + rpShort(b) + (a.getFullYear() !== b.getFullYear() ? ' ' + b.getFullYear() : '') + ' · ' + n + ' giorni';
+}
+function rpBuild() {
+  if (document.getElementById('rp-overlay')) return;
+  const o = document.createElement('div'); o.id = 'rp-overlay'; o.className = 'rp-overlay';
+  o.innerHTML = '<div class="rp-sheet" role="dialog" aria-label="Scegli intervallo di date">' +
+    '<div class="rp-head"><div class="rp-title"><b>Scegli le date</b><button type="button" class="rp-x" aria-label="Chiudi">✕</button></div>' +
+    '<div class="rp-sel"><span id="rp-s1">Inizio</span><span style="flex:0">→</span><span id="rp-s2">Fine</span></div>' +
+    '<div class="rp-chips"><button type="button" class="rp-chip" data-q="today">Oggi</button><button type="button" class="rp-chip" data-q="yesterday">Ieri</button><button type="button" class="rp-chip" data-q="7">Ultimi 7 giorni</button><button type="button" class="rp-chip" data-q="30">Ultimi 30 giorni</button><button type="button" class="rp-chip" data-q="month">Questo mese</button><button type="button" class="rp-chip" data-q="lastmonth">Mese scorso</button></div></div>' +
+    '<div class="rp-dow"><span>L</span><span>M</span><span>M</span><span>G</span><span>V</span><span>S</span><span>D</span></div>' +
+    '<div class="rp-body" id="rp-body"></div>' +
+    '<div class="rp-foot"><button type="button" class="rp-reset">Azzera</button><button type="button" class="rp-ok" disabled>Applica</button></div></div>';
+  document.body.appendChild(o);
+  o.addEventListener('click', e => { if (e.target === o) rpClose(); });
+  o.querySelector('.rp-x').addEventListener('click', rpClose);
+  o.querySelector('.rp-reset').addEventListener('click', () => { rpState.start = rpState.end = null; rpPaint(); });
+  o.querySelector('.rp-ok').addEventListener('click', rpApply);
+  o.querySelectorAll('.rp-chip').forEach(c => c.addEventListener('click', () => {
+    const t = new Date(); t.setHours(0, 0, 0, 0); const q = c.dataset.q; let a, b = new Date(t);
+    if (q === 'today') a = new Date(t);
+    else if (q === 'yesterday') { a = new Date(t); a.setDate(a.getDate() - 1); b = new Date(a); }
+    else if (q === 'month') a = new Date(t.getFullYear(), t.getMonth(), 1);
+    else if (q === 'lastmonth') { a = new Date(t.getFullYear(), t.getMonth() - 1, 1); b = new Date(t.getFullYear(), t.getMonth(), 0); }
+    else { a = new Date(t); a.setDate(a.getDate() - (parseInt(q) - 1)); }
+    rpState.start = a; rpState.end = b; rpPaint(); rpScrollTo(a);
+  }));
+  const body = o.querySelector('#rp-body'); const today = new Date(); today.setHours(0, 0, 0, 0);
+  let html = '';
+  for (let k = 12; k >= 0; k--) {
+    const m0 = new Date(today.getFullYear(), today.getMonth() - k, 1);
+    const days = new Date(m0.getFullYear(), m0.getMonth() + 1, 0).getDate(); const lead = (m0.getDay() + 6) % 7;
+    html += '<div class="rp-month" data-ym="' + m0.getFullYear() + '-' + m0.getMonth() + '"><h4>' + RP_MESI[m0.getMonth()] + ' ' + m0.getFullYear() + '</h4><div class="rp-grid">';
+    for (let i = 0; i < lead; i++) html += '<button type="button" class="rp-d empty" tabindex="-1" aria-hidden="true"></button>';
+    for (let d = 1; d <= days; d++) {
+      const dt = new Date(m0.getFullYear(), m0.getMonth(), d); const fut = dt > today;
+      html += '<button type="button" class="rp-d' + (+dt === +today ? ' today' : '') + '" data-d="' + rpFmt(dt) + '"' + (fut ? ' disabled' : '') + ' aria-label="' + d + ' ' + RP_MESI[m0.getMonth()] + '"><span>' + d + '</span></button>';
+    }
+    html += '</div></div>';
+  }
+  body.innerHTML = html;
+  body.addEventListener('click', e => {
+    const b = e.target.closest('.rp-d'); if (!b || b.disabled || !b.dataset.d) return;
+    const d = rpParse(b.dataset.d);
+    if (!rpState.start || rpState.end) { rpState.start = d; rpState.end = null; }
+    else if (d < rpState.start) { rpState.start = d; }
+    else { rpState.end = d; }
+    rpPaint();
+  });
+}
+function rpPaint() {
+  const o = document.getElementById('rp-overlay'); const { start, end } = rpState;
+  o.querySelectorAll('.rp-d[data-d]').forEach(b => {
+    const d = rpParse(b.dataset.d); const e = end || start;
+    b.classList.toggle('start', !!start && +d === +start);
+    b.classList.toggle('end', !!e && +d === +e);
+    b.classList.toggle('in', !!start && !!end && d > start && d < end);
+  });
+  const s1 = o.querySelector('#rp-s1'), s2 = o.querySelector('#rp-s2');
+  s1.textContent = start ? rpShort(start) + ' ' + start.getFullYear() : 'Inizio';
+  s2.textContent = end ? rpShort(end) + ' ' + end.getFullYear() : (start ? 'Tocca la fine' : 'Fine');
+  s1.classList.toggle('on', !start); s2.classList.toggle('on', !!start && !end);
+  if (!start) s1.classList.add('on');
+  const ok = o.querySelector('.rp-ok'); ok.disabled = !start;
+  ok.textContent = start ? 'Applica · ' + (Math.round(((end || start) - start) / 86400000) + 1) + ' giorni' : 'Applica';
+}
+function rpScrollTo(d) {
+  const m = document.querySelector('.rp-month[data-ym="' + d.getFullYear() + '-' + d.getMonth() + '"]');
+  if (m) m.scrollIntoView({ block: 'start' });
+}
+function rpOpen(trig) {
+  rpBuild(); rpState.trig = trig;
+  rpState.start = rpParse(document.getElementById(trig.dataset.from).value);
+  rpState.end = rpParse(document.getElementById(trig.dataset.to).value);
+  const o = document.getElementById('rp-overlay'); o.classList.add('open'); document.body.style.overflow = 'hidden';
+  rpPaint();
+  const body = o.querySelector('#rp-body');
+  if (rpState.start) rpScrollTo(rpState.start); else body.scrollTop = body.scrollHeight;
+  if (rpState.start && rpState.start.getMonth() === new Date().getMonth()) body.scrollTop = body.scrollHeight;
+}
+function rpClose() { const o = document.getElementById('rp-overlay'); if (o) o.classList.remove('open'); document.body.style.overflow = ''; }
+function rpApply() {
+  const t = rpState.trig; if (!t || !rpState.start) return;
+  document.getElementById(t.dataset.from).value = rpFmt(rpState.start);
+  document.getElementById(t.dataset.to).value = rpFmt(rpState.end || rpState.start);
+  rpLabel(t); rpClose();
+  document.getElementById(t.dataset.apply).click();
+}
+function initRangePickers() {
+  document.querySelectorAll('.rp-trigger').forEach(t => { t.addEventListener('click', () => rpOpen(t)); rpLabel(t); });
+}
 document.addEventListener('DOMContentLoaded', () => {
   loadMarketplaces();
   // v5.46: i campi data partono da oggi (data locale, non UTC), così il calendario si apre sul mese corrente
@@ -4071,6 +4219,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-bs-periods] .period-btn').forEach(btn => btn.addEventListener('click', () => loadBestSellers(btn.dataset.period, btn)));
   document.getElementById('analytics-apply').addEventListener('click', applyCustomRange);
   document.getElementById('bs-apply').addEventListener('click', applyBsCustomRange);
+  initRangePickers();
   ['c-prezzo', 'c-iva', 'c-costo', 'c-spedizione'].forEach(id => { const el = document.getElementById(id); if (el) { el.addEventListener('input', confronta); if (el.tagName === 'SELECT') el.addEventListener('change', confronta); } });
   document.getElementById('calcola-btn').addEventListener('click', calcola);
   // Batch Excel listeners
@@ -4730,7 +4879,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.54', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.55', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
