@@ -2266,7 +2266,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .lo-row:last-child { border-bottom: 0; }
   .lo-flag { font-size: 1rem; line-height: 1; }
   .lo-top { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; min-width: 0; }
-  .lo-num { font-weight: 700; }
+  .lo-num { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; }
+  .lo-top > :not(.lo-num) { flex-shrink: 0; white-space: nowrap; }
   .lo-time { color: var(--gray-500); font-size: 0.72rem; }
   .lo-mp { display: inline-block; color: #fff; font-size: 0.62rem; font-weight: 600; padding: 2px 7px; border-radius: 10px; white-space: nowrap; }
   .lo-items { grid-column: 1; font-size: 0.74rem; color: var(--gray-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2448,7 +2449,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.56</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.56.1</p>
       </div>
     </div>
     <div class="header-right">
@@ -2808,6 +2809,8 @@ function renderRefunds(resi) {
   '</div>';
 }
 
+// v5.56.1: numero ordine corto (es. #miinto-b2ae…) per tenere le righe allineate
+function loShortNum(n) { n = String(n || ''); return n.length > 14 ? n.slice(0, 13) + '…' : n; }
 // v5.56: bandierina paese di spedizione nella lista ordini
 function loFlag(cc) {
   cc = String(cc || '').toUpperCase();
@@ -2832,7 +2835,7 @@ function renderLastOrders(breakdown) {
     const testo = art.length ? art.map(function (a) { return (a.quantity > 1 ? a.quantity + '× ' : '') + a.title; }).join(' · ') : '—';
     const m = o.margine_netto || 0; const cls = m >= 0 ? 'pos' : 'neg';
     const reso = o.refund_status === 'partial' ? ' ↩️' : '';
-    return '<div class="lo-row" data-ord="' + esc(String(o.order_number || '')) + '"><div class="lo-top"><span class="lo-num">' + esc(o.name || ('#' + o.order_number)) + '</span>' + loFlag(o.country) + '<span class="lo-mp" style="background:' + (MP_COLORS[r.k] || '#8E8E8E') + ';color:' + mpTextColor(MP_COLORS[r.k]) + '">' + esc(r.nome) + '</span><span class="lo-time">' + quando + reso + '</span></div>' +
+    return '<div class="lo-row" data-ord="' + esc(String(o.order_number || '')) + '"><div class="lo-top"><span class="lo-num" title="' + esc(o.name || ('#' + o.order_number)) + '">' + esc(loShortNum(o.name || ('#' + o.order_number))) + '</span>' + loFlag(o.country) + '<span class="lo-mp" style="background:' + (MP_COLORS[r.k] || '#8E8E8E') + ';color:' + mpTextColor(MP_COLORS[r.k]) + '">' + esc(r.nome) + '</span><span class="lo-time">' + quando + reso + '</span></div>' +
       '<div class="lo-price">€' + Math.round(o.fatturato || 0).toLocaleString('it-IT') + '</div>' +
       '<div class="lo-items" title="' + esc(testo) + '">' + esc(testo) + '</div>' +
       '<div class="lo-marg ' + cls + '">' + (m >= 0 ? '+' : '−') + '€' + Math.abs(Math.round(m)).toLocaleString('it-IT') + ' · ' + (o.margine_percentuale || 0).toFixed(1) + '%</div></div>';
@@ -4887,7 +4890,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.56', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.56.1', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {
