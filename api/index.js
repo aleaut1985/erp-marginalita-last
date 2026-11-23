@@ -4777,7 +4777,9 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && path === GIGLIO_SYNC_PATH) {
       const bearer = String(req.headers['authorization'] || '');
       const autorizzato = (CRON_SECRET && bearer === 'Bearer ' + CRON_SECRET) || !!getAuthenticatedUser(req);
-      const dry = autorizzato && (req.query?.dry === '1' || /[?&]dry=1/.test(req.url || ''));
+      const dryRichiesto = req.query?.dry === '1' || /[?&]dry=1/.test(req.url || '');
+      if (dryRichiesto && !autorizzato) return res.status(401).json({ ok: false, error: 'Simulazione disponibile solo dopo il login ERP' });
+      const dry = autorizzato && dryRichiesto;
       if (!dry) {
         const libero = await kvGet(GIGLIO_KV_LOCK);
         if (libero) return res.status(200).json({ ok: true, saltato: 'eseguito da meno di 5 minuti', ultimo: autorizzato ? JSON.parse((await kvGet(GIGLIO_KV_ULTIMO)) || 'null') : undefined });
