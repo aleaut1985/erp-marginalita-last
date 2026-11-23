@@ -1887,7 +1887,7 @@ async function giglioImporta({ dry = false } = {}) {
       const nome = await giglioCreaOrdine(o, v);
       importati.add(id);
       esito.creati.push(`${nome} ← ${desc} → ${v.sku}`);
-    } catch (e) { esito.errori.push(desc + ' · ' + e.message); }
+    } catch (e) { console.log('[giglio] errore ordine', desc, '·', e.message); esito.errori.push(desc + ' · ' + e.message); }
   }
   if (!dry) {
     await kvSetBody(GIGLIO_KV_IMPORTATI, JSON.stringify([...importati].slice(-3000)));
