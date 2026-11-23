@@ -1793,6 +1793,117 @@ async function assicuraWebhookOrdini() {
   return { creato: c.ok, status: c.status, risposta: cj };
 }
 
+// ============ v5.57 GIGLIO → SHOPIFY: import automatico ordini (portale supplier.giglio.com) ============
+// Legge gli ordini "waiting" della boutique TLuxy su api.giglio.com e crea in Shopify un ordine per ogni ordine Giglio
+// (cliente Giglio.com S.p.a., tag = numero ordine Giglio come nell'inserimento manuale, nota GIGLIO / n° / data / DDT).
+// Doppioni bloccati dal tag (anche per gli ordini già inseriti a mano) e da una lista in KV.
+// Se l'articolo non ha giacenza in Shopify l'ordine NON viene creato e parte un avviso (possibile no-stock).
+const GIGLIO_API = 'https://api.giglio.com';
+const GIGLIO_USER = process.env.GIGLIO_USER || '';
+const GIGLIO_PASSWORD = process.env.GIGLIO_PASSWORD || '';
+const GIGLIO_BOUTIQUE = process.env.GIGLIO_BOUTIQUE || '524';
+const GIGLIO_CUSTOMER_GID = process.env.GIGLIO_CUSTOMER_GID || 'gid://shopify/Customer/7784800747732';
+const GIGLIO_SYNC_PATH = '/api/cron/giglio';
+const GIGLIO_KV_IMPORTATI = 'giglio_importati_v1';
+const GIGLIO_KV_AVVISATI = 'giglio_avvisati_v1';
+const GIGLIO_KV_LOCK = 'giglio_lock_v1';
+const GIGLIO_KV_ULTIMO = 'giglio_ultimo_run_v1';
+
+async function giglioLogin() {
+  if (!GIGLIO_USER || !GIGLIO_PASSWORD) throw new Error('Credenziali Giglio mancanti (GIGLIO_USER / GIGLIO_PASSWORD su Vercel)');
+  const r = await fetch(GIGLIO_API + '/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ name: GIGLIO_USER, password: GIGLIO_PASSWORD }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.auth_token) throw new Error('Login Giglio fallito (HTTP ' + r.status + ')');
+  return { 'giglio-auth-token': j.auth_token, 'giglio-refresh-token': j.refresh_token || '', 'Accept': 'application/json' };
+}
+async function giglioOrdini(headers, status, maxPagine = 10) {
+  const out = [];
+  for (let p = 1; p <= maxPagine; p++) {
+    const r = await fetch(`${GIGLIO_API}/orders?status=${status}&page=${p}&boutique=${GIGLIO_BOUTIQUE}`, { headers });
+    if (!r.ok) throw new Error('Giglio /orders ' + status + ' HTTP ' + r.status);
+    const j = await r.json();
+    out.push(...(j.data || []));
+    if (!j.last_page || p >= j.last_page) break;
+  }
+  return out;
+}
+async function giglioTagGiaInShopify(ids) {
+  const trovati = new Set();
+  for (let i = 0; i < ids.length; i += 20) {
+    const blocco = ids.slice(i, i + 20);
+    const q = blocco.map(id => 'tag:' + id).join(' OR ');
+    const d = await shopifyGraphQL(`query($q: String!) { orders(first: 100, query: $q) { edges { node { tags } } } }`, { q });
+    (d.orders?.edges || []).forEach(e => (e.node.tags || []).forEach(t => { if (blocco.includes(String(t).trim())) trovati.add(String(t).trim()); }));
+  }
+  return trovati;
+}
+async function giglioVariante(barcode) {
+  const d = await shopifyGraphQL(`query($q: String!) { productVariants(first: 2, query: $q) { edges { node { id sku title price inventoryQuantity product { title status } } } } }`, { q: 'barcode:' + barcode });
+  return (d.productVariants?.edges || []).map(e => e.node);
+}
+function giglioDataIt(iso) { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric' }); }
+function giglioSkuCorto(sku) { const m = String(sku || '').match(/(\d{4,5})\s+T_/); return m ? m[1] : String(sku || ''); }
+
+async function giglioCreaOrdine(o, v) {
+  const note = `GIGLIO\n${o.c_order_id} - ${giglioSkuCorto(v.sku)}\n${giglioDataIt(o.data)}\nDDT\n(import automatico ERP · ordine Giglio ${o.ordine})`;
+  const c = await shopifyGraphQL(`mutation($input: DraftOrderInput!) { draftOrderCreate(input: $input) { draftOrder { id } userErrors { field message } } }`, {
+    input: { customerId: GIGLIO_CUSTOMER_GID, lineItems: [{ variantId: v.id, quantity: Math.max(1, parseInt(o.quantita) || 1) }], tags: [String(o.c_order_id), 'GIGLIO', 'GIGLIO_AUTO'], note }
+  });
+  const ue = c.draftOrderCreate?.userErrors || [];
+  if (ue.length || !c.draftOrderCreate?.draftOrder?.id) throw new Error('draftOrderCreate: ' + JSON.stringify(ue).slice(0, 200));
+  const k = await shopifyGraphQL(`mutation($id: ID!) { draftOrderComplete(id: $id, paymentPending: false) { draftOrder { order { id name } } userErrors { field message } } }`, { id: c.draftOrderCreate.draftOrder.id });
+  const ue2 = k.draftOrderComplete?.userErrors || [];
+  if (ue2.length) throw new Error('draftOrderComplete: ' + JSON.stringify(ue2).slice(0, 200));
+  return k.draftOrderComplete?.draftOrder?.order?.name || '(creato)';
+}
+async function giglioNotifica(titolo, testo, urgente) {
+  if (!NTFY_TOPIC) return;
+  try { await fetch('https://ntfy.sh/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: NTFY_TOPIC, title: titolo, message: testo.slice(0, 3800), tags: [urgente ? 'warning' : 'package'], priority: urgente ? 4 : 3, click: ERP_PUBLIC_URL + '/#ordini' }) }); } catch (_) {}
+}
+
+async function giglioImporta({ dry = false } = {}) {
+  const t0 = Date.now();
+  const headers = await giglioLogin();
+  const attesa = await giglioOrdini(headers, 'waiting');
+  const importati = new Set(JSON.parse((await kvGet(GIGLIO_KV_IMPORTATI)) || '[]').map(String));
+  const avvisati = new Set(JSON.parse((await kvGet(GIGLIO_KV_AVVISATI)) || '[]').map(String));
+  const ids = [...new Set(attesa.map(o => String(o.c_order_id)))];
+  const candidati = ids.filter(id => !importati.has(id));
+  const inShopify = candidati.length ? await giglioTagGiaInShopify(candidati) : new Set();
+  inShopify.forEach(id => importati.add(id));
+  const esito = { in_attesa: attesa.length, gia_in_shopify: ids.length - candidati.length + inShopify.size, creati: [], no_stock: [], barcode_sconosciuti: [], errori: [], dry };
+  for (const o of attesa) {
+    const id = String(o.c_order_id);
+    if (importati.has(id)) continue;
+    if (Date.now() - t0 > 45000) { esito.rimandati = (esito.rimandati || 0) + 1; continue; }
+    const desc = `${id} · ${o.linea} ${o.categoria || ''} ${o.colore || ''} tg.${o.taglia} · barcode ${o.barcode}`;
+    try {
+      const varianti = await giglioVariante(o.barcode);
+      if (varianti.length !== 1) { esito.barcode_sconosciuti.push(desc + (varianti.length > 1 ? ' (barcode su più varianti)' : '')); continue; }
+      const v = varianti[0];
+      const qta = Math.max(1, parseInt(o.quantita) || 1);
+      if ((v.inventoryQuantity || 0) < qta) { esito.no_stock.push(desc + ` · ${v.sku} (giacenza ${v.inventoryQuantity})`); continue; }
+      if (dry) { esito.creati.push(`${desc} → ${v.sku} (simulato)`); continue; }
+      const nome = await giglioCreaOrdine(o, v);
+      importati.add(id);
+      esito.creati.push(`${nome} ← ${desc} → ${v.sku}`);
+    } catch (e) { esito.errori.push(desc + ' · ' + e.message); }
+  }
+  if (!dry) {
+    await kvSetBody(GIGLIO_KV_IMPORTATI, JSON.stringify([...importati].slice(-3000)));
+    const nuoviAvvisi = [...esito.no_stock, ...esito.barcode_sconosciuti, ...esito.errori].filter(x => !avvisati.has(x.split(' · ')[0]));
+    if (esito.creati.length) await giglioNotifica(`Giglio: ${esito.creati.length} ordini importati in Shopify`, esito.creati.join('\n'), false);
+    if (nuoviAvvisi.length) {
+      await giglioNotifica(`Giglio: ${nuoviAvvisi.length} ordini da controllare`, nuoviAvvisi.map(x => '• ' + x).join('\n'), true);
+      nuoviAvvisi.forEach(x => avvisati.add(x.split(' · ')[0]));
+      await kvSetBody(GIGLIO_KV_AVVISATI, JSON.stringify([...avvisati].slice(-3000)));
+    }
+    await kvSetBody(GIGLIO_KV_ULTIMO, JSON.stringify({ quando: new Date().toISOString(), creati: esito.creati.length, no_stock: esito.no_stock.length, barcode_sconosciuti: esito.barcode_sconosciuti.length, errori: esito.errori.length }));
+  }
+  esito.durata_ms = Date.now() - t0;
+  return esito;
+}
+
 // ============ v5.48 LORD & TAYLOR: tag LORDANDTAYLOR + metafield custom.lord_taylor_cost ============
 // Regola: prodotti ATTIVI, esclusi DUOMO (tag TLX_PRODUCT:DUO) e DIFETTO (tag o titolo).
 // lord_taylor_cost = prezzo scontato (variant price) × 0,76 arrotondato per eccesso all'euro (.00).
@@ -2449,7 +2560,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.56.1</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.57</p>
       </div>
     </div>
     <div class="header-right">
@@ -4660,6 +4771,29 @@ export default async function handler(req, res) {
       }
     }
 
+    // ============ GIGLIO → SHOPIFY (v5.57) ============
+    // Pubblico ma innocuo: importa solo ordini Giglio non ancora presenti; senza autenticazione risponde con i soli conteggi
+    // e al massimo una volta ogni 5 minuti. ?dry=1 (solo utente loggato / CRON_SECRET) simula senza creare nulla.
+    if (req.method === 'GET' && path === GIGLIO_SYNC_PATH) {
+      const bearer = String(req.headers['authorization'] || '');
+      const autorizzato = (CRON_SECRET && bearer === 'Bearer ' + CRON_SECRET) || !!getAuthenticatedUser(req);
+      const dry = autorizzato && (req.query?.dry === '1' || /[?&]dry=1/.test(req.url || ''));
+      if (!dry) {
+        const libero = await kvGet(GIGLIO_KV_LOCK);
+        if (libero) return res.status(200).json({ ok: true, saltato: 'eseguito da meno di 5 minuti', ultimo: autorizzato ? JSON.parse((await kvGet(GIGLIO_KV_ULTIMO)) || 'null') : undefined });
+        await kvSetEx(GIGLIO_KV_LOCK, 290, '1');
+      }
+      try {
+        const esito = await giglioImporta({ dry });
+        if (autorizzato) return res.json({ ok: true, ...esito });
+        return res.json({ ok: true, creati: esito.creati.length, da_controllare: esito.no_stock.length + esito.barcode_sconosciuti.length + esito.errori.length });
+      } catch (e) {
+        console.log('[giglio] errore', e.message);
+        if (!dry && !/Credenziali/.test(e.message)) await giglioNotifica('Giglio: import ordini non riuscito', e.message, true);
+        return res.status(500).json({ ok: false, error: autorizzato ? e.message : 'errore' });
+      }
+    }
+
     // ============ LOGIN UTENTE + PASSWORD (v5.22) ============
     if (PASSWORD_AUTH && path === '/login') {
       res.setHeader('Cache-Control', 'no-store');
@@ -4890,7 +5024,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.56.1', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.57', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/analytics') {

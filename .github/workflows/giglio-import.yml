@@ -1,0 +1,13 @@
+name: Import ordini Giglio
+# Ogni 15 minuti chiama l'ERP, che importa in Shopify gli ordini Giglio nuovi (idempotente, max 1 run ogni 5 min lato ERP).
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Chiama ERP
+        run: curl -fsS --max-time 90 https://erp-marginalita-last.vercel.app/api/cron/giglio || true
