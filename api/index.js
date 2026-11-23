@@ -691,8 +691,8 @@ const MARKETPLACE_CONFIGS = {
   'REFLAUNT': { nome: 'Reflaunt', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: '14gg reso + report + fattura (~30gg)', payment_policy: { type: 'fixed_days', days_offset: 30 },
     nota_regole: 'Dropship: l\'ordine arriva su Shopify al payout (metafield custom.reflaunt_payout) = incasso, senza IVA né commissioni; etichetta di spedizione fornita da Reflaunt' },
   // v5.47: contratto Giglio 29/10/2024 — sconto base 31% sul prezzo finale senza IVA + 2,5% per pagamento 30DFFM = 33,5%;
-  // contributo spedizione €3,60 (applicato per ordine); penali KPI mensili NON incluse (arrivano dal rendiconto Giglio)
-  'GIGLIO': { nome: 'GIGLIO.COM', sconto_percentuale: 0, fee_principale: 33.5, fee_secondaria: 0, fee_fissa_trasporto: 3.6, fee_fissa_packaging: 0, pagamento: '30gg data fattura fine mese (fine mese+1)', payment_policy: { type: 'monthly_end', month_offset: 1 }, nota_regole: 'Commissione 31% + 2,5% (pagamento 30DFFM) = 33,5% sul prezzo pagato dal cliente senza IVA. Contributo spedizione €3,60 a pezzo. Penali KPI (no-stock/ritardi) a parte, dal rendiconto mensile.' }
+  // commissione attuale 34,5% (confermata nov 2026, fatture Giglio); contributo spedizione €3,60 (applicato per ordine); penali KPI mensili NON incluse (arrivano dal rendiconto Giglio)
+  'GIGLIO': { nome: 'GIGLIO.COM', sconto_percentuale: 0, fee_principale: 34.5, fee_secondaria: 0, fee_fissa_trasporto: 3.6, fee_fissa_packaging: 0, pagamento: '30gg data fattura fine mese (fine mese+1)', payment_policy: { type: 'monthly_end', month_offset: 1 }, nota_regole: 'Commissione 34,5% (confermata da Alessio nov 2026) sul prezzo pagato dal cliente senza IVA. Contributo spedizione €3,60 a pezzo. Penali KPI (no-stock/ritardi) a parte, dal rendiconto mensile.' }
 };
 
 // Normalizza source_name per matching più robusto: lowercase + spazi→trattini
