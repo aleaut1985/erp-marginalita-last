@@ -1804,6 +1804,7 @@ const GIGLIO_PASSWORD = process.env.GIGLIO_PASSWORD || '';
 const GIGLIO_BOUTIQUE = process.env.GIGLIO_BOUTIQUE || '524';
 const GIGLIO_CUSTOMER_GID = process.env.GIGLIO_CUSTOMER_GID || 'gid://shopify/Customer/7784800747732';
 const GIGLIO_SYNC_PATH = '/api/cron/giglio';
+const GIGLIO_ESCLUSI = ['4518633', '4518634', '4522917', '4527782'];
 const GIGLIO_KV_IMPORTATI = 'giglio_importati_v1';
 const GIGLIO_KV_AVVISATI = 'giglio_avvisati_v1';
 const GIGLIO_KV_LOCK = 'giglio_lock_v1';
@@ -1868,6 +1869,8 @@ async function giglioImporta({ dry = false } = {}) {
   const importati = new Set(JSON.parse((await kvGet(GIGLIO_KV_IMPORTATI)) || '[]').map(String));
   const avvisati = new Set(JSON.parse((await kvGet(GIGLIO_KV_AVVISATI)) || '[]').map(String));
   const ids = [...new Set(attesa.map(o => String(o.c_order_id)))];
+  // Ordini da NON importare (out of stock / basso margine, decisi da Alessio 23/11/2026)
+  GIGLIO_ESCLUSI.forEach(id => importati.add(id));
   const candidati = ids.filter(id => !importati.has(id));
   const inShopify = candidati.length ? await giglioTagGiaInShopify(candidati) : new Set();
   inShopify.forEach(id => importati.add(id));
