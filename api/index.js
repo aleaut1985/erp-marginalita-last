@@ -3115,7 +3115,7 @@ function caricaTraffico(qs) {
   box.hidden = false; box.innerHTML = '<div class="t-err">Carico visite e conversione…</div>';
   fetch('/api/traffico?' + qs).then(function (r) { return r.json(); }).then(function (t) {
     if (!t || !t.success) {
-      box.innerHTML = '<div class="t-err">Visite non disponibili' + (t && t.read_reports === false ? ': l\'app Shopify dell\'ERP non ha il permesso "Analytics" (read_reports).' : '.') + '</div>';
+      box.innerHTML = '<div class="t-err">Visite non disponibili' + (t && t.read_reports === false ? ': l’app Shopify dell’ERP non ha il permesso "Analytics" (read_reports).' : '.') + '</div>';
       return;
     }
     var gg = t.giorni || [], n = gg.length || 1, media = Math.round(t.sessioni / n);
