@@ -924,6 +924,26 @@ async function shopifyGraphQL(query, variables = {}) {
   return j.data;
 }
 
+// v5.59: visite e conversione del sito (ShopifyQL, serve lo scope read_reports sull'app Shopify)
+const trafficoCache = new Map();
+async function trafficoSito(da, a) {
+  const key = da + '|' + a; const c = trafficoCache.get(key);
+  if (c && Date.now() - c.t < 10 * 60 * 1000) return c.v;
+  const token = await getShopifyAccessToken();
+  const q = `FROM sessions SHOW sessions, sessions_that_completed_checkout TIMESERIES day SINCE ${da} UNTIL ${a}`;
+  const r = await fetch(`https://${SHOPIFY_STORE}/admin/api/2025-10/graphql.json`, { method: 'POST', headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' }, body: JSON.stringify({ query: 'query($q:String!){ shopifyqlQuery(query:$q){ tableData { columns { name } rows } parseErrors } }', variables: { q } }) });
+  const j = await r.json();
+  if (j.errors) throw new Error(JSON.stringify(j.errors).slice(0, 300));
+  const res = j.data && j.data.shopifyqlQuery;
+  if (!res || !res.tableData) throw new Error('ShopifyQL: ' + ((res && res.parseErrors || []).join('; ') || 'nessun dato'));
+  const rows = (res.tableData.rows || []).map(x => Array.isArray(x) ? { day: x[0], sessions: x[1], sessions_that_completed_checkout: x[2] } : x);
+  const giorni = rows.map(x => ({ d: String(x.day || '').slice(0, 10), s: parseInt(x.sessions) || 0, o: parseInt(x.sessions_that_completed_checkout) || 0 })).filter(x => x.d).sort((x, y) => x.d < y.d ? -1 : 1);
+  const sess = giorni.reduce((t, x) => t + x.s, 0), ok = giorni.reduce((t, x) => t + x.o, 0);
+  const v = { sessioni: sess, checkout: ok, conversione: sess ? ok / sess * 100 : 0, giorni };
+  trafficoCache.set(key, { t: Date.now(), v });
+  return v;
+}
+
 const DUO_BULK_QUERY = `{ products(query: "tag:'TLX_PRODUCT:DUO' AND status:active") { edges { node { id handle title vendor productType tags metafield(namespace: "custom", key: "prezzo_miinto") { value } variants { edges { node { id sku price compareAtPrice inventoryQuantity inventoryItem { unitCost { amount } } } } } } } } }`;
 
 function analizzaCatalogoDuo(jsonl, giornoISO) {
@@ -2378,6 +2398,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .kpi-more-val { font-weight: 600; color: #00704a; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .kpi-more[open] > summary { border-bottom: 1px solid var(--gray-200, #e8e2d6); }
   .kpi-more .kpi-grid { padding: 12px; margin-bottom: 0; }
+  .traffic { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 10px 0 4px; }
+  .traffic .t-kpi { background: var(--white); border: 1px solid #ECE8DF; border-radius: 14px; padding: 12px 14px; }
+  .traffic .t-val { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .traffic .t-sub { font-size: 0.72rem; color: var(--gray-500); margin-top: 2px; }
+  .traffic .t-bars { grid-column: 1 / -1; display: flex; align-items: flex-end; gap: 3px; height: 54px; padding: 4px 2px 0; }
+  .traffic .t-bar { flex: 1 1 0; min-width: 2px; background: #D9D3C7; border-radius: 3px 3px 0 0; position: relative; }
+  .traffic .t-bar.last { background: var(--black); }
+  .traffic .t-axis { grid-column: 1 / -1; display: flex; justify-content: space-between; font-size: 0.66rem; color: var(--gray-500); margin-top: -4px; }
+  .traffic .t-err { grid-column: 1 / -1; font-size: 0.75rem; color: var(--gray-500); }
   .perf-grid { margin: 0 0 4px; } #perf-ieri { margin: 8px 0 12px; } #perf-ieri:empty { display: none; } .perf-range { margin-bottom: 14px; }
   .last-orders { margin: -12px 0 24px; border: 1px solid var(--gray-200, #e8e2d6); border-radius: 14px; background: #fff; overflow: hidden; }
   .lo-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; font-size: 0.8rem; color: var(--gray-700); letter-spacing: 0.02em; border-bottom: 1px solid var(--gray-200, #e8e2d6); }
@@ -2572,7 +2601,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.58</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.59</p>
       </div>
     </div>
     <div class="header-right">
@@ -2611,6 +2640,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="oggi-kpi dark"><div class="ch-lab">Incassato</div><div class="oggi-val" id="lordo">—</div><div class="oggi-sub" id="ordini-count">— ordini</div></div>
         <div class="oggi-kpi pos" id="kpi-netto-box"><div class="ch-lab">Margine netto</div><div class="oggi-val" id="netto">—</div><div class="oggi-sub" id="margine-sub">—</div></div>
       </div>
+      <div class="traffic" id="traffic-box" hidden></div>
       <div class="oggi-ieri" id="perf-ieri"></div>
       <details class="kpi-more"><summary><span>IVA e costi</span><span class="kpi-more-val" id="kpi-more-val" style="color:var(--gray-700)"></span></summary>
       <div class="kpi-grid">
@@ -3069,6 +3099,7 @@ async function fetchAnalytics(url) {
       renderErrors(data.ordini_con_errori || []);
       renderForeignCurrency(data.ordini_valuta_estera || []);
       renderRefunds(data.resi || null);
+      caricaTraffico(url.split('?')[1] || '');
       return true;
     }
   } catch(e) { console.error(e); }
@@ -3078,6 +3109,28 @@ async function fetchAnalytics(url) {
   return false;
 }
 
+// v5.59: visite giornaliere e tasso di conversione del sito per il periodo scelto
+function caricaTraffico(qs) {
+  var box = document.getElementById('traffic-box'); if (!box) return;
+  box.hidden = false; box.innerHTML = '<div class="t-err">Carico visite e conversione…</div>';
+  fetch('/api/traffico?' + qs).then(function (r) { return r.json(); }).then(function (t) {
+    if (!t || !t.success) {
+      box.innerHTML = '<div class="t-err">Visite non disponibili' + (t && t.read_reports === false ? ': l\'app Shopify dell\'ERP non ha il permesso "Analytics" (read_reports).' : '.') + '</div>';
+      return;
+    }
+    var gg = t.giorni || [], n = gg.length || 1, media = Math.round(t.sessioni / n);
+    var it = function (v) { return Math.round(v).toLocaleString('it-IT'); };
+    var html = '<div class="t-kpi"><div class="ch-lab">Visite sito</div><div class="t-val">' + it(t.sessioni) + '</div><div class="t-sub">' + (n > 1 ? 'media ' + it(media) + ' al giorno' : 'sessioni tluxy.com') + '</div></div>'
+      + '<div class="t-kpi"><div class="ch-lab">Conversione</div><div class="t-val">' + t.conversione.toFixed(2).replace('.', ',') + '%</div><div class="t-sub">' + it(t.checkout) + ' acquisti sul sito</div></div>';
+    if (gg.length > 1) {
+      var max = Math.max.apply(null, gg.map(function (x) { return x.s; }).concat([1]));
+      var fmt = function (d) { return d.slice(8, 10) + '/' + d.slice(5, 7); };
+      html += '<div class="t-bars" aria-label="Visite giornaliere">' + gg.map(function (x, i) { return '<span class="t-bar' + (i === gg.length - 1 ? ' last' : '') + '" style="height:' + Math.max(4, Math.round(x.s / max * 100)) + '%" title="' + fmt(x.d) + ': ' + it(x.s) + ' visite · conv. ' + (x.s ? (x.o / x.s * 100).toFixed(2).replace('.', ',') : '0') + '%"></span>'; }).join('') + '</div>'
+        + '<div class="t-axis"><span>' + fmt(gg[0].d) + '</span><span>' + fmt(gg[gg.length - 1].d) + '</span></div>';
+    }
+    box.innerHTML = html;
+  }).catch(function () { box.innerHTML = '<div class="t-err">Visite non disponibili.</div>'; });
+}
 async function setPeriod(p, btn) { setActiveButton('[data-analytics-periods] .period-btn', btn); var pi = document.getElementById('perf-ieri'); if (pi) pi.innerHTML = ''; var ok = await fetchAnalytics('/api/analytics?periodo=' + p); if (p === 'today') caricaIeriRiga(); return ok; }
 // v5.52: riga "Ieri" sotto i KPI quando il periodo è Oggi (prima stava in un box separato duplicato)
 function caricaIeriRiga() {
@@ -5039,9 +5092,20 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.58', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.59', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
+    if (req.method === 'GET' && path === '/api/traffico') {
+      try {
+        const rg = getDateRange(query.get('periodo') || 'today', query.get('from'), query.get('to'));
+        const da = getRomeDateString(new Date(rg.dateFrom)), a = getRomeDateString(new Date(rg.dateTo));
+        return res.json({ success: true, da, a, ...(await trafficoSito(da, a)) });
+      } catch (e) {
+        let scopes = null;
+        try { const t = await getShopifyAccessToken(); const r = await fetch(`https://${SHOPIFY_STORE}/admin/oauth/access_scopes.json`, { headers: { 'X-Shopify-Access-Token': t } }); scopes = (await r.json()).access_scopes?.map(x => x.handle); } catch (_) {}
+        return res.json({ success: false, error: e.message, read_reports: scopes ? scopes.includes('read_reports') : null });
+      }
+    }
     if (req.method === 'GET' && path === '/api/analytics') {
       const periodo = query.get('periodo') || 'today';
       const from = query.get('from'); const to = query.get('to');
