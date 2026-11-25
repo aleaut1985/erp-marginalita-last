@@ -966,12 +966,12 @@ async function trafficoFonti(da, a) {
 async function omnisendIscritti() {
   const KEY = (process.env.OMNISEND_API_KEY || '').trim().replace(/^["']|["']$/g, '');
   if (!KEY) throw new Error('NO_KEY');
-  const ck = 'omni_iscritti_v1';
+  const ck = 'omni_iscritti_v2';
   const cached = await kvGet(ck);
   if (cached) { try { return JSON.parse(cached); } catch (_) {} }
   const oggi = getRomeDateString();
   const piu1 = getRomeDateString(new Date(Date.now() + 86400000));
-  const d59 = getRomeDateString(new Date(Date.now() - 57 * 86400000)); // max 60 giorni con granularità day
+  const d59 = getRomeDateString(new Date(Date.now() - 58 * 86400000)); // max 60 giorni con granularità day
   const m = new Date(); const da12 = `${m.getFullYear() - 1}-${String(m.getMonth() + 2 > 12 ? 1 : m.getMonth() + 2).padStart(2, '0')}-01`;
   const off = getRomeOffset(new Date()) === 120 ? '+02:00' : '+01:00';
   const body = { queries: [
@@ -986,6 +986,31 @@ async function omnisendIscritti() {
   const pick = a => ((j.statistics || []).find(x => x.alias === a) || { rows: [] }).rows.map(x => ({ d: String(x.timestamp).slice(0, 10), i: x.subscribedEmail || 0, u: x.unsubscribedEmail || 0 }));
   const v = { giorni: pick('giorni'), mesi: pick('mesi'), oggi, agg: new Date().toISOString() };
   await kvSetEx(ck, 3600, JSON.stringify(v));
+  return v;
+}
+
+// v5.62: totale iscritti email (conteggio contatti "subscribed", cache 6h)
+async function omnisendTotale() {
+  const KEY = (process.env.OMNISEND_API_KEY || '').trim().replace(/^["']|["']$/g, '');
+  if (!KEY) throw new Error('NO_KEY');
+  const ck = 'omni_totale_v1';
+  const cached = await kvGet(ck);
+  if (cached) { try { return JSON.parse(cached); } catch (_) {} }
+  const h = { 'Authorization': 'Omnisend-API-Key ' + KEY, 'Omnisend-Version': '2026-03-15', 'Accept': 'application/json' };
+  let tot = 0, after = '', pagine = 0, completo = false;
+  const t0 = Date.now();
+  while (pagine < 400 && Date.now() - t0 < 45000) {
+    const u = 'https://api.omnisend.com/api/contacts?status=subscribed&limit=250' + (after ? '&after=' + encodeURIComponent(after) : '');
+    const r = await fetch(u, { headers: h });
+    if (!r.ok) throw new Error('Omnisend contacts HTTP ' + r.status);
+    const j = await r.json();
+    tot += (j.contacts || []).length; pagine++;
+    const nx = j.paging && j.paging.cursors && j.paging.cursors.after;
+    if (!(j.paging && j.paging.hasMore) || !nx) { completo = true; break; }
+    after = nx;
+  }
+  const v = { totale: tot, completo, agg: new Date().toISOString() };
+  if (completo) await kvSetEx(ck, 6 * 3600, JSON.stringify(v));
   return v;
 }
 
@@ -2465,6 +2490,18 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .traffic .t-nl { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .traffic .t-nl .t-val { font-size: 1.15rem; }
   .traffic .t-nl .t-neg { font-size: 0.8rem; color: var(--gray-500); }
+  .traffic .t-nl { flex-direction: column; align-items: stretch; gap: 6px; }
+  .traffic .nl-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .traffic .nl-tot { font-size: 0.78rem; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: #EEF4EF; color: #2F5A3A; white-space: nowrap; }
+  .traffic .nl-main { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .traffic .nl-d { font-size: 0.78rem; font-weight: 600; color: var(--gray-500); }
+  .traffic .nl-d.up { color: #1F7A3E; } .traffic .nl-d.down { color: #B3261E; }
+  .traffic .nl-cmp { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
+  .traffic .nl-c { border: 1px solid var(--gray-200, #e5e5e5); border-radius: 8px; padding: 6px 8px; min-width: 0; }
+  .traffic .nl-ck { font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: .04em; }
+  .traffic .nl-cv { font-weight: 600; font-size: 0.95rem; }
+  .traffic .nl-cs { font-size: 0.7rem; color: var(--gray-500); }
+  @media (max-width: 520px) { .traffic .nl-cmp { grid-template-columns: 1fr; } }
   .traffic .t-err { grid-column: 1 / -1; font-size: 0.75rem; color: var(--gray-500); }
   .perf-grid { margin: 0 0 4px; } #perf-ieri { margin: 8px 0 12px; } #perf-ieri:empty { display: none; } .perf-range { margin-bottom: 14px; }
   .last-orders { margin: -12px 0 24px; border: 1px solid var(--gray-200, #e8e2d6); border-radius: 14px; background: #fff; overflow: hidden; }
@@ -3200,9 +3237,20 @@ function caricaIscritti(qs) {
       el.innerHTML = '<span class="ch-lab">Iscritti newsletter</span><span class="t-sub">' + (d && d.error === 'NO_KEY' ? 'da collegare: manca la chiave API di Omnisend' : 'non disponibili') + '</span>';
       return;
     }
-    var gg = d.giorni || [], n = gg.length;
-    el.innerHTML = '<span class="ch-lab">Iscritti newsletter</span><span class="t-val">+' + d.iscritti.toLocaleString('it-IT') + '</span>'
-      + '<span class="t-neg">' + d.disiscritti.toLocaleString('it-IT') + ' disiscritti' + (n > 1 ? ' · media +' + Math.round(d.iscritti / n) + ' al giorno' : '') + (d.approx ? ' · dato mensile' : '') + '</span>';
+    var gg = d.giorni || [], n = gg.length, it = function (v) { return Math.round(v).toLocaleString('it-IT'); };
+    var delta = function (a, b) {
+      if (!b) return a ? '<span class="nl-d up">▲ nuovo</span>' : '<span class="nl-d">=</span>';
+      var p = Math.round((a - b) / b * 100);
+      return '<span class="nl-d ' + (p > 0 ? 'up' : p < 0 ? 'down' : '') + '">' + (p > 0 ? '▲ +' : p < 0 ? '▼ ' : '= ') + p + '%</span>';
+    };
+    var lbl = n === 1 ? 'giorno prima' : 'periodo prima';
+    var tot = d.totale && d.totale.totale ? '<span class="nl-tot" title="Contatti iscritti alla newsletter oggi">● ' + it(d.totale.totale) + ' iscritti totali</span>' : '';
+    var h = '<div class="nl-head"><span class="ch-lab">Iscritti newsletter</span>' + tot + '</div>'
+      + '<div class="nl-main"><span class="t-val">+' + it(d.iscritti) + '</span>'
+      + (d.prec ? delta(d.iscritti, d.prec.iscritti) + '<span class="t-neg">vs +' + it(d.prec.iscritti) + ' ' + lbl + '</span>' : '') + '</div>'
+      + '<div class="t-neg">' + it(d.disiscritti) + ' disiscritti · netto ' + (d.iscritti - d.disiscritti >= 0 ? '+' : '') + it(d.iscritti - d.disiscritti) + (n > 1 ? ' · media +' + Math.round(d.iscritti / n) + ' al giorno' : '') + (d.approx ? ' · dato mensile' : '') + '</div>';
+    if (d.confronti && d.confronti.length) h += '<div class="nl-cmp">' + d.confronti.map(function (c) { return '<div class="nl-c"><div class="nl-ck">' + c.k + '</div><div class="nl-cv">+' + it(c.a) + ' ' + delta(c.a, c.b) + '</div><div class="nl-cs">vs +' + it(c.b) + ' ' + c.vs + '</div></div>'; }).join('') + '</div>';
+    el.innerHTML = h;
   }).catch(function () { el.innerHTML = '<span class="ch-lab">Iscritti newsletter</span><span class="t-sub">non disponibili</span>'; });
 }
 var FONTI_NOMI = { direct: 'Diretto', search: 'Ricerca', social: 'Social', email: 'Email / newsletter', unknown: 'Altri siti', paid: 'A pagamento', referral: 'Altri siti' };
@@ -5195,7 +5243,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.61', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.62', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/newsletter-iscritti') {
@@ -5204,11 +5252,30 @@ export default async function handler(req, res) {
         const da = getRomeDateString(new Date(rg.dateFrom)), a = getRomeDateString(new Date(rg.dateTo));
         const v = await omnisendIscritti();
         const minG = v.giorni.length ? v.giorni[0].d : a;
-        let righe, approx = false;
-        if (da >= minG) righe = v.giorni.filter(x => x.d >= da && x.d <= a);
-        else { righe = v.mesi.filter(x => x.d.slice(0, 7) >= da.slice(0, 7) && x.d.slice(0, 7) <= a.slice(0, 7)); approx = true; }
-        const iscritti = righe.reduce((t, x) => t + x.i, 0), disiscritti = righe.reduce((t, x) => t + x.u, 0);
-        return res.json({ success: true, da, a, iscritti, disiscritti, giorni: approx ? [] : righe, approx, aggiornato: v.agg });
+        const DAY = 86400000, dPiu = (d, n) => new Date(new Date(d + 'T12:00:00Z').getTime() + n * DAY).toISOString().slice(0, 10);
+        const somma = (x, y) => {
+          if (x >= minG) { const r = v.giorni.filter(g => g.d >= x && g.d <= y); return { i: r.reduce((t, g) => t + g.i, 0), u: r.reduce((t, g) => t + g.u, 0), righe: r, approx: false }; }
+          const r = v.mesi.filter(g => g.d.slice(0, 7) >= x.slice(0, 7) && g.d.slice(0, 7) <= y.slice(0, 7));
+          return { i: r.reduce((t, g) => t + g.i, 0), u: r.reduce((t, g) => t + g.u, 0), righe: [], approx: true };
+        };
+        const cur = somma(da, a);
+        const lung = Math.round((new Date(a + 'T12:00:00Z') - new Date(da + 'T12:00:00Z')) / DAY) + 1;
+        const pa = dPiu(da, -1), pda = dPiu(da, -lung);
+        const prec = somma(pda, pa);
+        const oggi = getRomeDateString(), ieri = dPiu(oggi, -1);
+        const meseDa = oggi.slice(0, 8) + '01';
+        const pm = new Date(oggi.slice(0, 7) + '-01T12:00:00Z'); pm.setUTCMonth(pm.getUTCMonth() - 1);
+        const pmDa = pm.toISOString().slice(0, 10);
+        const ggPm = new Date(Date.UTC(pm.getUTCFullYear(), pm.getUTCMonth() + 1, 0)).getUTCDate();
+        const pmA = pmDa.slice(0, 8) + String(Math.min(+oggi.slice(8, 10), ggPm)).padStart(2, '0');
+        const confronti = [
+          { k: 'Oggi', vs: 'ieri', a: somma(oggi, oggi).i, b: somma(ieri, ieri).i },
+          { k: 'Ultimi 7 giorni', vs: '7 giorni prima', a: somma(dPiu(oggi, -6), oggi).i, b: somma(dPiu(oggi, -13), dPiu(oggi, -7)).i },
+          { k: 'Questo mese', vs: 'stesso periodo mese scorso', a: somma(meseDa, oggi).i, b: somma(pmDa, pmA).i }
+        ];
+        let totale = null;
+        try { totale = await omnisendTotale(); } catch (e2) { console.log('[newsletter-totale]', e2.message); }
+        return res.json({ success: true, da, a, iscritti: cur.i, disiscritti: cur.u, giorni: cur.approx ? [] : cur.righe, approx: cur.approx, prec: { da: pda, a: pa, iscritti: prec.i, disiscritti: prec.u, approx: prec.approx }, confronti, totale, aggiornato: v.agg });
       } catch (e) { console.log('[newsletter-iscritti]', e.message); return res.json({ success: false, error: e.message === 'NO_KEY' ? 'NO_KEY' : e.message }); }
     }
     if (req.method === 'GET' && path === '/api/traffico-fonti') {
