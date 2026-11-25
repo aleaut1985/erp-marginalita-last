@@ -978,7 +978,7 @@ async function omnisendIscritti() {
     { alias: 'giorni', metrics: [{ name: 'subscribedEmail' }, { name: 'unsubscribedEmail' }], dimensions: [{ name: 'timestamp', granularity: 'day' }], dateRange: { from: d59 + 'T00:00:00' + off, to: piu1 + 'T00:00:00' + off } },
     { alias: 'mesi', metrics: [{ name: 'subscribedEmail' }, { name: 'unsubscribedEmail' }], dimensions: [{ name: 'timestamp', granularity: 'month' }], dateRange: { from: (m.getMonth() === 11 ? `${m.getFullYear()}-01-01` : da12) + 'T00:00:00' + off, to: piu1 + 'T00:00:00' + off } }
   ] };
-  const r = await fetch('https://api.omnisend.com/api/analytics/statistics', { method: 'POST', headers: { 'X-API-KEY': KEY, 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(body) });
+  const r = await fetch('https://api.omnisend.com/api/analytics/statistics', { method: 'POST', headers: { 'Authorization': 'Omnisend-API-Key ' + KEY, 'Omnisend-Version': '2026-03-15', 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error('Omnisend HTTP ' + r.status + ' ' + (await r.text()).slice(0, 200));
   const j = await r.json();
   const pick = a => ((j.statistics || []).find(x => x.alias === a) || { rows: [] }).rows.map(x => ({ d: String(x.timestamp).slice(0, 10), i: x.subscribedEmail || 0, u: x.unsubscribedEmail || 0 }));
