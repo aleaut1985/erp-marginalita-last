@@ -964,7 +964,7 @@ async function trafficoFonti(da, a) {
 
 // v5.61: iscritti newsletter da Omnisend (API statistics: max 55 chiamate/giorno → cache 1h in KV)
 async function omnisendIscritti() {
-  const KEY = process.env.OMNISEND_API_KEY;
+  const KEY = (process.env.OMNISEND_API_KEY || '').trim().replace(/^["']|["']$/g, '');
   if (!KEY) throw new Error('NO_KEY');
   const ck = 'omni_iscritti_v1';
   const cached = await kvGet(ck);
@@ -978,7 +978,9 @@ async function omnisendIscritti() {
     { alias: 'giorni', metrics: [{ name: 'subscribedEmail' }, { name: 'unsubscribedEmail' }], dimensions: [{ name: 'timestamp', granularity: 'day' }], dateRange: { from: d59 + 'T00:00:00' + off, to: piu1 + 'T00:00:00' + off } },
     { alias: 'mesi', metrics: [{ name: 'subscribedEmail' }, { name: 'unsubscribedEmail' }], dimensions: [{ name: 'timestamp', granularity: 'month' }], dateRange: { from: (m.getMonth() === 11 ? `${m.getFullYear()}-01-01` : da12) + 'T00:00:00' + off, to: piu1 + 'T00:00:00' + off } }
   ] };
-  const r = await fetch('https://api.omnisend.com/api/analytics/statistics', { method: 'POST', headers: { 'Authorization': 'Omnisend-API-Key ' + KEY, 'Omnisend-Version': '2026-03-15', 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(body) });
+  let r = await fetch('https://api.omnisend.com/api/analytics/statistics', { method: 'POST', headers: { 'Authorization': 'Omnisend-API-Key ' + KEY, 'Omnisend-Version': '2026-03-15', 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(body) });
+  if (r.status === 401) r = await fetch('https://api.omnisend.com/api/analytics/statistics', { method: 'POST', headers: { 'X-API-KEY': KEY, 'Omnisend-Version': '2026-03-15', 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(body) });
+  if (r.status === 401) console.log('[newsletter-iscritti] chiave rifiutata, lunghezza', KEY.length, 'formato', /^[0-9a-f]{24}-[A-Za-z0-9]+$/.test(KEY) ? 'ok' : 'anomalo');
   if (!r.ok) throw new Error('Omnisend HTTP ' + r.status + ' ' + (await r.text()).slice(0, 200));
   const j = await r.json();
   const pick = a => ((j.statistics || []).find(x => x.alias === a) || { rows: [] }).rows.map(x => ({ d: String(x.timestamp).slice(0, 10), i: x.subscribedEmail || 0, u: x.unsubscribedEmail || 0 }));
