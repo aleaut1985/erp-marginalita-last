@@ -966,7 +966,7 @@ async function trafficoFonti(da, a) {
 async function omnisendIscritti() {
   const KEY = (process.env.OMNISEND_API_KEY || '').trim().replace(/^["']|["']$/g, '');
   if (!KEY) throw new Error('NO_KEY');
-  const ck = 'omni_iscritti_v2';
+  const ck = 'omni_iscritti_v3';
   const cached = await kvGet(ck);
   if (cached) { try { return JSON.parse(cached); } catch (_) {} }
   const oggi = getRomeDateString();
@@ -985,8 +985,47 @@ async function omnisendIscritti() {
   const j = await r.json();
   const pick = a => ((j.statistics || []).find(x => x.alias === a) || { rows: [] }).rows.map(x => ({ d: String(x.timestamp).slice(0, 10), i: x.subscribedEmail || 0, u: x.unsubscribedEmail || 0 }));
   const v = { giorni: pick('giorni'), mesi: pick('mesi'), oggi, agg: new Date().toISOString() };
+  // v5.63: togli iscrizioni finte (email test… dei bot, iscritto+disiscritto entro 2 minuti)
+  try {
+    const f = await omnisendFinti(KEY, d59);
+    const togli = (rows, key, len) => rows.forEach(g => { const x = f[key][g.d.slice(0, len)]; if (x) { g.i = Math.max(0, g.i - (x.i || 0)); g.u = Math.max(0, g.u - (x.u || 0)); } });
+    togli(v.giorni, 'giorni', 10); togli(v.mesi, 'mesi', 7);
+    v.finti = f.totale; v.finti_completo = f.completo;
+  } catch (e) { console.log('[newsletter-finti]', e.message); }
   await kvSetEx(ck, 3600, JSON.stringify(v));
   return v;
+}
+
+// v5.63: contatti finti creati negli ultimi ~60 giorni, raggruppati per giorno/mese (ora di Roma)
+const EMAIL_TEST_BOT = /^test[0-9a-f]{20,}@/i;
+async function omnisendFinti(KEY, daGiorno) {
+  const h = { 'Authorization': 'Omnisend-API-Key ' + KEY, 'Omnisend-Version': '2026-03-15', 'Accept': 'application/json' };
+  const out = { giorni: {}, mesi: {}, totale: 0, completo: false };
+  const add = (iso, campo) => {
+    const d = getRomeDateString(new Date(iso));
+    for (const [k, key] of [[d, 'giorni'], [d.slice(0, 7), 'mesi']]) { out[key][k] = out[key][k] || { i: 0, u: 0 }; out[key][k][campo]++; }
+  };
+  let after = '', pagine = 0; const t0 = Date.now();
+  while (pagine < 60 && Date.now() - t0 < 25000) {
+    const r = await fetch('https://api.omnisend.com/api/contacts?sort=createdAt&direction=desc&limit=250' + (after ? '&after=' + encodeURIComponent(after) : ''), { headers: h });
+    if (!r.ok) throw new Error('Omnisend contacts HTTP ' + r.status);
+    const j = await r.json(); pagine++;
+    let fine = false;
+    for (const c of (j.contacts || [])) {
+      if (getRomeDateString(new Date(c.createdAt)) < daGiorno) { fine = true; break; }
+      const st = (c.statuses || []).filter(s => s.channel === 'email');
+      const sub = st.find(s => s.status === 'subscribed'), uns = st.find(s => s.status === 'unsubscribed');
+      const rapido = sub && uns && Math.abs(new Date(uns.statusChangedAt) - new Date(sub.statusChangedAt)) <= 120000;
+      if (!(EMAIL_TEST_BOT.test(c.email || '') || rapido)) continue;
+      out.totale++;
+      if (sub) add(sub.statusChangedAt, 'i');
+      if (uns) add(uns.statusChangedAt, 'u');
+    }
+    const nx = j.paging && j.paging.cursors && j.paging.cursors.after;
+    if (fine || !(j.paging && j.paging.hasMore) || !nx) { out.completo = true; break; }
+    after = nx;
+  }
+  return out;
 }
 
 // v5.62: totale iscritti email (conteggio contatti "subscribed", cache 6h)
@@ -3248,7 +3287,7 @@ function caricaIscritti(qs) {
     var h = '<div class="nl-head"><span class="ch-lab">Iscritti newsletter</span>' + tot + '</div>'
       + '<div class="nl-main"><span class="t-val">+' + it(d.iscritti) + '</span>'
       + (d.prec ? delta(d.iscritti, d.prec.iscritti) + '<span class="t-neg">vs +' + it(d.prec.iscritti) + ' ' + lbl + '</span>' : '') + '</div>'
-      + '<div class="t-neg">' + it(d.disiscritti) + ' disiscritti · netto ' + (d.iscritti - d.disiscritti >= 0 ? '+' : '') + it(d.iscritti - d.disiscritti) + (n > 1 ? ' · media +' + Math.round(d.iscritti / n) + ' al giorno' : '') + (d.approx ? ' · dato mensile' : '') + '</div>';
+      + '<div class="t-neg">' + it(d.disiscritti) + ' disiscritti · netto ' + (d.iscritti - d.disiscritti >= 0 ? '+' : '') + it(d.iscritti - d.disiscritti) + (n > 1 ? ' · media +' + Math.round(d.iscritti / n) + ' al giorno' : '') + (d.approx ? ' · dato mensile' : '') + '</div>' + (d.finti ? '<div class="t-sub" title="Email di test dei bot o iscritti e disiscritti entro 2 minuti">esclusi ' + it(d.finti) + ' contatti finti (bot) negli ultimi 60 giorni</div>' : '');
     if (d.confronti && d.confronti.length) h += '<div class="nl-cmp">' + d.confronti.map(function (c) { return '<div class="nl-c"><div class="nl-ck">' + c.k + '</div><div class="nl-cv">+' + it(c.a) + ' ' + delta(c.a, c.b) + '</div><div class="nl-cs">vs +' + it(c.b) + ' ' + c.vs + '</div></div>'; }).join('') + '</div>';
     el.innerHTML = h;
   }).catch(function () { el.innerHTML = '<span class="ch-lab">Iscritti newsletter</span><span class="t-sub">non disponibili</span>'; });
@@ -5243,7 +5282,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.62', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.63', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/newsletter-iscritti') {
@@ -5275,7 +5314,7 @@ export default async function handler(req, res) {
         ];
         let totale = null;
         try { totale = await omnisendTotale(); } catch (e2) { console.log('[newsletter-totale]', e2.message); }
-        return res.json({ success: true, da, a, iscritti: cur.i, disiscritti: cur.u, giorni: cur.approx ? [] : cur.righe, approx: cur.approx, prec: { da: pda, a: pa, iscritti: prec.i, disiscritti: prec.u, approx: prec.approx }, confronti, totale, aggiornato: v.agg });
+        return res.json({ success: true, da, a, iscritti: cur.i, disiscritti: cur.u, giorni: cur.approx ? [] : cur.righe, approx: cur.approx, prec: { da: pda, a: pa, iscritti: prec.i, disiscritti: prec.u, approx: prec.approx }, confronti, totale, finti: v.finti || 0, aggiornato: v.agg });
       } catch (e) { console.log('[newsletter-iscritti]', e.message); return res.json({ success: false, error: e.message === 'NO_KEY' ? 'NO_KEY' : e.message }); }
     }
     if (req.method === 'GET' && path === '/api/traffico-fonti') {
