@@ -944,6 +944,24 @@ async function trafficoSito(da, a) {
   return v;
 }
 
+// v5.60: da dove arrivano le visite (fonte + sito di provenienza)
+async function trafficoFonti(da, a) {
+  const key = 'f|' + da + '|' + a; const c = trafficoCache.get(key);
+  if (c && Date.now() - c.t < 10 * 60 * 1000) return c.v;
+  const token = await getShopifyAccessToken();
+  const q = `FROM sessions SHOW sessions, sessions_that_completed_checkout GROUP BY referrer_source, referrer_name SINCE ${da} UNTIL ${a} ORDER BY sessions DESC LIMIT 40`;
+  const r = await fetch(`https://${SHOPIFY_STORE}/admin/api/2025-10/graphql.json`, { method: 'POST', headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' }, body: JSON.stringify({ query: 'query($q:String!){ shopifyqlQuery(query:$q){ tableData { columns { name } rows } parseErrors } }', variables: { q } }) });
+  const j = await r.json();
+  if (j.errors) throw new Error(JSON.stringify(j.errors).slice(0, 300));
+  const res = j.data && j.data.shopifyqlQuery;
+  if (!res || !res.tableData) throw new Error('ShopifyQL: ' + ((res && res.parseErrors || []).join('; ') || 'nessun dato'));
+  const v = (res.tableData.rows || []).map(x => Array.isArray(x) ? { referrer_source: x[0], referrer_name: x[1], sessions: x[2], sessions_that_completed_checkout: x[3] } : x)
+    .map(x => ({ fonte: String(x.referrer_source || '').toLowerCase(), nome: String(x.referrer_name || ''), s: parseInt(x.sessions) || 0, o: parseInt(x.sessions_that_completed_checkout) || 0 }))
+    .filter(x => x.s > 0);
+  trafficoCache.set(key, { t: Date.now(), v });
+  return v;
+}
+
 const DUO_BULK_QUERY = `{ products(query: "tag:'TLX_PRODUCT:DUO' AND status:active") { edges { node { id handle title vendor productType tags metafield(namespace: "custom", key: "prezzo_miinto") { value } variants { edges { node { id sku price compareAtPrice inventoryQuantity inventoryItem { unitCost { amount } } } } } } } } }`;
 
 function analizzaCatalogoDuo(jsonl, giornoISO) {
@@ -2406,6 +2424,17 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .traffic .t-bar { flex: 1 1 0; min-width: 2px; background: #D9D3C7; border-radius: 3px 3px 0 0; position: relative; }
   .traffic .t-bar.last { background: var(--black); }
   .traffic .t-axis { grid-column: 1 / -1; display: flex; justify-content: space-between; font-size: 0.66rem; color: var(--gray-500); margin-top: -4px; }
+  .traffic .t-kpi.t-click { cursor: pointer; } .traffic .t-kpi.t-click:hover { border-color: #CFC7B8; }
+  .traffic .t-more { font-size: 0.7rem; color: var(--gray-500); margin-left: 4px; }
+  .traffic .t-src { grid-column: 1 / -1; background: var(--white); border: 1px solid #ECE8DF; border-radius: 14px; padding: 6px 14px; }
+  .traffic .t-src-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid #F1EEE8; font-variant-numeric: tabular-nums; }
+  .traffic .t-src-row:last-child { border-bottom: 0; }
+  .traffic .t-src-name { font-weight: 600; font-size: 0.86rem; min-width: 0; }
+  .traffic .t-src-name small { display: block; font-weight: 400; color: var(--gray-500); font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .traffic .t-src-n { font-size: 0.86rem; text-align: right; }
+  .traffic .t-src-c { font-size: 0.72rem; color: var(--gray-500); text-align: right; min-width: 64px; }
+  .traffic .t-src-bar { grid-column: 1 / -1; height: 4px; background: #F1EEE8; border-radius: 2px; overflow: hidden; }
+  .traffic .t-src-bar span { display: block; height: 100%; background: var(--black); }
   .traffic .t-err { grid-column: 1 / -1; font-size: 0.75rem; color: var(--gray-500); }
   .perf-grid { margin: 0 0 4px; } #perf-ieri { margin: 8px 0 12px; } #perf-ieri:empty { display: none; } .perf-range { margin-bottom: 14px; }
   .last-orders { margin: -12px 0 24px; border: 1px solid var(--gray-200, #e8e2d6); border-radius: 14px; background: #fff; overflow: hidden; }
@@ -2601,7 +2630,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.59</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.60</p>
       </div>
     </div>
     <div class="header-right">
@@ -3120,7 +3149,7 @@ function caricaTraffico(qs) {
     }
     var gg = t.giorni || [], n = gg.length || 1, media = Math.round(t.sessioni / n);
     var it = function (v) { return Math.round(v).toLocaleString('it-IT'); };
-    var html = '<div class="t-kpi"><div class="ch-lab">Visite sito</div><div class="t-val">' + it(t.sessioni) + '</div><div class="t-sub">' + (n > 1 ? 'media ' + it(media) + ' al giorno' : 'sessioni tluxy.com') + '</div></div>'
+    var html = '<div class="t-kpi t-click" role="button" tabindex="0" onclick="toggleFonti()" onkeydown="if(event.key===&quot;Enter&quot;)toggleFonti()"><div class="ch-lab">Visite sito <span class="t-more">· da dove ›</span></div><div class="t-val">' + it(t.sessioni) + '</div><div class="t-sub">' + (n > 1 ? 'media ' + it(media) + ' al giorno' : 'sessioni tluxy.com') + '</div></div>'
       + '<div class="t-kpi"><div class="ch-lab">Conversione</div><div class="t-val">' + t.conversione.toFixed(2).replace('.', ',') + '%</div><div class="t-sub">' + it(t.checkout) + ' acquisti sul sito</div></div>';
     if (gg.length > 1) {
       var max = Math.max.apply(null, gg.map(function (x) { return x.s; }).concat([1]));
@@ -3128,8 +3157,39 @@ function caricaTraffico(qs) {
       html += '<div class="t-bars" aria-label="Visite giornaliere">' + gg.map(function (x, i) { return '<span class="t-bar' + (i === gg.length - 1 ? ' last' : '') + '" style="height:' + Math.max(4, Math.round(x.s / max * 100)) + '%" title="' + fmt(x.d) + ': ' + it(x.s) + ' visite · conv. ' + (x.s ? (x.o / x.s * 100).toFixed(2).replace('.', ',') : '0') + '%"></span>'; }).join('') + '</div>'
         + '<div class="t-axis"><span>' + fmt(gg[0].d) + '</span><span>' + fmt(gg[gg.length - 1].d) + '</span></div>';
     }
-    box.innerHTML = html;
+    box.innerHTML = html + '<div class="t-src" id="t-src" hidden></div>';
+    TRAFFICO_QS = qs;
   }).catch(function () { box.innerHTML = '<div class="t-err">Visite non disponibili.</div>'; });
+}
+var TRAFFICO_QS = '';
+var FONTI_NOMI = { direct: 'Diretto', search: 'Ricerca', social: 'Social', email: 'Email / newsletter', unknown: 'Altri siti', paid: 'A pagamento', referral: 'Altri siti' };
+function nomeFonte(f) {
+  var n = (f.nome || '').trim(), low = n.toLowerCase(), src = f.fonte;
+  if (src === 'direct' || (!n && src === 'unknown')) return ['Diretto', 'digitato l’indirizzo, preferiti o app'];
+  if (/google/.test(low)) return ['Google', src === 'search' ? 'ricerca' : (FONTI_NOMI[src] || src)];
+  if (/instagram/.test(low)) return ['Instagram', 'Meta'];
+  if (/facebook|fb\b/.test(low)) return ['Facebook', 'Meta'];
+  if (/bing/.test(low)) return ['Bing', 'ricerca'];
+  if (/omnisend|klaviyo|mail|newsletter/.test(low) || src === 'email') return ['Newsletter / email', n || 'email'];
+  if (/chatgpt|openai/.test(low)) return ['ChatGPT', 'assistente AI'];
+  if (/tiktok/.test(low)) return ['TikTok', 'social'];
+  return [n || (FONTI_NOMI[src] || src || 'Altro'), FONTI_NOMI[src] || src || ''];
+}
+function toggleFonti() {
+  var el = document.getElementById('t-src'); if (!el) return;
+  if (!el.hidden) { el.hidden = true; return; }
+  el.hidden = false; el.innerHTML = '<div class="t-err" style="padding:8px 0">Carico le fonti…</div>';
+  fetch('/api/traffico-fonti?' + TRAFFICO_QS).then(function (r) { return r.json(); }).then(function (d) {
+    if (!d || !d.success || !d.fonti || !d.fonti.length) { el.innerHTML = '<div class="t-err" style="padding:8px 0">Fonti non disponibili.</div>'; return; }
+    var agg = {};
+    d.fonti.forEach(function (f) { var nm = nomeFonte(f); var k = nm[0]; if (!agg[k]) agg[k] = { nome: k, det: nm[1], s: 0, o: 0 }; agg[k].s += f.s; agg[k].o += f.o; });
+    var righe = Object.keys(agg).map(function (k) { return agg[k]; }).sort(function (a, b) { return b.s - a.s; });
+    var tot = righe.reduce(function (t, x) { return t + x.s; }, 0) || 1;
+    el.innerHTML = righe.slice(0, 12).map(function (x) {
+      var pct = Math.round(x.s / tot * 100);
+      return '<div class="t-src-row"><div class="t-src-name">' + x.nome + (x.det ? '<small>' + x.det + '</small>' : '') + '</div><div class="t-src-n">' + x.s.toLocaleString('it-IT') + ' <small style="color:var(--gray-500)">' + pct + '%</small></div><div class="t-src-c">' + x.o + ' acq. · ' + (x.s ? (x.o / x.s * 100).toFixed(1).replace('.', ',') : '0') + '%</div><div class="t-src-bar"><span style="width:' + pct + '%"></span></div></div>';
+    }).join('');
+  }).catch(function () { el.innerHTML = '<div class="t-err" style="padding:8px 0">Fonti non disponibili.</div>'; });
 }
 async function setPeriod(p, btn) { setActiveButton('[data-analytics-periods] .period-btn', btn); var pi = document.getElementById('perf-ieri'); if (pi) pi.innerHTML = ''; var ok = await fetchAnalytics('/api/analytics?periodo=' + p); if (p === 'today') caricaIeriRiga(); return ok; }
 // v5.52: riga "Ieri" sotto i KPI quando il periodo è Oggi (prima stava in un box separato duplicato)
@@ -5092,9 +5152,16 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.59', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.60', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
+    if (req.method === 'GET' && path === '/api/traffico-fonti') {
+      try {
+        const rg = getDateRange(query.get('periodo') || 'today', query.get('from'), query.get('to'));
+        const da = getRomeDateString(new Date(rg.dateFrom)), a = getRomeDateString(new Date(rg.dateTo));
+        return res.json({ success: true, fonti: await trafficoFonti(da, a) });
+      } catch (e) { return res.json({ success: false, error: e.message }); }
+    }
     if (req.method === 'GET' && path === '/api/traffico') {
       try {
         const rg = getDateRange(query.get('periodo') || 'today', query.get('from'), query.get('to'));
