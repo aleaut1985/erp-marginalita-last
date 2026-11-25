@@ -971,7 +971,7 @@ async function omnisendIscritti() {
   if (cached) { try { return JSON.parse(cached); } catch (_) {} }
   const oggi = getRomeDateString();
   const piu1 = getRomeDateString(new Date(Date.now() + 86400000));
-  const d59 = getRomeDateString(new Date(Date.now() - 59 * 86400000));
+  const d59 = getRomeDateString(new Date(Date.now() - 57 * 86400000)); // max 60 giorni con granularità day
   const m = new Date(); const da12 = `${m.getFullYear() - 1}-${String(m.getMonth() + 2 > 12 ? 1 : m.getMonth() + 2).padStart(2, '0')}-01`;
   const off = getRomeOffset(new Date()) === 120 ? '+02:00' : '+01:00';
   const body = { queries: [
@@ -5207,7 +5207,7 @@ export default async function handler(req, res) {
         else { righe = v.mesi.filter(x => x.d.slice(0, 7) >= da.slice(0, 7) && x.d.slice(0, 7) <= a.slice(0, 7)); approx = true; }
         const iscritti = righe.reduce((t, x) => t + x.i, 0), disiscritti = righe.reduce((t, x) => t + x.u, 0);
         return res.json({ success: true, da, a, iscritti, disiscritti, giorni: approx ? [] : righe, approx, aggiornato: v.agg });
-      } catch (e) { return res.json({ success: false, error: e.message === 'NO_KEY' ? 'NO_KEY' : e.message }); }
+      } catch (e) { console.log('[newsletter-iscritti]', e.message); return res.json({ success: false, error: e.message === 'NO_KEY' ? 'NO_KEY' : e.message }); }
     }
     if (req.method === 'GET' && path === '/api/traffico-fonti') {
       try {
