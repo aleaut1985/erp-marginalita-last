@@ -962,6 +962,31 @@ async function trafficoFonti(da, a) {
   return v;
 }
 
+// v5.61: iscritti newsletter da Omnisend (API statistics: max 55 chiamate/giorno → cache 1h in KV)
+async function omnisendIscritti() {
+  const KEY = process.env.OMNISEND_API_KEY;
+  if (!KEY) throw new Error('NO_KEY');
+  const ck = 'omni_iscritti_v1';
+  const cached = await kvGet(ck);
+  if (cached) { try { return JSON.parse(cached); } catch (_) {} }
+  const oggi = getRomeDateString();
+  const piu1 = getRomeDateString(new Date(Date.now() + 86400000));
+  const d59 = getRomeDateString(new Date(Date.now() - 59 * 86400000));
+  const m = new Date(); const da12 = `${m.getFullYear() - 1}-${String(m.getMonth() + 2 > 12 ? 1 : m.getMonth() + 2).padStart(2, '0')}-01`;
+  const off = getRomeOffset(new Date()) === 120 ? '+02:00' : '+01:00';
+  const body = { queries: [
+    { alias: 'giorni', metrics: [{ name: 'subscribedEmail' }, { name: 'unsubscribedEmail' }], dimensions: [{ name: 'timestamp', granularity: 'day' }], dateRange: { from: d59 + 'T00:00:00' + off, to: piu1 + 'T00:00:00' + off } },
+    { alias: 'mesi', metrics: [{ name: 'subscribedEmail' }, { name: 'unsubscribedEmail' }], dimensions: [{ name: 'timestamp', granularity: 'month' }], dateRange: { from: (m.getMonth() === 11 ? `${m.getFullYear()}-01-01` : da12) + 'T00:00:00' + off, to: piu1 + 'T00:00:00' + off } }
+  ] };
+  const r = await fetch('https://api.omnisend.com/api/analytics/statistics', { method: 'POST', headers: { 'X-API-KEY': KEY, 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error('Omnisend HTTP ' + r.status + ' ' + (await r.text()).slice(0, 200));
+  const j = await r.json();
+  const pick = a => ((j.statistics || []).find(x => x.alias === a) || { rows: [] }).rows.map(x => ({ d: String(x.timestamp).slice(0, 10), i: x.subscribedEmail || 0, u: x.unsubscribedEmail || 0 }));
+  const v = { giorni: pick('giorni'), mesi: pick('mesi'), oggi, agg: new Date().toISOString() };
+  await kvSetEx(ck, 3600, JSON.stringify(v));
+  return v;
+}
+
 const DUO_BULK_QUERY = `{ products(query: "tag:'TLX_PRODUCT:DUO' AND status:active") { edges { node { id handle title vendor productType tags metafield(namespace: "custom", key: "prezzo_miinto") { value } variants { edges { node { id sku price compareAtPrice inventoryQuantity inventoryItem { unitCost { amount } } } } } } } } }`;
 
 function analizzaCatalogoDuo(jsonl, giornoISO) {
@@ -2435,6 +2460,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .traffic .t-src-c { font-size: 0.72rem; color: var(--gray-500); text-align: right; min-width: 64px; }
   .traffic .t-src-bar { grid-column: 1 / -1; height: 4px; background: #F1EEE8; border-radius: 2px; overflow: hidden; }
   .traffic .t-src-bar span { display: block; height: 100%; background: var(--black); }
+  .traffic .t-nl { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .traffic .t-nl .t-val { font-size: 1.15rem; }
+  .traffic .t-nl .t-neg { font-size: 0.8rem; color: var(--gray-500); }
   .traffic .t-err { grid-column: 1 / -1; font-size: 0.75rem; color: var(--gray-500); }
   .perf-grid { margin: 0 0 4px; } #perf-ieri { margin: 8px 0 12px; } #perf-ieri:empty { display: none; } .perf-range { margin-bottom: 14px; }
   .last-orders { margin: -12px 0 24px; border: 1px solid var(--gray-200, #e8e2d6); border-radius: 14px; background: #fff; overflow: hidden; }
@@ -2630,7 +2658,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-divider"></div>
       <div class="header-info">
         <h1>Business Manager</h1>
-        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.60</p>
+        <p><span class="hide-m">Business Intelligence Dashboard · </span>v5.61</p>
       </div>
     </div>
     <div class="header-right">
@@ -3157,11 +3185,24 @@ function caricaTraffico(qs) {
       html += '<div class="t-bars" aria-label="Visite giornaliere">' + gg.map(function (x, i) { return '<span class="t-bar' + (i === gg.length - 1 ? ' last' : '') + '" style="height:' + Math.max(4, Math.round(x.s / max * 100)) + '%" title="' + fmt(x.d) + ': ' + it(x.s) + ' visite · conv. ' + (x.s ? (x.o / x.s * 100).toFixed(2).replace('.', ',') : '0') + '%"></span>'; }).join('') + '</div>'
         + '<div class="t-axis"><span>' + fmt(gg[0].d) + '</span><span>' + fmt(gg[gg.length - 1].d) + '</span></div>';
     }
-    box.innerHTML = html + '<div class="t-src" id="t-src" hidden></div>';
+    box.innerHTML = html + '<div class="t-src" id="t-src" hidden></div><div class="t-kpi t-nl" id="t-nl"><span class="ch-lab">Iscritti newsletter</span><span class="t-sub">carico…</span></div>';
     TRAFFICO_QS = qs;
+    caricaIscritti(qs);
   }).catch(function () { box.innerHTML = '<div class="t-err">Visite non disponibili.</div>'; });
 }
 var TRAFFICO_QS = '';
+function caricaIscritti(qs) {
+  var el = document.getElementById('t-nl'); if (!el) return;
+  fetch('/api/newsletter-iscritti?' + qs).then(function (r) { return r.json(); }).then(function (d) {
+    if (!d || !d.success) {
+      el.innerHTML = '<span class="ch-lab">Iscritti newsletter</span><span class="t-sub">' + (d && d.error === 'NO_KEY' ? 'da collegare: manca la chiave API di Omnisend' : 'non disponibili') + '</span>';
+      return;
+    }
+    var gg = d.giorni || [], n = gg.length;
+    el.innerHTML = '<span class="ch-lab">Iscritti newsletter</span><span class="t-val">+' + d.iscritti.toLocaleString('it-IT') + '</span>'
+      + '<span class="t-neg">' + d.disiscritti.toLocaleString('it-IT') + ' disiscritti' + (n > 1 ? ' · media +' + Math.round(d.iscritti / n) + ' al giorno' : '') + (d.approx ? ' · dato mensile' : '') + '</span>';
+  }).catch(function () { el.innerHTML = '<span class="ch-lab">Iscritti newsletter</span><span class="t-sub">non disponibili</span>'; });
+}
 var FONTI_NOMI = { direct: 'Diretto', search: 'Ricerca', social: 'Social', email: 'Email / newsletter', unknown: 'Altri siti', paid: 'A pagamento', referral: 'Altri siti' };
 function nomeFonte(f) {
   var n = (f.nome || '').trim(), low = n.toLowerCase(), src = f.fonte;
@@ -5152,9 +5193,22 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.60', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.61', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
+    if (req.method === 'GET' && path === '/api/newsletter-iscritti') {
+      try {
+        const rg = getDateRange(query.get('periodo') || 'today', query.get('from'), query.get('to'));
+        const da = getRomeDateString(new Date(rg.dateFrom)), a = getRomeDateString(new Date(rg.dateTo));
+        const v = await omnisendIscritti();
+        const minG = v.giorni.length ? v.giorni[0].d : a;
+        let righe, approx = false;
+        if (da >= minG) righe = v.giorni.filter(x => x.d >= da && x.d <= a);
+        else { righe = v.mesi.filter(x => x.d.slice(0, 7) >= da.slice(0, 7) && x.d.slice(0, 7) <= a.slice(0, 7)); approx = true; }
+        const iscritti = righe.reduce((t, x) => t + x.i, 0), disiscritti = righe.reduce((t, x) => t + x.u, 0);
+        return res.json({ success: true, da, a, iscritti, disiscritti, giorni: approx ? [] : righe, approx, aggiornato: v.agg });
+      } catch (e) { return res.json({ success: false, error: e.message === 'NO_KEY' ? 'NO_KEY' : e.message }); }
+    }
     if (req.method === 'GET' && path === '/api/traffico-fonti') {
       try {
         const rg = getDateRange(query.get('periodo') || 'today', query.get('from'), query.get('to'));
