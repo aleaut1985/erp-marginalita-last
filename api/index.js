@@ -698,6 +698,9 @@ const MARKETPLACE_CONFIGS = {
     nota_regole: 'Dropship: l\'ordine arriva su Shopify al payout (metafield custom.reflaunt_payout) = incasso, senza IVA né commissioni; etichetta di spedizione fornita da Reflaunt' },
   // v5.47: contratto Giglio 29/10/2024 — sconto base 31% sul prezzo finale senza IVA + 2,5% per pagamento 30DFFM = 33,5%;
   // commissione attuale 34,5% (confermata nov 2026, fatture Giglio); contributo spedizione €3,60 (applicato per ordine); penali KPI mensili NON incluse (arrivano dal rendiconto Giglio)
+  // v5.63: ABOUT YOU (app Shopify "About You", source_name "ayou", tag ayou, ordini ds-xxxx). Commissione a scaglioni di prezzo
+  // (struttura dal 01/07/2026: fascia minima <35€, fasce intermedie fino a 100€) — percentuali ESATTE da confermare dal Seller Center › Legal.
+  'ABOUT_YOU': { nome: 'About You', sconto_percentuale: 0, fee_principale: 20, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1.5, pagamento: 'Da confermare (SCAYLE Payments)', payment_policy: { type: 'monthly_decade', month_offset: 1, payout_day: 10 }, provvisoria: true, nota_regole: 'Commissione PROVVISORIA 20% in attesa delle percentuali ufficiali (scaglioni per prezzo, Seller Center › Onboarding › Legal)' },
   'GIGLIO': { nome: 'GIGLIO.COM', sconto_percentuale: 0, fee_principale: 34.5, fee_secondaria: 0, fee_fissa_trasporto: 3.6, fee_fissa_packaging: 0, pagamento: '30gg data fattura fine mese (fine mese+1)', payment_policy: { type: 'monthly_end', month_offset: 1 }, nota_regole: 'Commissione 34,5% (confermata da Alessio nov 2026) sul prezzo pagato dal cliente senza IVA. Contributo spedizione €3,60 a pezzo. Penali KPI (no-stock/ritardi) a parte, dal rendiconto mensile.' }
 };
 
@@ -719,6 +722,7 @@ const SOURCE_NAME_MAP = {
   'archivist': 'ARCHIVIST', 'winkelstraat': 'WINKELSTRAAT',
   'italist': 'ITALIST', 'italist-app': 'ITALIST',
   'syncio-order': 'JAMMY_DUDE', 'jammydude21': 'JAMMY_DUDE', 'jammy-dude': 'JAMMY_DUDE', 'jammydude': 'JAMMY_DUDE',
+  'ayou': 'ABOUT_YOU', 'about-you': 'ABOUT_YOU', 'aboutyou': 'ABOUT_YOU', '426640277505': 'ABOUT_YOU',
   'poizon': 'POIZON', '217504907265': 'POIZON',
   '223431819265': 'BALARDI'
 };
@@ -3261,7 +3265,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <script>
 const MARKETPLACES = ${JSON.stringify(Object.fromEntries(Object.entries(MARKETPLACE_CONFIGS).filter(([k]) => k !== 'REFLAUNT')))};
 function mpTextColor(hex){ var h=(hex||'#8E8E8E').replace('#',''); var c=[0,2,4].map(function(i){ var v=parseInt(h.substr(i,2),16)/255; return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4); }); var L=0.2126*c[0]+0.7152*c[1]+0.0722*c[2]; return (1.05/(L+0.05)) >= 4.5 ? '#FFFFFF' : '#1A1A1A'; }
-const MP_COLORS = { REFLAUNT:'#6E8B74', TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC', MARK_FOYS:'#2E5F8F', GIGLIO:'#7B4F8A' };
+const MP_COLORS = { REFLAUNT:'#6E8B74', TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC', MARK_FOYS:'#2E5F8F', GIGLIO:'#7B4F8A', ABOUT_YOU:'#E4572E' };
 
 function setActiveButton(selector, btn) { document.querySelectorAll(selector).forEach(b => b.classList.remove('active')); if (btn) btn.classList.add('active'); }
 async function fetchNoCache(url) { const sep = url.includes('?') ? '&' : '?'; const res = await fetch(url + sep + '_=' + Date.now(), { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } }); return res.json(); }
