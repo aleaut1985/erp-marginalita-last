@@ -6439,7 +6439,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && path === '/api/alerts') {
       try {
         const refresh = query.get('refresh') === '1';
-        const cacheKey = 'pannello_canali_v544';
+        const cacheKey = 'pannello_canali_v571';
         if (!refresh && KV_ENABLED) {
           try { const c = await kvGet(cacheKey); if (c) { const obj = JSON.parse(c); if (Date.now() - new Date(obj.generato_il).getTime() < 15 * 60000) return res.json({ success: true, cached: true, ...obj }); } } catch (e) {}
         }
@@ -6458,7 +6458,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && path === '/api/forecast') {
       try {
         const forceRefresh = query.get('refresh') === '1';
-        const FORECAST_CACHE_KEY = 'forecast_cache_v544';
+        const FORECAST_CACHE_KEY = 'forecast_cache_v571';
         const FORECAST_META_KEY = 'forecast_cache_meta_v544';
         const FORECAST_TTL_HOURS = 24;
         
