@@ -700,7 +700,7 @@ const MARKETPLACE_CONFIGS = {
   // commissione attuale 34,5% (confermata nov 2026, fatture Giglio); contributo spedizione €3,60 (applicato per ordine); penali KPI mensili NON incluse (arrivano dal rendiconto Giglio)
   // v5.63: ABOUT YOU (app Shopify "About You", source_name "ayou", tag ayou, ordini ds-xxxx). Commissione a scaglioni di prezzo
   // (struttura dal 01/07/2026: fascia minima <35€, fasce intermedie fino a 100€) — percentuali ESATTE da confermare dal Seller Center › Legal.
-  'ABOUT_YOU': { nome: 'About You', sconto_percentuale: 0, fee_principale: 20, fee_secondaria: 1.15, fee_fissa_trasporto: 12, fee_fissa_packaging: 1.5, pagamento: 'Mensile: 5° giorno lavorativo del mese dopo (SCAYLE Payments)', payment_policy: { type: 'monthly_decade', month_offset: 1, payout_day: 7 }, provvisoria: true, nota_regole: 'Commissione marketplace PROVVISORIA 20% (scaglioni per prezzo, da Seller Center › Documents). SCAYLE Payments fee 1,15% sul lordo IVA inclusa (contratto 22/06/2026, Tier 1). Payout il 5° giorno lavorativo del mese successivo; trattenuta di garanzia resi 60gg / chargeback 180gg. Etichetta di reso prepagata a nostro carico.' },
+  'ABOUT_YOU': { nome: 'About You', sconto_percentuale: 0, fee_principale: 19, fee_secondaria: 1.15, fee_fissa_trasporto: 12, fee_fissa_packaging: 1.5, pagamento: 'Mensile: 5° giorno lavorativo del mese dopo (SCAYLE Payments)', payment_policy: { type: 'monthly_decade', month_offset: 1, payout_day: 7 }, nota_regole: 'Commissione a scaglioni per categoria e prezzo (tabella Seller Center nov 2026: >100€ uomo 22%, borse/accessori 19%, scarpe 19%, donna 18%), calcolata riga per riga. SCAYLE Payments 1,15% sul lordo (contratto 22/06/2026). Payout 5° giorno lavorativo del mese dopo; trattenuta garanzia resi 60gg / chargeback 180gg. Reso prepagato a nostro carico.' },
   'GIGLIO': { nome: 'GIGLIO.COM', sconto_percentuale: 0, fee_principale: 34.5, fee_secondaria: 0, fee_fissa_trasporto: 3.6, fee_fissa_packaging: 0, pagamento: '30gg data fattura fine mese (fine mese+1)', payment_policy: { type: 'monthly_end', month_offset: 1 }, nota_regole: 'Commissione 34,5% (confermata da Alessio nov 2026) sul prezzo pagato dal cliente senza IVA. Contributo spedizione €3,60 a pezzo. Penali KPI (no-stock/ritardi) a parte, dal rendiconto mensile.' }
 };
 
@@ -783,9 +783,38 @@ function getConfigPerData(mpKey, dataOrdine) {
   return { ...base, ...override, regola_storica_fino_al: fino_al };
 }
 
+// v5.66: commissione About You per categoria × fascia di prezzo unitario (IVA incl.) — tabella Seller Center nov 2026 (fonte wortfilter.de 23/11/2026)
+const ABOUT_YOU_TIERS = {            // <35, 35–50, 50–100, >100
+  uomo:      [6, 14, 18, 22],
+  donna:     [4, 5, 13, 18],
+  accessori: [6, 16, 18, 19],
+  scarpe:    [4, 8, 16, 19]
+};
+function aboutYouCategoria(item) {
+  const sku = String(item.sku || '').toUpperCase(), t = String(item.title || '').toLowerCase(), v = String(item.vendor || '').toLowerCase();
+  if (/^BAG/.test(sku) || /\b(bag|borsa|wallet|portafoglio|belt|cintura|scarf|sciarpa|hat|cappello|jewel|sunglass|occhiali)/.test(t)) return 'accessori';
+  if (/\b(sneaker|shoe|scarp|boot|stivale|loafer|mocassino|sandal|mule|pump|décolleté|decollete)/.test(t)) return 'scarpe';
+  if (v.includes('autore')) return 'uomo';
+  if (/\b(women|woman|donna|dress|abito donna|skirt|gonna)/.test(t)) return 'donna';
+  return 'uomo'; // prudenziale: fascia più cara
+}
+function aboutYouFeePct(ordine) {
+  let lordo = 0, fee = 0;
+  for (const it of (ordine.line_items || [])) {
+    const q = parseInt(it.quantity) || 0, pu = parseFloat(it.price) || 0;
+    if (!q || !pu) continue;
+    const tr = ABOUT_YOU_TIERS[aboutYouCategoria(it)];
+    const pct = pu < 35 ? tr[0] : pu < 50 ? tr[1] : pu < 100 ? tr[2] : tr[3];
+    lordo += pu * q; fee += pu * q * pct / 100;
+  }
+  return lordo > 0 ? Math.round(fee / lordo * 10000) / 100 : null;
+}
+
 function riconosciMarketplace(ordine) {
   const r = riconosciMarketplaceBase(ordine);
-  return { key: r.key, config: getConfigPerData(r.key, ordine.created_at) || r.config };
+  let config = getConfigPerData(r.key, ordine.created_at) || r.config;
+  if (r.key === 'ABOUT_YOU') { const p = aboutYouFeePct(ordine); if (p !== null) config = { ...config, fee_principale: p }; }
+  return { key: r.key, config };
 }
 
 function riconosciMarketplaceBase(ordine) {
