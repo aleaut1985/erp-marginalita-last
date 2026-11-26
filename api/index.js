@@ -1165,6 +1165,123 @@ async function paEsegui({ live, soloEmail, soloHandle, testBf }) {
   return out;
 }
 
+
+// ============ v5.65 RICHIESTE AVVISO PREZZO → OFFERTA PERSONALE (codice 48h + email "Allegra" da concierge@tluxy.it) ============
+// Il prezzo del prodotto NON viene mai toccato (i marketplace lo seguono): lo sconto è un codice Shopify personale,
+// 1 utilizzo, solo su quel prodotto, valido 48 ore. L'email la manda Alessio dalla casella concierge (bottone "Scrivi").
+const PA_MIN_MARGINE_EUR = 25, PA_MIN_MARGINE_PCT = 0.10, PA_FEE = 0.02, PA_IVA = 1.22;
+function paMargine(prezzo, costo) { const netto = prezzo / PA_IVA; return netto - costo - prezzo * PA_FEE; }
+function paPrezzoMinimo(prezzo, costo) {
+  if (!costo) return null;
+  for (let x = Math.floor(prezzo); x > 0; x--) {
+    const m = paMargine(x, costo), soglia = Math.max(PA_MIN_MARGINE_EUR, PA_MIN_MARGINE_PCT * x / PA_IVA);
+    if (m < soglia) return x + 1 <= prezzo ? x + 1 : null;
+  }
+  return 1;
+}
+async function paDettaglio(handle) {
+  const d = await shopifyGraphQL(`query($h:String!){ productByHandle(handle:$h){ id title vendor handle status featuredImage{ url } variants(first:100){ nodes{ price compareAtPrice availableForSale inventoryItem{ unitCost{ amount } } } } } }`, { h: handle });
+  const p = d && d.productByHandle; if (!p) return null;
+  const disp = p.variants.nodes.filter(v => v.availableForSale).sort((a, b) => parseFloat(a.price) - parseFloat(b.price));
+  const v = disp[0] || p.variants.nodes[0];
+  const prezzo = v ? parseFloat(v.price) : 0;
+  const costo = v && v.inventoryItem && v.inventoryItem.unitCost ? parseFloat(v.inventoryItem.unitCost.amount) : 0;
+  const minimo = paPrezzoMinimo(prezzo, costo);
+  return { id: p.id, title: p.title, brand: p.vendor, handle: p.handle, attivo: p.status === 'ACTIVE', disponibile: disp.length > 0, img: p.featuredImage ? p.featuredImage.url : '',
+           prezzo, costo, margine: costo ? Math.round(paMargine(prezzo, costo)) : null, prezzo_minimo: minimo, sconto_max_pct: minimo ? Math.max(0, Math.floor((1 - minimo / prezzo) * 100)) : null };
+}
+function paEmailAllegra(lang, o) {
+  const it = lang === 'it';
+  const scad = new Date(o.scade).toLocaleString(it ? 'it-IT' : 'en-GB', { timeZone: 'Europe/Rome', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  const subject = it ? `Una proposta per lei: ${o.title}` : `A personal offer for you: ${o.title}`;
+  const body = it
+    ? `Buongiorno,\n\nho visto che segue ${o.title} su T.LUXY. Per lei ho riservato un prezzo speciale: ${paEuro(o.nuovo)} invece di ${paEuro(o.prezzo)}.\n\nLe basta inserire il codice ${o.code} al checkout. Il codice è personale ed è valido 48 ore, fino a ${scad}.\n\nEcco il link diretto:\n${o.url}\n\nResto a disposizione per qualsiasi domanda su taglia, condizioni o spedizione.\n\nUn caro saluto,\nAllegra\nPersonal Concierge · T.LUXY\nhttps://tluxy.com`
+    : `Hello,\n\nI noticed you are following ${o.title} on T.LUXY. I have reserved a special price for you: ${paEuro(o.nuovo)} instead of ${paEuro(o.prezzo)}.\n\nJust enter the code ${o.code} at checkout. The code is personal and valid for 48 hours, until ${scad}.\n\nHere is the direct link:\n${o.url}\n\nI remain at your disposal for any question about size, condition or shipping.\n\nKind regards,\nAllegra\nPersonal Concierge · T.LUXY\nhttps://tluxy.com`;
+  return { subject, body, mailto: 'mailto:' + encodeURIComponent(o.email) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body) };
+}
+async function paRichieste() {
+  const KEY = (process.env.OMNISEND_API_KEY || '').trim().replace(/^["']|["']$/g, '');
+  const h = { 'Authorization': 'Omnisend-API-Key ' + KEY, 'Omnisend-Version': '2026-03-15', 'Accept': 'application/json' };
+  const contatti = []; let after = '';
+  for (let i = 0; i < 10; i++) {
+    const r = await fetch('https://api.omnisend.com/api/contacts?tag=price-alert&limit=250' + (after ? '&after=' + encodeURIComponent(after) : ''), { headers: h });
+    if (!r.ok) throw new Error('Omnisend contacts HTTP ' + r.status);
+    const j = await r.json(); contatti.push(...(j.contacts || []));
+    const nx = j.paging && j.paging.cursors && j.paging.cursors.after;
+    if (!(j.paging && j.paging.hasMore) || !nx) break; after = nx;
+  }
+  const prodotti = new Map(); const righe = [];
+  for (const c of contatti) {
+    const email = String(c.email || '').toLowerCase(); if (!email || EMAIL_TEST_BOT.test(email)) continue;
+    const tags = (c.tags || []).map(t => String(t).toLowerCase());
+    const lang = tags.includes('lang-it') || (!tags.some(t => t.startsWith('lang-')) && c.countryCode === 'IT') ? 'it' : 'en';
+    const stato = (c.identifiers || []).find(x => x.type === 'email')?.channels?.email?.status || c.status;
+    for (const t of tags.filter(t => t.startsWith('pa-'))) {
+      const handle = t.slice(3);
+      if (!prodotti.has(handle)) { try { prodotti.set(handle, await paDettaglio(handle)); } catch (e) { prodotti.set(handle, null); } }
+      let offerta = null; try { offerta = JSON.parse(await kvGet('pa:offer:' + email + ':' + handle) || 'null'); } catch (_) {}
+      righe.push({ email, nome: [c.firstName, c.lastName].filter(Boolean).join(' '), paese: c.countryCode || '', lang, stato, dal: c.createdAt, handle, prodotto: prodotti.get(handle), offerta });
+    }
+  }
+  return righe;
+}
+async function paCreaOfferta({ email, handle, pct, prezzoFinale, lang }) {
+  const p = await paDettaglio(handle);
+  if (!p) throw new Error('Prodotto non trovato');
+  let nuovo = prezzoFinale ? Math.round(prezzoFinale) : Math.round(p.prezzo * (100 - pct) / 100);
+  if (!(nuovo > 0 && nuovo < p.prezzo)) throw new Error('Prezzo offerta non valido');
+  if (p.prezzo_minimo && nuovo < p.prezzo_minimo) throw new Error(`Sotto il margine minimo: il prezzo più basso consentito è ${paEuro(p.prezzo_minimo)}`);
+  const sconto = Math.round((p.prezzo - nuovo) * 100) / 100;
+  const nome = (email.split('@')[0].replace(/[^a-z]/gi, '').slice(0, 6) || 'CLUB').toUpperCase();
+  const code = 'ALLEGRA-' + nome + '-' + crypto.randomBytes(2).toString('hex').toUpperCase();
+  const ora = new Date(), scade = new Date(ora.getTime() + 48 * 3600 * 1000);
+  const d = await shopifyGraphQL(`mutation($b: DiscountCodeBasicInput!){ discountCodeBasicCreate(basicCodeDiscount: $b){ codeDiscountNode{ id } userErrors{ field message } } }`, { b: {
+    title: `Offerta personale ${email} – ${p.title}`, code, startsAt: ora.toISOString(), endsAt: scade.toISOString(), usageLimit: 1, appliesOncePerCustomer: true,
+    customerSelection: { all: true }, combinesWith: { orderDiscounts: false, productDiscounts: false, shippingDiscounts: true },
+    customerGets: { value: { discountAmount: { amount: sconto, appliesOnEachItem: false } }, items: { products: { productsToAdd: [p.id] } } } } });
+  const r = d.discountCodeBasicCreate;
+  if (r.userErrors && r.userErrors.length) throw new Error('Shopify: ' + r.userErrors.map(e => e.message).join('; '));
+  const url = 'https://tluxy.com' + (lang === 'it' ? '/it' : '') + '/products/' + handle + '?utm_source=concierge&utm_medium=email&utm_campaign=avviso-prezzo-offerta';
+  const o = { email, handle, title: p.title, prezzo: p.prezzo, nuovo, sconto, code, id: r.codeDiscountNode.id, creata: ora.toISOString(), scade: scade.toISOString(), url, lang };
+  await kvSetEx('pa:offer:' + email + ':' + handle, 90 * 86400, JSON.stringify(o));
+  return { ...o, email_bozza: paEmailAllegra(lang, o) };
+}
+
+
+const PA_PAGE = `<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Avvisi prezzo · TLuxy</title>
+<style>
+:root{--bg:#F3EEE7;--fg:#1a1a1a;--mut:#5c5249;--line:#d9d1c6}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{position:sticky;top:0;background:var(--bg);padding:16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;z-index:2}
+h1{font:600 20px Georgia,serif;margin:0;letter-spacing:.02em}a.back{color:var(--fg);font-size:15px}
+main{max-width:720px;margin:0 auto;padding:16px}.mut{color:var(--mut);font-size:14px}
+.card{background:#fff;padding:16px;margin:0 0 14px;display:grid;grid-template-columns:84px 1fr;gap:14px}
+.card img{width:84px;height:84px;object-fit:contain;background:#f6f3ef}
+.t{font-weight:600}.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
+button,.btn{min-height:44px;padding:0 16px;border:1px solid #000;background:#fff;color:#000;font:600 14px inherit;letter-spacing:.04em;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+button.pri,.btn.pri{background:#000;color:#fff}button:disabled{opacity:.35;cursor:not-allowed}
+input{min-height:44px;width:110px;padding:0 10px;border:1px solid var(--line);font-size:16px}
+.of{grid-column:1/-1;background:var(--bg);padding:14px;margin-top:4px}.of pre{white-space:pre-wrap;font:14px/1.5 inherit;margin:10px 0;background:#fff;padding:12px}
+.code{font:700 18px ui-monospace,Menlo,monospace;letter-spacing:.04em}.err{color:#b23a2a;font-size:14px;margin-top:6px}
+.badge{display:inline-block;font-size:12px;padding:2px 8px;border:1px solid var(--line);margin-left:6px}
+</style></head><body><header><h1>Avvisi prezzo</h1><a class="back" href="/">← ERP</a></header><main><p class="mut">Clienti che hanno chiesto di essere avvisate se il prezzo scende. Il prezzo del prodotto non cambia: crei un codice personale (1 uso, solo quel prodotto, 48 ore) e mandi l'email da concierge@tluxy.it.</p><div id="l" class="mut">Carico…</div></main>
+<script>
+const eur=n=>'€'+Number(n).toLocaleString('it-IT',{maximumFractionDigits:2});
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function offertaHtml(o){return '<div class="of"><div>Codice <span class="code">'+esc(o.code)+'</span> · '+eur(o.nuovo)+' invece di '+eur(o.prezzo)+' · scade '+new Date(o.scade).toLocaleString('it-IT',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+'</div>'+(o.email_bozza?'<pre>'+esc(o.email_bozza.subject)+'\\n\\n'+esc(o.email_bozza.body)+'</pre><div class="row"><a class="btn pri" href="'+esc(o.email_bozza.mailto)+'">Scrivi da concierge@</a><button onclick="navigator.clipboard.writeText(this.dataset.t);this.textContent=\\'Copiato ✓\\'" data-t="'+esc(o.email_bozza.body)+'">Copia testo</button></div>':'')+'</div>';}
+async function carica(){const r=await fetch('/api/avvisi');const j=await r.json();const el=document.getElementById('l');
+if(!j.success){el.textContent='Errore: '+(j.error||'');return}
+if(!j.righe.length){el.innerHTML='Nessuna richiesta per ora. Ti arriva una notifica quando una cliente attiva l\\'avviso.';return}
+el.innerHTML=j.righe.map((x,i)=>{const p=x.prodotto||{};const max=p.sconto_max_pct;const b=[5,10,15,20].map(v=>'<button '+(max!=null&&v>max?'disabled':'')+' onclick="offri('+i+','+v+')">−'+v+'%</button>').join('');
+return '<div class="card" id="c'+i+'"><img src="'+esc(p.img)+'" alt=""><div><div class="t">'+esc(p.brand)+' · '+esc(p.title||x.handle)+'</div><div class="mut">'+esc(x.nome||'')+' '+esc(x.email)+' <span class="badge">'+esc(x.paese||x.lang)+'</span>'+(x.stato!=='subscribed'?'<span class="badge">'+esc(x.stato)+'</span>':'')+'</div><div class="mut">Prezzo '+eur(p.prezzo||0)+(p.margine!=null?' · margine '+eur(p.margine):'')+(max!=null?' · sconto max '+max+'% (min '+eur(p.prezzo_minimo)+')':' · costo mancante')+(p.disponibile===false?' · <b>esaurito</b>':'')+'</div><div class="row">'+b+'<input type="number" inputmode="decimal" placeholder="€ finale" id="p'+i+'"><button class="pri" onclick="offri('+i+',0)">Crea codice</button></div><div class="err" id="e'+i+'"></div></div>'+(x.offerta?offertaHtml(x.offerta):'')+'</div>'}).join('');window._r=j.righe}
+async function offri(i,pct){const x=window._r[i];const pf=pct?0:parseFloat(document.getElementById('p'+i).value);const e=document.getElementById('e'+i);e.textContent='';
+if(!pct&&!(pf>0)){e.textContent='Scegli una percentuale o scrivi il prezzo finale.';return}
+if(!confirm('Creo il codice personale per '+x.email+' ('+(pct?'−'+pct+'%':eur(pf))+', 48 ore)?'))return;
+const r=await fetch('/api/avvisi/offerta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:x.email,handle:x.handle,pct,prezzoFinale:pf,lang:x.lang})});const j=await r.json();
+if(!j.success){e.textContent=j.error||'Errore';return}const c=document.getElementById('c'+i);const old=c.querySelector('.of');if(old)old.remove();c.insertAdjacentHTML('beforeend',offertaHtml(j.offerta))}
+carica();
+</script></body></html>`;
+
 const DUO_BULK_QUERY = `{ products(query: "tag:'TLX_PRODUCT:DUO' AND status:active") { edges { node { id handle title vendor productType tags metafield(namespace: "custom", key: "prezzo_miinto") { value } variants { edges { node { id sku price compareAtPrice inventoryQuantity inventoryItem { unitCost { amount } } } } } } } } }`;
 
 function analizzaCatalogoDuo(jsonl, giornoISO) {
@@ -5139,6 +5256,28 @@ export default async function handler(req, res) {
       }
     }
 
+    // ============ RICHIESTE AVVISO PREZZO (v5.65) ============
+    // Pubblico: il tema avvisa l'ERP quando una cliente attiva l'avviso → notifica push ad Alessio (limite 40/ora).
+    if (req.method === 'POST' && path === '/api/pa-segnala') {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      let b = req.body; if (typeof b === 'string') { try { b = JSON.parse(b); } catch (_) { b = {}; } } if (!b || typeof b !== 'object') b = await readJsonBody(req);
+      const handle = String(b.handle || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 120);
+      const email = String(b.email || '').toLowerCase().slice(0, 120);
+      if (!handle || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || EMAIL_TEST_BOT.test(email)) return res.status(204).end();
+      const ck = 'pa:notif:' + new Date().toISOString().slice(0, 13); const n = parseInt(await kvGet(ck) || '0', 10);
+      if (n >= 40) return res.status(204).end(); await kvSetEx(ck, 3700, String(n + 1));
+      try {
+        const p = await paDettaglio(handle);
+        if (p && NTFY_TOPIC) {
+          const titolo = `🔔 Avviso prezzo: ${p.brand} ${p.title}`.slice(0, 120);
+          const testo = `${email.replace(/(^.).*(@.*$)/, '$1…$2')} vuole sapere se scende.\nPrezzo ${paEuro(p.prezzo)}` + (p.margine != null ? ` · margine ${paEuro(p.margine)}` : '') + (p.sconto_max_pct ? ` · sconto max ${p.sconto_max_pct}%` : '');
+          await fetch('https://ntfy.sh/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: NTFY_TOPIC, title: titolo, message: testo, tags: ['bell'], priority: 4, click: ERP_PUBLIC_URL + '/avvisi' }) });
+        }
+      } catch (e) { console.log('[pa-segnala]', e.message); }
+      return res.status(204).end();
+    }
+    if (req.method === 'OPTIONS' && path === '/api/pa-segnala') { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Control-Allow-Headers', 'Content-Type'); return res.status(204).end(); }
+
     // ============ AVVISO CALO PREZZO (v5.64) ============
     // Cron giornaliero; anche Bearer CRON_SECRET o utente loggato. ?email=&handle= (solo loggato) manda subito un evento di prova.
     if (req.method === 'GET' && path === PA_PATH) {
@@ -5392,11 +5531,22 @@ export default async function handler(req, res) {
     // Tutti gli altri endpoint richiedono autenticazione (se abilitata)
     const authUser = getAuthenticatedUser(req);
     if (AUTH_ENABLED && !authUser) {
-      if (req.method === 'GET' && (path === '/' || path === '/dashboard')) {
+      if (req.method === 'GET' && (path === '/' || path === '/dashboard' || path === '/avvisi')) {
         res.writeHead(302, { Location: '/login?expired=1' });
         return res.end();
       }
       return res.status(401).json({ success: false, error: 'Non autorizzato. Effettua il login.', auth_required: true });
+    }
+
+    // ============ v5.65 PAGINA AVVISI PREZZO ============
+    if (req.method === 'GET' && path === '/avvisi') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.status(200).send(PA_PAGE); }
+    if (req.method === 'GET' && path === '/api/avvisi') {
+      try { return res.json({ success: true, righe: await paRichieste() }); } catch (e) { return res.json({ success: false, error: e.message }); }
+    }
+    if (req.method === 'POST' && path === '/api/avvisi/offerta') {
+      const b = await readJsonBody(req);
+      try { return res.json({ success: true, offerta: await paCreaOfferta({ email: String(b.email || '').toLowerCase(), handle: String(b.handle || ''), pct: Math.max(0, Math.min(50, parseInt(b.pct || 0, 10))), prezzoFinale: parseFloat(b.prezzoFinale || 0) || 0, lang: b.lang === 'it' ? 'it' : 'en' }) }); }
+      catch (e) { return res.json({ success: false, error: e.message }); }
     }
 
     if (req.method === 'GET' && (path === '/' || path === '/dashboard')) {
@@ -5406,7 +5556,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.64', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.65', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/newsletter-iscritti') {
