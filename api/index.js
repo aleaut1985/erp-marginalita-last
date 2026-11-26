@@ -1053,6 +1053,113 @@ async function omnisendTotale() {
   return v;
 }
 
+
+// ============ v5.64 AVVISO CALO PREZZO (tema: snippet tlx-price-alert → tag price-alert + pa-<handle>) ============
+// Ogni mattina: per ogni contatto Omnisend con tag price-alert e ogni suo tag pa-<handle>, confronta il prezzo effettivo
+// di oggi (taglia disponibile più economica, con la fascia Black Friday bf26-X nei giorni 27–30/11) con quello del giorno
+// in cui l'abbiamo visto la prima volta (KV). Se è sceso di almeno 5% o 20 € e il prodotto è disponibile, manda a Omnisend
+// l'evento "price dropped" (automazione "T.LUXY - Avviso prezzo sceso"). Una sola volta per contatto e prodotto.
+// I prezzi non vengono MAI modificati: solo letti. PRICE_ALERT_LIVE=1 per inviare davvero; altrimenti simula.
+const PA_PATH = '/api/cron/price-alerts';
+const PA_BF = { da: '2026-11-27', a: '2026-11-30' };
+const paEuro = n => { const r = Math.round(n * 100) / 100; const [i, d] = r.toFixed(2).split('.'); return '€' + i.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (d === '00' ? '' : ',' + d); };
+function paTesti(lang, d) {
+  const it = lang === 'it';
+  const bf = d.bf;
+  return {
+    subject: bf ? (it ? `Black Friday: ${d.title} ora a ${paEuro(d.nuovo)}` : `Black Friday: ${d.title} now ${paEuro(d.nuovo)}`)
+                : (it ? `Il prezzo è sceso: ${d.title}` : `Price drop: ${d.title}`),
+    preheader: bf ? (it ? `−${d.pct}% applicato al checkout, fino al 30/11. Su tluxy.com` : `−${d.pct}% applied at checkout, until 30/11. On tluxy.com`)
+                  : (it ? `Ora a ${paEuro(d.nuovo)} invece di ${paEuro(d.vecchio)}. Su tluxy.com` : `Now ${paEuro(d.nuovo)} instead of ${paEuro(d.vecchio)}. On tluxy.com`),
+    eyebrow: it ? 'Il tuo avviso prezzo' : 'Your price alert',
+    headline: bf ? (it ? `Ora con il Black Friday: −${d.pct}%.` : `Now with Black Friday: −${d.pct}%.`) : (it ? 'Buone notizie: il prezzo è sceso.' : 'Good news: the price has dropped.'),
+    intro: bf ? (it ? 'Il pezzo che segui è nel Black Friday. Il lusso autentico, selezionato per te.' : 'The piece you follow is in our Black Friday. Authentic luxury, selected for you.')
+              : (it ? 'Il pezzo che segui costa meno da oggi. Il lusso autentico, selezionato per te.' : 'The piece you follow costs less from today. Authentic luxury, selected for you.'),
+    saving: bf ? (it ? `−${paEuro(d.vecchio - d.nuovo)} con il Black Friday` : `−${paEuro(d.vecchio - d.nuovo)} with Black Friday`) : (it ? `−${paEuro(d.vecchio - d.nuovo)} da quando lo segui` : `−${paEuro(d.vecchio - d.nuovo)} since you started following`),
+    ref_line: bf ? (it ? `Prezzo retail ${paEuro(d.rrp)} · Prezzo più basso ultimi 30 gg ${paEuro(d.base)}` : `RRP ${paEuro(d.rrp)} · Lowest price in the last 30 days ${paEuro(d.base)}`) : '',
+    cta: it ? 'Vedi il prodotto' : 'View the product',
+    note: bf ? (it ? 'Sconto applicato automaticamente al checkout, fino al 30/11. Pezzi disponibili in quantità limitata.' : 'Discount applied automatically at checkout, until 30/11. Limited quantities available.')
+             : (it ? "Pezzi disponibili in quantità limitata: il prezzo vale finché c'è disponibilità." : 'Limited quantities available: the price is valid while stock lasts.'),
+    trust: it ? '✓ Autenticità garantita · Spedizione assicurata · Reso entro 14 giorni' : '✓ Guaranteed authentic · Insured shipping · Returns within 14 days',
+    footer: it ? "Ricevi questa email perché hai attivato l'avviso prezzo su tluxy.com." : 'You are receiving this email because you set a price alert on tluxy.com.',
+    unsub_label: it ? 'Disiscriviti' : 'Unsubscribe'
+  };
+}
+async function paProdotto(handle, cache) {
+  if (cache.has(handle)) return cache.get(handle);
+  let v = null;
+  try {
+    const d = await shopifyGraphQL(`query($h:String!){ productByHandle(handle:$h){ title vendor handle status featuredImage{ url } variants(first:100){ nodes{ price compareAtPrice availableForSale } } collections(first:60){ nodes{ handle } } } }`, { h: handle });
+    const p = d && d.productByHandle;
+    if (p) {
+      const disp = p.variants.nodes.filter(x => x.availableForSale);
+      const top = disp.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))[0] || null;
+      let pct = 0;
+      for (const c of p.collections.nodes) { const m = /^bf26-(5|10|15|20|25|30)$/.exec(c.handle); if (m) pct = Math.max(pct, +m[1]); }
+      const oggi = getRomeDateString();
+      const bfOn = oggi >= PA_BF.da && oggi <= PA_BF.a && pct > 0;
+      const base = top ? parseFloat(top.price) : 0;
+      const cmp = top && top.compareAtPrice ? parseFloat(top.compareAtPrice) : 0;
+      v = { title: p.title, brand: p.vendor, handle: p.handle, attivo: p.status === 'ACTIVE', disponibile: !!top, img: p.featuredImage ? p.featuredImage.url : '',
+            base, rrp: Math.max(base, cmp), pct: bfOn ? pct : 0, bf: bfOn, eff: bfOn ? Math.round(base * (100 - pct) / 100) : base };
+    }
+  } catch (e) { console.log('[price-alert] prodotto', handle, e.message); }
+  cache.set(handle, v);
+  return v;
+}
+async function paEsegui({ live, soloEmail, soloHandle, testBf }) {
+  const KEY = (process.env.OMNISEND_API_KEY || '').trim().replace(/^["']|["']$/g, '');
+  if (!KEY) throw new Error('NO_KEY');
+  const h = { 'Authorization': 'Omnisend-API-Key ' + KEY, 'Omnisend-Version': '2026-03-15', 'Accept': 'application/json', 'Content-Type': 'application/json' };
+  const contatti = []; let after = '';
+  if (soloEmail && soloHandle) contatti.push({ email: soloEmail, tags: ['lang-it', 'pa-' + soloHandle], countryCode: 'IT' });
+  for (let i = 0; i < 20 && !(soloEmail && soloHandle); i++) {
+    const r = await fetch('https://api.omnisend.com/api/contacts?tag=price-alert&limit=250' + (after ? '&after=' + encodeURIComponent(after) : ''), { headers: h });
+    if (!r.ok) throw new Error('Omnisend contacts HTTP ' + r.status);
+    const j = await r.json(); contatti.push(...(j.contacts || []));
+    const nx = j.paging && j.paging.cursors && j.paging.cursors.after;
+    if (!(j.paging && j.paging.hasMore) || !nx) break; after = nx;
+  }
+  const cache = new Map(); const out = { contatti: contatti.length, coppie: 0, nuovi: 0, invii: [], saltati: 0, live };
+  for (const c of contatti) {
+    const email = String(c.email || '').toLowerCase();
+    if (!email || EMAIL_TEST_BOT.test(email)) continue;
+    if (soloEmail && email !== soloEmail.toLowerCase()) continue;
+    const tags = (c.tags || []).map(t => String(t).toLowerCase());
+    const lang = tags.includes('lang-it') || (!tags.some(t => t.startsWith('lang-')) && c.countryCode === 'IT') ? 'it' : 'en';
+    for (const t of tags.filter(t => t.startsWith('pa-'))) {
+      const handle = t.slice(3);
+      if (soloHandle && handle !== soloHandle) continue;
+      out.coppie++;
+      const p = await paProdotto(handle, cache);
+      if (!p || !p.attivo || !p.base) { out.saltati++; continue; }
+      const k = 'pa:v1:' + email + ':' + handle;
+      let st = null; try { st = JSON.parse(await kvGet(k) || 'null'); } catch (_) {}
+      if (!st) { st = { base: p.eff, at: new Date().toISOString(), sent: null }; await kvSet(k, JSON.stringify(st)); out.nuovi++; if (!soloEmail) continue; }
+      if (st.sent && !soloEmail) continue;
+      const calo = st.base - p.eff;
+      const soglia = Math.min(20, st.base * 0.05);
+      const scatta = p.disponibile && calo > 0 && calo >= soglia;
+      if (!scatta && !soloEmail) continue;
+      let vecchio = soloEmail && !scatta ? p.base : st.base;
+      let nuovo = p.eff, bfx = p.bf, pctx = p.pct;
+      if (soloEmail && testBf > 0) { vecchio = p.base; nuovo = Math.round(p.base * (100 - testBf) / 100); bfx = true; pctx = testBf; }
+      const d = { title: p.title, nuovo, vecchio, base: p.base, rrp: p.rrp, bf: bfx, pct: pctx };
+      const url = 'https://tluxy.com' + (lang === 'it' ? '/it' : '') + '/products/' + handle + '?utm_source=omnisend&utm_medium=email&utm_campaign=avviso-prezzo';
+      const props = { ...paTesti(lang, d), product_title: p.title, product_brand: p.brand, product_url: url, product_image: p.img, price_new: paEuro(nuovo), price_old: paEuro(vecchio), price_rrp: paEuro(p.rrp), lowest_30d: paEuro(p.base), is_black_friday: bfx, price_new_num: nuovo };
+      const voce = { email, handle, vecchio, nuovo, bf: bfx, lang };
+      if (live || soloEmail) {
+        const r = await fetch('https://api.omnisend.com/api/events', { method: 'POST', headers: h, body: JSON.stringify({ eventName: 'price dropped', origin: 'api', eventVersion: '', contact: { email }, properties: props }) });
+        voce.inviato = r.ok; voce.status = r.status;
+        if (r.ok && !soloEmail) { st.sent = new Date().toISOString(); st.sentPrice = nuovo; await kvSet(k, JSON.stringify(st)); }
+        if (!r.ok) voce.errore = (await r.text()).slice(0, 200);
+      }
+      out.invii.push(voce);
+    }
+  }
+  return out;
+}
+
 const DUO_BULK_QUERY = `{ products(query: "tag:'TLX_PRODUCT:DUO' AND status:active") { edges { node { id handle title vendor productType tags metafield(namespace: "custom", key: "prezzo_miinto") { value } variants { edges { node { id sku price compareAtPrice inventoryQuantity inventoryItem { unitCost { amount } } } } } } } } }`;
 
 function analizzaCatalogoDuo(jsonl, giornoISO) {
@@ -5027,6 +5134,18 @@ export default async function handler(req, res) {
       }
     }
 
+    // ============ AVVISO CALO PREZZO (v5.64) ============
+    // Cron giornaliero; anche Bearer CRON_SECRET o utente loggato. ?email=&handle= (solo loggato) manda subito un evento di prova.
+    if (req.method === 'GET' && path === PA_PATH) {
+      const bearer = String(req.headers['authorization'] || '');
+      const utente = getAuthenticatedUser(req);
+      if (!((CRON_SECRET && bearer === 'Bearer ' + CRON_SECRET) || utente)) return res.status(401).json({ ok: false });
+      const soloEmail = utente ? (query.get('email') || '') : '';
+      const soloHandle = utente ? (query.get('handle') || '') : '';
+      try { return res.json({ ok: true, ...(await paEsegui({ live: process.env.PRICE_ALERT_LIVE === '1', soloEmail, soloHandle, testBf: utente ? parseInt(query.get('bf') || '0', 10) : 0 })) }); }
+      catch (e) { console.log('[price-alert]', e.message); return res.status(500).json({ ok: false, error: e.message }); }
+    }
+
     // ============ GIGLIO → SHOPIFY (v5.57) ============
     // Pubblico ma innocuo: importa solo ordini Giglio non ancora presenti; senza autenticazione risponde con i soli conteggi
     // e al massimo una volta ogni 5 minuti. ?dry=1 (solo utente loggato / CRON_SECRET) simula senza creare nulla.
@@ -5282,7 +5401,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.63', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.64', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/newsletter-iscritti') {
