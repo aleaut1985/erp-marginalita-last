@@ -5718,7 +5718,7 @@ export default async function handler(req, res) {
     // Tutti gli altri endpoint richiedono autenticazione (se abilitata)
     const authUser = getAuthenticatedUser(req);
     if (AUTH_ENABLED && !authUser) {
-      if (req.method === 'GET' && (path === '/' || path === '/dashboard' || path === '/avvisi')) {
+      if (req.method === 'GET' && (path === '/' || path === '/dashboard' || path === '/avvisi' || path === '/utenti')) {
         res.writeHead(302, { Location: '/login?expired=1' });
         return res.end();
       }
