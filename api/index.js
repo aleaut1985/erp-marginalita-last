@@ -1135,7 +1135,12 @@ async function paEsegui({ live, soloEmail, soloHandle, testBf }) {
       if (!p || !p.attivo || !p.base) { out.saltati++; continue; }
       const k = 'pa:v1:' + email + ':' + handle;
       let st = null; try { st = JSON.parse(await kvGet(k) || 'null'); } catch (_) {}
-      if (!st) { st = { base: p.eff, at: new Date().toISOString(), sent: null }; await kvSet(k, JSON.stringify(st)); out.nuovi++; if (!soloEmail) continue; }
+      if (!st) {
+        // prezzo di riferimento = prezzo pieno del sito (senza Black Friday). Chi si è iscritto prima del 27/11 riceve l'avviso BF.
+        st = { base: p.base, at: new Date().toISOString(), sent: null }; await kvSet(k, JSON.stringify(st)); out.nuovi++;
+        const primaBf = String(c.createdAt || '9999').slice(0, 10) < PA_BF.da;
+        if (!soloEmail && !(p.bf && primaBf)) continue;
+      }
       if (st.sent && !soloEmail) continue;
       const calo = st.base - p.eff;
       const soglia = Math.min(20, st.base * 0.05);
