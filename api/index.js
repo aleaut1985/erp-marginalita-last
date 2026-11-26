@@ -1062,6 +1062,39 @@ async function omnisendFinti(KEY, daGiorno) {
 }
 
 // v5.62: totale iscritti email (conteggio contatti "subscribed", cache 6h)
+// v5.67: iscritti per form Omnisend (report per form nel periodo; elenco form in cache 6h, report 30 min)
+const omniFormCache = new Map();
+async function omnisendIscrittiPerForm(da, a) {
+  const KEY = (process.env.OMNISEND_API_KEY || '').trim().replace(/^["']|["']$/g, '');
+  if (!KEY) throw new Error('NO_KEY');
+  const ck = 'f|' + da + '|' + a, hit = omniFormCache.get(ck);
+  if (hit && Date.now() - hit.t < 30 * 60000) return hit.v;
+  const h = { 'Authorization': 'Omnisend-API-Key ' + KEY, 'Omnisend-Version': '2026-03-15', 'Accept': 'application/json' };
+  let forms = null;
+  const cf = await kvGet('omni_forms_v1');
+  if (cf) { try { forms = JSON.parse(cf); } catch (_) {} }
+  if (!forms) {
+    const r = await fetch('https://api.omnisend.com/api/forms?limit=100', { headers: h });
+    if (!r.ok) throw new Error('Omnisend forms HTTP ' + r.status);
+    const j = await r.json();
+    forms = (j.forms || []).map(f => ({ id: f.id, nome: f.name, stato: f.status, tipo: f.displayType }));
+    await kvSetEx('omni_forms_v1', 6 * 3600, JSON.stringify(forms));
+  }
+  const off = getRomeOffset(new Date()) === 120 ? '+02:00' : '+01:00';
+  const righe = await Promise.all(forms.map(async f => {
+    try {
+      const u = 'https://api.omnisend.com/api/forms/' + f.id + '/report?createdAtFrom=' + encodeURIComponent(da + 'T00:00:00' + off) + '&createdAtTo=' + encodeURIComponent(a + 'T23:59:59' + off);
+      const r = await fetch(u, { headers: h });
+      if (!r.ok) return null;
+      const st = (await r.json()).statistics || {};
+      return { ...f, viste: st.views || 0, invii: st.submits || 0, iscritti: st.signups || 0 };
+    } catch (_) { return null; }
+  }));
+  const v = righe.filter(x => x && (x.iscritti || x.viste)).sort((x, y) => y.iscritti - x.iscritti || y.viste - x.viste);
+  omniFormCache.set(ck, { t: Date.now(), v });
+  return v;
+}
+
 async function omnisendTotale() {
   const KEY = (process.env.OMNISEND_API_KEY || '').trim().replace(/^["']|["']$/g, '');
   if (!KEY) throw new Error('NO_KEY');
@@ -2797,6 +2830,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .traffic .nl-main { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
   .traffic .nl-d { font-size: 0.78rem; font-weight: 600; color: var(--gray-500); }
   .traffic .nl-d.up { color: #1F7A3E; } .traffic .nl-d.down { color: #B3261E; }
+  .traffic .nl-click { cursor: pointer; } .traffic .nl-click:focus-visible { outline: 2px solid #2F5A3A; outline-offset: 2px; }
+  .traffic .nl-form { border-top: 1px solid var(--gray-200, #e5e5e5); margin-top: 6px; padding-top: 6px; display: flex; flex-direction: column; gap: 8px; }
+  .traffic .nl-fr { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "n v" "b b" "s s"; gap: 2px 8px; }
+  .traffic .nl-fn { grid-area: n; font-size: 0.85rem; font-weight: 600; min-width: 0; }
+  .traffic .nl-fv { grid-area: v; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .traffic .nl-fb { grid-area: b; height: 6px; background: #EEF1EE; border-radius: 3px; overflow: hidden; }
+  .traffic .nl-fb span { display: block; height: 100%; background: #2F5A3A; border-radius: 3px; } .traffic .nl-fb span.alt { background: #9AA59C; }
+  .traffic .nl-fs { grid-area: s; font-size: 0.72rem; color: var(--gray-500); }
+  .traffic .nl-off { font-size: 0.65rem; font-weight: 500; color: #8a6d1f; background: #F6EBDC; padding: 1px 6px; border-radius: 6px; }
   .traffic .nl-cmp { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
   .traffic .nl-c { border: 1px solid var(--gray-200, #e5e5e5); border-radius: 8px; padding: 6px 8px; min-width: 0; }
   .traffic .nl-ck { font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: .04em; }
@@ -3546,13 +3588,41 @@ function caricaIscritti(qs) {
     };
     var lbl = n === 1 ? 'giorno prima' : 'periodo prima';
     var tot = d.totale && d.totale.totale ? '<span class="nl-tot" title="Contatti iscritti alla newsletter oggi">● ' + it(d.totale.totale) + ' iscritti totali</span>' : '';
-    var h = '<div class="nl-head"><span class="ch-lab">Iscritti newsletter</span>' + tot + '</div>'
+    var h = '<div class="nl-head"><span class="ch-lab nl-click" role="button" tabindex="0" onclick="toggleNlForm()" onkeydown="if(event.key===&quot;Enter&quot;)toggleNlForm()">Iscritti newsletter <span class="t-more">· da quale form ›</span></span>' + tot + '</div>'
       + '<div class="nl-main"><span class="t-val">+' + it(d.iscritti) + '</span>'
       + (d.prec ? delta(d.iscritti, d.prec.iscritti) + '<span class="t-neg">vs +' + it(d.prec.iscritti) + ' ' + lbl + '</span>' : '') + '</div>'
       + '<div class="t-neg">' + it(d.disiscritti) + ' disiscritti · netto ' + (d.iscritti - d.disiscritti >= 0 ? '+' : '') + it(d.iscritti - d.disiscritti) + (n > 1 ? ' · media +' + Math.round(d.iscritti / n) + ' al giorno' : '') + (d.approx ? ' · dato mensile' : '') + '</div>' + (d.finti ? '<div class="t-sub" title="Email di test dei bot o iscritti e disiscritti entro 2 minuti">esclusi ' + it(d.finti) + ' contatti finti (bot) negli ultimi 60 giorni</div>' : '');
     if (d.confronti && d.confronti.length) h += '<div class="nl-cmp">' + d.confronti.map(function (c) { return '<div class="nl-c"><div class="nl-ck">' + c.k + '</div><div class="nl-cv">+' + it(c.a) + ' ' + delta(c.a, c.b) + '</div><div class="nl-cs">vs +' + it(c.b) + ' ' + c.vs + '</div></div>'; }).join('') + '</div>';
+    h += '<div class="nl-form" id="nl-form" hidden></div>';
+    NL_TOT = d.iscritti || 0;
     el.innerHTML = h;
   }).catch(function () { el.innerHTML = '<span class="ch-lab">Iscritti newsletter</span><span class="t-sub">non disponibili</span>'; });
+}
+var NL_TOT = 0;
+function nomeForm(n) {
+  n = String(n || '');
+  if (/avvisami|notify me|back in stock/i.test(n)) return (n.indexOf('(IT') >= 0 ? 'Avvisami quando torna (IT)' : n.indexOf('(EN') >= 0 ? 'Notify me – back in stock (EN)' : 'Avviso disponibilità');
+  if (/landing/i.test(n)) return 'Landing page newsletter';
+  if (/welcome/i.test(n)) return 'Popup benvenuto −10%';
+  return n;
+}
+function toggleNlForm() {
+  var el = document.getElementById('nl-form'); if (!el) return;
+  if (!el.hidden) { el.hidden = true; return; }
+  el.hidden = false; el.innerHTML = '<div class="t-sub">Carico i form…</div>';
+  fetch('/api/newsletter-form?' + TRAFFICO_QS).then(function (r) { return r.json(); }).then(function (d) {
+    if (!d || !d.success) { el.innerHTML = '<div class="t-sub">Dettaglio form non disponibile.</div>'; return; }
+    var it = function (v) { return Math.round(v).toLocaleString('it-IT'); };
+    var rows = d.form || [], somma = rows.reduce(function (t, f) { return t + f.iscritti; }, 0);
+    var max = Math.max.apply(null, rows.map(function (f) { return f.iscritti; }).concat([1]));
+    var html = rows.map(function (f) {
+      var conv = f.viste ? (f.invii / f.viste * 100).toFixed(1).replace('.', ',') + '% di chi lo vede' : '';
+      return '<div class="nl-fr"><div class="nl-fn">' + nomeForm(f.nome) + (f.stato !== 'enabled' ? ' <span class="nl-off">spento</span>' : '') + '</div><div class="nl-fb"><span style="width:' + Math.max(3, Math.round(f.iscritti / max * 100)) + '%"></span></div><div class="nl-fv">+' + it(f.iscritti) + '</div><div class="nl-fs">' + it(f.viste) + ' visualizzazioni' + (conv ? ' · ' + conv : '') + '</div></div>';
+    }).join('');
+    var altri = NL_TOT - somma;
+    if (altri > 0) html += '<div class="nl-fr"><div class="nl-fn">Altri canali</div><div class="nl-fb"><span class="alt" style="width:' + Math.max(3, Math.round(altri / Math.max(max, altri) * 100)) + '%"></span></div><div class="nl-fv">+' + it(altri) + '</div><div class="nl-fs">checkout, fascia/popup Black Friday del sito, concierge, import</div></div>';
+    el.innerHTML = html || '<div class="t-sub">Nessuna iscrizione dai form nel periodo.</div>';
+  }).catch(function () { el.innerHTML = '<div class="t-sub">Dettaglio form non disponibile.</div>'; });
 }
 var FONTI_NOMI = { direct: 'Diretto', search: 'Ricerca', social: 'Social', email: 'Email / newsletter', unknown: 'Altri siti', paid: 'A pagamento', referral: 'Altri siti' };
 function nomeFonte(f) {
@@ -5592,6 +5662,14 @@ export default async function handler(req, res) {
       return res.json({ sistema: 'TLuxy Business Manager v5.65', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
+    if (req.method === 'GET' && path === '/api/newsletter-form') {
+      try {
+        const rg = getDateRange(query.get('periodo') || 'today', query.get('from'), query.get('to'));
+        const da = getRomeDateString(new Date(rg.dateFrom)), a = getRomeDateString(new Date(rg.dateTo));
+        const form = await omnisendIscrittiPerForm(da, a);
+        return res.json({ success: true, da, a, form });
+      } catch (e) { console.log('[newsletter-form]', e.message); return res.json({ success: false, error: e.message }); }
+    }
     if (req.method === 'GET' && path === '/api/newsletter-iscritti') {
       try {
         const rg = getDateRange(query.get('periodo') || 'today', query.get('from'), query.get('to'));
