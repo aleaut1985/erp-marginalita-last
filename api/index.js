@@ -861,6 +861,10 @@ function riconosciMarketplaceBase(ordine) {
   if (tags.includes('mark foy') || tags.includes("mark foy's")) {
     return { key: 'MARK_FOYS', config: MARKETPLACE_CONFIGS.MARK_FOYS };
   }
+  // Ordini Syncio arrivati da Jammy Dude (tag "jammydude21 syncio-order"): stesso source 1615469, ma sono Jammy Dude, non Mark Foy's
+  if (/jammy\s*-?dude/.test(tags)) {
+    return { key: 'JAMMY_DUDE', config: MARKETPLACE_CONFIGS.JAMMY_DUDE };
+  }
   // Caso sub: source 1615469 MA email non è di thebradery → Mark Foy's
   if (rawSource === '1615469' && email && !email.includes('thebradery')) {
     return { key: 'MARK_FOYS', config: MARKETPLACE_CONFIGS.MARK_FOYS };
