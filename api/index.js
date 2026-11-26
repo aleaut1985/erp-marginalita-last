@@ -2900,6 +2900,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .lo-mp { display: inline-block; color: #fff; font-size: 0.62rem; font-weight: 600; padding: 2px 7px; border-radius: 10px; white-space: nowrap; }
   .lo-forn { display: inline-block; font-size: 0.6rem; font-weight: 700; letter-spacing: .04em; padding: 1px 5px; border-radius: 4px; margin-right: 5px; background: #ECE8DF; color: #5A5347; vertical-align: 1px; }
   .lo-forn-mm { background: #EDE4F7; color: #5B2E91; }
+  .lo-atl { grid-column: 1 / -1; grid-row: 3; margin-top: 4px; font-size: 0.72rem; }
+  .lo-atl-ok { color: #2F6B3A; font-weight: 600; }
+  .lo-atl-btn { font: inherit; font-size: 0.72rem; font-weight: 600; padding: 4px 10px; border-radius: 6px; border: 1px solid #5B2E91; background: #fff; color: #5B2E91; cursor: pointer; }
+  .lo-atl-btn:hover { background: #EDE4F7; } .lo-atl-btn:disabled { opacity: .6; cursor: default; }
   .lo-items { grid-column: 1; font-size: 0.74rem; color: var(--gray-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lo-price { grid-column: 2; grid-row: 1; text-align: right; font-weight: 600; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
   .lo-marg { grid-column: 2; grid-row: 2; text-align: right; font-size: 0.74rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -3449,6 +3453,25 @@ function loFlag(cc) {
   var f = String.fromCodePoint(0x1F1E6 + cc.charCodeAt(0) - 65, 0x1F1E6 + cc.charCodeAt(1) - 65);
   return '<span class="lo-flag" title="' + cc + '" aria-label="Paese ' + cc + '">' + f + '</span>';
 }
+// v5.69: ordini Mantova Moda → bottone per il tag ATELIER READY (fa partire l'ordine su Atelier)
+function loAtelierBtn(o) {
+  var pronto = String(o.tags || '').split(',').some(function (t) { return t.trim().toUpperCase() === 'ATELIER READY'; });
+  var n = String(o.name || ('#' + o.order_number)).replace(/[&<>"']/g, '');
+  return pronto ? '<div class="lo-atl lo-atl-ok">✓ Inviato ad Atelier</div>'
+    : '<div class="lo-atl"><button type="button" class="lo-atl-btn" data-name="' + n + '" onclick="loAtelierReady(this)">Invia ad Atelier (tag ATELIER READY)</button></div>';
+}
+function loAtelierReady(btn) {
+  var nome = btn.getAttribute('data-name');
+  if (!confirm('Aggiungo il tag ATELIER READY all’ordine ' + nome + '? Atelier lo prenderà in carico.')) return;
+  btn.disabled = true; btn.textContent = 'Invio…';
+  fetch('/api/ordine-atelier-ready', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nome }) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.success) { btn.parentNode.className = 'lo-atl lo-atl-ok'; btn.parentNode.textContent = d.gia ? '✓ Era già inviato ad Atelier' : '✓ Inviato ad Atelier'; }
+      else { btn.disabled = false; btn.textContent = 'Riprova'; alert(d.error || 'Errore'); }
+    })
+    .catch(function () { btn.disabled = false; btn.textContent = 'Riprova'; });
+}
 // v5.50: lista compatta degli ordini del periodo sotto "Costi e margine" (si vedono ~3 righe, poi si scorre)
 function renderLastOrders(breakdown) {
   const box = document.getElementById('last-orders'); const list = document.getElementById('lo-list'); const cnt = document.getElementById('lo-count');
@@ -3470,7 +3493,7 @@ function renderLastOrders(breakdown) {
     return '<div class="lo-row" data-ord="' + esc(String(o.order_number || '')) + '"><div class="lo-top"><span class="lo-num" title="' + esc(o.name || ('#' + o.order_number)) + '">' + esc(loShortNum(o.name || ('#' + o.order_number))) + '</span>' + loFlag(o.country) + '<span class="lo-mp" style="background:' + (MP_COLORS[r.k] || '#8E8E8E') + ';color:' + mpTextColor(MP_COLORS[r.k]) + '">' + esc(r.nome) + '</span><span class="lo-time">' + quando + reso + '</span></div>' +
       '<div class="lo-price">€' + Math.round(o.fatturato || 0).toLocaleString('it-IT') + '</div>' +
       '<div class="lo-items" title="' + esc(testo) + '">' + fornChip + esc(testo) + '</div>' +
-      '<div class="lo-marg ' + cls + '">' + (m >= 0 ? '+' : '−') + '€' + Math.abs(Math.round(m)).toLocaleString('it-IT') + ' · ' + (o.margine_percentuale || 0).toFixed(1) + '%</div></div>';
+      '<div class="lo-marg ' + cls + '">' + (m >= 0 ? '+' : '−') + '€' + Math.abs(Math.round(m)).toLocaleString('it-IT') + ' · ' + (o.margine_percentuale || 0).toFixed(1) + '%</div>' + (fornChip.indexOf('lo-forn-mm') > -1 ? loAtelierBtn(o) : '') + '</div>';
   }).join('');
   if (cnt) cnt.textContent = righe.length > 3 ? righe.length + ' · scorri per vederli tutti' : String(righe.length);
   list.scrollTop = 0; box.hidden = false;
@@ -5695,6 +5718,25 @@ export default async function handler(req, res) {
       catch (e) { return res.json({ success: false, error: e.message }); }
     }
 
+    // v5.69: tag ATELIER READY sugli ordini Mantova Moda → Atelier/Zucchetti prende in carico l'ordine
+    if (req.method === 'POST' && path === '/api/ordine-atelier-ready') {
+      const b = await readJsonBody(req);
+      const nome = String(b.name || '').trim().slice(0, 80);
+      if (!nome) return res.json({ success: false, error: 'Ordine mancante' });
+      try {
+        const q = await shopifyGraphQL('query($q:String!){ orders(first:1, query:$q){ edges { node { id name tags lineItems(first:50){ edges { node { sku } } } } } } }', { q: 'name:' + JSON.stringify(nome) });
+        const o = q?.data?.orders?.edges?.[0]?.node;
+        if (!o) return res.json({ success: false, error: 'Ordine ' + nome + ' non trovato' });
+        const mm = (o.lineItems?.edges || []).some(e => isMMSku(e.node.sku));
+        if (!mm) return res.json({ success: false, error: 'Nessun articolo Mantova Moda (AMM-) in questo ordine' });
+        if ((o.tags || []).some(t => String(t).toUpperCase() === 'ATELIER READY')) return res.json({ success: true, gia: true });
+        const r = await shopifyGraphQL('mutation($id:ID!,$t:[String!]!){ tagsAdd(id:$id, tags:$t){ userErrors { message } } }', { id: o.id, t: ['ATELIER READY'] });
+        const err = r?.errors?.[0]?.message || r?.data?.tagsAdd?.userErrors?.[0]?.message;
+        if (err) return res.json({ success: false, error: /access|scope|denied/i.test(err) ? 'Manca il permesso write_orders sull\'app ERP' : err });
+        return res.json({ success: true });
+      } catch (e) { return res.json({ success: false, error: e.message }); }
+    }
+
     if (req.method === 'GET' && (path === '/' || path === '/dashboard')) {
       res.setHeader('Content-Type', 'text/html');
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
@@ -5702,7 +5744,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.68', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.69', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/newsletter-form') {
@@ -5919,6 +5961,7 @@ export default async function handler(req, res) {
           breakdown_marketplace[mp.key].dettaglio_ordini.push({
             order_number: ordine.order_number,
             name: ordine.name,
+            tags: ordine.tags || '',
             created_at: ordine.created_at,
             country,
             fatturato: ris.prezzo_lordo_iva_inclusa,
