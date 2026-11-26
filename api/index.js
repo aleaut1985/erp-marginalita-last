@@ -1296,21 +1296,21 @@ function paTestiRiservato(lang, o) {
   const it = lang === 'it';
   const scad = new Date(o.scade).toLocaleString(it ? 'it-IT' : 'en-GB', { timeZone: 'Europe/Rome', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   return it ? {
-    subject: `Ti abbiamo riservato un prezzo: ${o.title}`, preheader: 'Un prezzo solo per te, valido 24 ore.',
+    subject: `Variazione di prezzo: ${o.title}`, preheader: 'Un prezzo solo per te, valido 24 ore.',
     eyebrow: 'Solo per te · 24 ore', headline: 'Ti abbiamo riservato un prezzo',
     intro: `Ci avevi chiesto di avvisarti. Per le prossime 24 ore questo pezzo ha un prezzo pensato solo per te.`,
     expiry_line: `Il tuo prezzo è valido fino a ${scad}`, cta: 'Vedi il tuo prezzo',
     note: 'Nessun codice da inserire: aprendo il link il prezzo è già applicato. Il prezzo vale finché il pezzo è disponibile.',
     signature: 'Il tuo Personal Concierge T.LUXY', trust: 'Originale garantito · Spedizione assicurata · Reso facile',
-    footer: 'Ricevi questa email perché hai chiesto di essere avvisata sul prezzo di questo articolo.', unsub_label: "Annulla l'iscrizione"
+    footer: 'Stai ricevendo questa email perché c’è stata una variazione di prezzo sull’articolo che segui.', unsub_label: "Annulla l'iscrizione"
   } : {
-    subject: `We've reserved a price for you: ${o.title}`, preheader: 'A price just for you, valid for 24 hours.',
+    subject: `Price change: ${o.title}`, preheader: 'A price just for you, valid for 24 hours.',
     eyebrow: 'Just for you · 24 hours', headline: "We've reserved a price for you",
     intro: `You asked us to let you know. For the next 24 hours this piece has a price set aside just for you.`,
     expiry_line: `Your price is valid until ${scad} (Italian time)`, cta: 'See your price',
     note: 'No code needed: open the link and your price is already applied. Valid while the piece is available.',
     signature: 'Your T.LUXY Personal Concierge', trust: 'Guaranteed authentic · Insured shipping · Easy returns',
-    footer: 'You are receiving this email because you asked to be notified about the price of this item.', unsub_label: 'Unsubscribe'
+    footer: 'You are receiving this email because there has been a price change on the item you are following.', unsub_label: 'Unsubscribe'
   };
 }
 async function paCreaOfferta({ email, handle, pct, prezzoFinale, lang }) {
