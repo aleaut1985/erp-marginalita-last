@@ -132,6 +132,22 @@ function passwordOk(user, pass) {
     return userOk && passOk;
   } catch (e) { return false; }
 }
+// v5.70: utenti aggiuntivi (es. Floriana) salvati in KV come { email: 'salt:hash' }; li gestisce solo l'amministratore da /utenti
+const UTENTI_KEY = 'erp:utenti:v1';
+async function utentiExtra() { try { const v = await kvGet(UTENTI_KEY); const o = v ? JSON.parse(v) : {}; return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } }
+function hashPassword(pass) { const salt = crypto.randomBytes(16); return salt.toString('hex') + ':' + crypto.scryptSync(String(pass), salt, 64, { N: 16384, r: 8, p: 1 }).toString('hex'); }
+function hashOk(pass, stored) { try { const [salt, hash] = String(stored).split(':'); const calc = crypto.scryptSync(String(pass || ''), Buffer.from(salt, 'hex'), 64, { N: 16384, r: 8, p: 1 }); return crypto.timingSafeEqual(calc, Buffer.from(hash, 'hex')); } catch (e) { return false; } }
+function isAdmin(u) { return !!u && (u.email === 'utente:' + ERP_USER || u.email === 'auth-disabled'); }
+function utentiPage(lista, msg) {
+  const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const righe = lista.length ? lista.map(e => `<li><span>${esc(e)}</span><form method="post" action="/utenti" onsubmit="return confirm('Tolgo l’accesso a ${esc(e)}?')"><input type="hidden" name="azione" value="rimuovi"><input type="hidden" name="email" value="${esc(e)}"><button class="rm">Togli accesso</button></form></li>`).join('') : '<li class="vuoto">Nessun altro utente</li>';
+  return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Utenti · TLuxy Business Manager</title>
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F6F4EF;color:#1b1b1b;margin:0;padding:24px 16px}main{max-width:460px;margin:0 auto;background:#fff;border-radius:14px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.06)}h1{font-size:1.2rem;margin:0 0 4px}p{color:#666;font-size:.88rem;margin:0 0 18px}ul{list-style:none;padding:0;margin:0 0 22px}li{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #eee;font-size:.92rem}li.vuoto{color:#999}label{display:block;font-size:.8rem;font-weight:600;margin:12px 0 4px}input[type=email],input[type=password]{width:100%;box-sizing:border-box;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:1rem}button{font:inherit;cursor:pointer;border-radius:8px}button.add{margin-top:16px;width:100%;padding:11px;background:#111;color:#fff;border:0;font-weight:600}button.rm{padding:5px 10px;background:#fff;border:1px solid #c0392b;color:#c0392b;font-size:.8rem}.msg{background:#EEF4EF;color:#2F5A3A;padding:10px;border-radius:8px;font-size:.88rem;margin-bottom:14px}a{color:#555;font-size:.85rem}</style></head><body><main>
+<h1>Chi può entrare nell’ERP</h1><p>Tu sei l’amministratore. Gli utenti qui sotto vedono tutto l’ERP ma non possono gestire gli accessi.</p>
+${msg ? `<div class="msg">${esc(msg)}</div>` : ''}<ul>${righe}</ul>
+<form method="post" action="/utenti"><input type="hidden" name="azione" value="aggiungi"><label>Email (sarà il nome utente)</label><input type="email" name="email" required autocomplete="off"><label>Password (almeno 10 caratteri)</label><input type="password" name="password" required minlength="10" autocomplete="new-password"><button class="add">Aggiungi utente</button></form>
+<p style="margin-top:18px"><a href="/">← Torna all’ERP</a></p></main></body></html>`;
+}
 function passwordLoginPage(errore) {
   return `<!DOCTYPE html>
 <html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -5501,9 +5517,11 @@ export default async function handler(req, res) {
         res.setHeader('Content-Type', 'text/html');
         if (t.n >= 8) return res.status(429).send(passwordLoginPage('Troppi tentativi, riprova tra 15 minuti'));
         await new Promise(r => setTimeout(r, 300));
-        if (!passwordOk(user, pass)) { t.n++; tentativiLogin.set(ip, t); return res.status(401).send(passwordLoginPage('Utente o password non corretti')); }
+        let chi = passwordOk(user, pass) ? ERP_USER : null;
+        if (!chi) { const ux = await utentiExtra(); const u = String(user || '').trim().toLowerCase(); if (ux[u] && hashOk(pass, ux[u])) chi = u; }
+        if (!chi) { t.n++; tentativiLogin.set(ip, t); return res.status(401).send(passwordLoginPage('Utente o password non corretti')); }
         tentativiLogin.delete(ip);
-        setAuthCookie(res, 'utente:' + ERP_USER);
+        setAuthCookie(res, 'utente:' + chi);
         res.writeHead(303, { Location: '/' });
         return res.end();
       }
@@ -5707,6 +5725,27 @@ export default async function handler(req, res) {
       return res.status(401).json({ success: false, error: 'Non autorizzato. Effettua il login.', auth_required: true });
     }
 
+    // v5.70: un utente aggiuntivo rimosso da /utenti perde subito l'accesso
+    if (AUTH_ENABLED && authUser && !isAdmin(authUser) && String(authUser.email).startsWith('utente:')) {
+      const ux = await utentiExtra();
+      if (!ux[String(authUser.email).slice(7)]) { clearAuthCookie(res); if (req.method === 'GET' && !path.startsWith('/api/')) { res.writeHead(302, { Location: '/login' }); return res.end(); } return res.status(401).json({ success: false, error: 'Accesso revocato', auth_required: true }); }
+    }
+    if (path === '/utenti') {
+      res.setHeader('Cache-Control', 'no-store'); res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      if (!isAdmin(authUser)) return res.status(403).send('Solo l’amministratore può gestire gli utenti.');
+      let msg = '';
+      if (req.method === 'POST') {
+        let raw = ''; if (req.body && typeof req.body === 'object') raw = new URLSearchParams(req.body).toString(); else if (typeof req.body === 'string') raw = req.body; else await new Promise((ok, ko) => { req.on('data', c => raw += c); req.on('end', ok); req.on('error', ko); });
+        const f = new URLSearchParams(raw); const email = String(f.get('email') || '').trim().toLowerCase();
+        const ux = await utentiExtra();
+        if (f.get('azione') === 'rimuovi') { delete ux[email]; await kvSet(UTENTI_KEY, JSON.stringify(ux)); msg = 'Accesso tolto a ' + email; }
+        else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email === ERP_USER) msg = 'Email non valida';
+        else if (String(f.get('password') || '').length < 10) msg = 'La password deve avere almeno 10 caratteri';
+        else { ux[email] = hashPassword(f.get('password')); await kvSet(UTENTI_KEY, JSON.stringify(ux)); msg = 'Utente ' + email + ' aggiunto: può entrare con questa email e la password scelta'; }
+      }
+      return res.status(200).send(utentiPage(Object.keys(await utentiExtra()).sort(), msg));
+    }
+
     // ============ v5.65 PAGINA AVVISI PREZZO ============
     if (req.method === 'GET' && path === '/avvisi') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.status(200).send(PA_PAGE); }
     if (req.method === 'GET' && path === '/api/avvisi') {
@@ -5744,7 +5783,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.69', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.70', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/newsletter-form') {
