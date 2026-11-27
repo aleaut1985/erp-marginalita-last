@@ -132,6 +132,24 @@ function passwordOk(user, pass) {
     return userOk && passOk;
   } catch (e) { return false; }
 }
+// v5.72: spesa pubblicitaria giornaliera (Google Ads + Meta) caricata ogni notte da Claude: KV ads:giorno:YYYY-MM-DD
+async function adsPeriodo(da, a) {
+  const giorni = []; for (let d = new Date(da + 'T12:00:00Z'); d.toISOString().slice(0, 10) <= a; d = new Date(d.getTime() + 86400000)) giorni.push(d.toISOString().slice(0, 10));
+  const vals = {}; for (let i = 0; i < giorni.length; i += 90) Object.assign(vals, await kvMGet(giorni.slice(i, i + 90).map(g => 'ads:giorno:' + g)));
+  const canali = {}; let totale = 0, mancanti = [];
+  giorni.forEach(g => {
+    let v = vals['ads:giorno:' + g]; if (!v) { mancanti.push(g); return; }
+    try { v = typeof v === 'string' ? JSON.parse(v) : v; } catch (e) { mancanti.push(g); return; }
+    ['google', 'meta'].forEach(c => {
+      const x = v[c]; if (!x) return;
+      if (!canali[c]) canali[c] = { totale: 0, campagne: {} };
+      canali[c].totale += +x.totale || 0; totale += +x.totale || 0;
+      (x.campagne || []).forEach(k => { const n = String(k.nome || '—'); const t = canali[c].campagne[n] || (canali[c].campagne[n] = { spesa: 0, tipo: k.tipo || '' }); t.spesa += +k.spesa || 0; });
+    });
+  });
+  Object.values(canali).forEach(c => { c.campagne = Object.entries(c.campagne).map(([nome, v]) => ({ nome, spesa: Math.round(v.spesa * 100) / 100, tipo: v.tipo })).sort((x, y) => y.spesa - x.spesa); c.totale = Math.round(c.totale * 100) / 100; });
+  return { da, a, giorni: giorni.length, caricati: giorni.length - mancanti.length, mancanti, totale: Math.round(totale * 100) / 100, canali };
+}
 // v5.70: utenti aggiuntivi (es. Floriana) salvati in KV come { email: 'salt:hash' }; li gestisce solo l'amministratore da /utenti
 const UTENTI_KEY = 'erp:utenti:v1';
 async function utentiExtra() { try { const v = await kvGet(UTENTI_KEY); const o = v ? JSON.parse(v) : {}; return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } }
@@ -3498,6 +3516,7 @@ function renderLastOrders(breakdown) {
   if (!box || !list) return;
   const righe = [];
   Object.keys(breakdown || {}).forEach(function (k) { (breakdown[k].dettaglio_ordini || []).forEach(function (o) { righe.push({ k: k, nome: breakdown[k].nome, o: o }); }); });
+  LAST_BD = breakdown || null; renderAds();
   if (!righe.length) { box.hidden = true; list.innerHTML = ''; return; }
   righe.sort(function (a, b) { return new Date(b.o.created_at || 0) - new Date(a.o.created_at || 0); });
   const oggi = new Date().toDateString();
@@ -3649,12 +3668,50 @@ function caricaTraffico(qs) {
       html += '<div class="t-bars" aria-label="Visite giornaliere">' + gg.map(function (x, i) { return '<span class="t-bar' + (i === gg.length - 1 ? ' last' : '') + '" style="height:' + Math.max(4, Math.round(x.s / max * 100)) + '%" title="' + fmt(x.d) + ': ' + it(x.s) + ' visite · conv. ' + (x.s ? (x.o / x.s * 100).toFixed(2).replace('.', ',') : '0') + '%"></span>'; }).join('') + '</div>'
         + '<div class="t-axis"><span>' + fmt(gg[0].d) + '</span><span>' + fmt(gg[gg.length - 1].d) + '</span></div>';
     }
-    box.innerHTML = html + '<div class="t-src" id="t-src" hidden></div><div class="t-kpi t-nl" id="t-nl"><span class="ch-lab">Iscritti newsletter</span><span class="t-sub">carico…</span></div>';
+    box.innerHTML = html + '<div class="t-src" id="t-src" hidden></div><div class="t-kpi t-nl" id="t-nl"><span class="ch-lab">Iscritti newsletter</span><span class="t-sub">carico…</span></div><div class="t-kpi t-nl" id="t-ads"><span class="ch-lab">Pubblicità</span><span class="t-sub">carico…</span></div>';
     TRAFFICO_QS = qs;
     caricaIscritti(qs);
+    caricaAds(qs);
   }).catch(function () { box.innerHTML = '<div class="t-err">Visite non disponibili.</div>'; });
 }
 var TRAFFICO_QS = '';
+// v5.72: spesa pubblicitaria Google + Meta del periodo, ripartita sulle vendite dirette (T. Luxy proprio)
+var ADS_DATA = null, LAST_BD = null;
+function caricaAds(qs) {
+  ADS_DATA = null;
+  fetch('/api/ads-spesa?' + qs).then(function (r) { return r.json(); }).then(function (d) { ADS_DATA = d; renderAds(); }).catch(function () { var el = document.getElementById('t-ads'); if (el) el.innerHTML = '<span class="ch-lab">Pubblicità</span><span class="t-sub">non disponibile</span>'; });
+}
+function renderAds() {
+  var el = document.getElementById('t-ads'), d = ADS_DATA; if (!el || !d) return;
+  var eu = function (v) { return '€' + Math.round(v || 0).toLocaleString('it-IT'); };
+  if (!d.success || !d.caricati) { el.innerHTML = '<span class="ch-lab">Pubblicità</span><span class="t-sub">' + (d.success ? 'spesa non ancora caricata per questo periodo (si aggiorna ogni notte)' : 'non disponibile') + '</span>'; return; }
+  var dir = LAST_BD && LAST_BD.TLUXY_SITE ? LAST_BD.TLUXY_SITE : null;
+  var g = d.canali.google ? d.canali.google.totale : 0, m = d.canali.meta ? d.canali.meta.totale : 0;
+  var h = '<div class="nl-head"><span class="ch-lab nl-click" role="button" tabindex="0" onclick="toggleAds()" onkeydown="if(event.key===&quot;Enter&quot;)toggleAds()">Pubblicità Google + Meta <span class="t-more">· dove sono andati i soldi ›</span></span></div>'
+    + '<div class="nl-main"><span class="t-val">' + eu(d.totale) + '</span><span class="t-neg">Google ' + eu(g) + ' · Meta ' + eu(m) + '</span></div>';
+  if (dir && dir.fatturato > 0) {
+    var pct = d.totale / dir.fatturato * 100, perOrd = dir.ordini ? d.totale / dir.ordini : 0, dopo = (dir.margine || 0) - d.totale;
+    h += '<div class="t-neg">' + pct.toFixed(1).replace('.', ',') + '% delle vendite dirette (' + eu(dir.fatturato) + ', ' + dir.ordini + ' ordini) · ' + eu(perOrd) + ' a ordine</div>'
+      + '<div class="t-neg">Margine vendite dirette dopo pubblicità: <b style="color:' + (dopo >= 0 ? 'var(--green,#2F6B3A)' : '#c0392b') + '">' + (dopo < 0 ? '−' : '') + eu(Math.abs(dopo)) + ' · ' + (dopo / dir.fatturato * 100).toFixed(1).replace('.', ',') + '%</b> (prima ' + eu(dir.margine) + ')</div>';
+  }
+  if (d.mancanti && d.mancanti.length) h += '<div class="t-neg">Mancano ' + d.mancanti.length + ' giorni di dati (' + d.mancanti.slice(0, 3).map(function (x) { return x.slice(8, 10) + '/' + x.slice(5, 7); }).join(', ') + (d.mancanti.length > 3 ? '…' : '') + ')</div>';
+  h += '<div class="nl-form" id="ads-det" hidden></div>';
+  el.innerHTML = h;
+}
+function toggleAds() {
+  var el = document.getElementById('ads-det'), d = ADS_DATA; if (!el || !d) return;
+  if (!el.hidden) { el.hidden = true; return; }
+  var eu = function (v) { return '€' + Math.round(v || 0).toLocaleString('it-IT'); };
+  var nomi = { google: 'Google Ads', meta: 'Meta (Facebook + Instagram)' };
+  var html = '';
+  ['google', 'meta'].forEach(function (c) {
+    var x = d.canali[c]; if (!x) return;
+    var max = Math.max.apply(null, x.campagne.map(function (k) { return k.spesa; }).concat([1]));
+    html += '<div class="nl-fr" style="font-weight:700;margin-top:6px"><span>' + nomi[c] + '</span><span>' + eu(x.totale) + '</span></div>'
+      + x.campagne.map(function (k) { return '<div class="nl-fr"><span title="' + k.nome.replace(/"/g, '') + '">' + k.nome.replace(/</g, '&lt;') + (k.tipo ? ' <span class="t-neg">· ' + k.tipo + '</span>' : '') + '</span><span>' + eu(k.spesa) + ' · ' + Math.round(k.spesa / (d.totale || 1) * 100) + '%</span></div><div style="height:4px;background:#EEE9DF;border-radius:2px;margin:0 0 4px"><div style="height:4px;border-radius:2px;background:' + (c === 'google' ? '#4A7FBC' : '#8E4FBF') + ';width:' + Math.max(2, Math.round(k.spesa / max * 100)) + '%"></div></div>'; }).join('');
+  });
+  el.innerHTML = html || '<div class="t-sub">Nessun dettaglio.</div>'; el.hidden = false;
+}
 function caricaIscritti(qs) {
   var el = document.getElementById('t-nl'); if (!el) return;
   fetch('/api/newsletter-iscritti?' + qs).then(function (r) { return r.json(); }).then(function (d) {
@@ -5504,6 +5561,22 @@ export default async function handler(req, res) {
       }
     }
 
+    // v5.72: carico spesa pubblicitaria di un giorno (Bearer CRON_SECRET o utente loggato)
+    if (req.method === 'POST' && path === '/api/ads-spesa') {
+      const bearer = String(req.headers['authorization'] || '');
+      if (!((CRON_SECRET && bearer === 'Bearer ' + CRON_SECRET) || getAuthenticatedUser(req))) return res.status(401).json({ ok: false });
+      let b = req.body; if (typeof b === 'string') { try { b = JSON.parse(b); } catch (_) { b = null; } } if (!b || typeof b !== 'object') b = await readJsonBody(req);
+      const giorni = Array.isArray(b.giorni) ? b.giorni : [b];
+      const fatti = [];
+      for (const g of giorni.slice(0, 120)) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(g.data || ''))) continue;
+        const pulisci = x => x ? { totale: Math.round((+x.totale || 0) * 100) / 100, campagne: (Array.isArray(x.campagne) ? x.campagne : []).slice(0, 60).map(k => ({ nome: String(k.nome || '').slice(0, 140), spesa: Math.round((+k.spesa || 0) * 100) / 100, tipo: String(k.tipo || '').slice(0, 30) })) } : null;
+        await kvSet('ads:giorno:' + g.data, JSON.stringify({ google: pulisci(g.google), meta: pulisci(g.meta), aggiornato: new Date().toISOString() }));
+        fatti.push(g.data);
+      }
+      return res.json({ ok: true, salvati: fatti });
+    }
+
     // ============ LOGIN UTENTE + PASSWORD (v5.22) ============
     if (PASSWORD_AUTH && path === '/login') {
       res.setHeader('Cache-Control', 'no-store');
@@ -5787,7 +5860,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api') {
-      return res.json({ sistema: 'TLuxy Business Manager v5.70', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
+      return res.json({ sistema: 'TLuxy Business Manager v5.72', status: 'LIVE', store: SHOPIFY_STORE, credentials_configured: !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET), auth_enabled: AUTH_ENABLED, auth_type: 'magic_link_resend', kv_enabled: KV_ENABLED, kv_source: KV_SOURCE, anthropic_configured: !!process.env.ANTHROPIC_API_KEY, user_email: authUser?.email || null, funzionalita: ['🧾 Controllo margini DUOMO (/api/duo-alerts)', '🔔 Alert canali lenti (/api/alerts)', '📅 Regole MP con data di validità (Miinto 21,5% dal 01/11/2026, Bradery 90/10)', '🧮 Scorciatoia Retail+Sconti nel Calcolatore', '📊 Excel batch con Retail + Sconto% fornitore', '💡 Sconto Max accettabile per 20% margine', '💬 Chat AI assistant (Claude Haiku 4.5)', 'GIGLIO.COM marketplace', 'Mark Foy: incasso = prezzo B2B (metafield mark_foy_price → listino → DUOMO costo×1,15)', 'Split costi KPI (Merce + Fees)', 'Simulatore DUO on-demand', 'Snapshot Inventario', 'Cache KV 24h', 'Previsioni Incassi', 'Balardi wallet', 'Gestione resi/refund', 'Conversione valuta automatica'], marketplaces_supportati: Object.keys(MARKETPLACE_CONFIGS).length });
     }
 
     if (req.method === 'GET' && path === '/api/newsletter-form') {
@@ -5797,6 +5870,12 @@ export default async function handler(req, res) {
         const form = await omnisendIscrittiPerForm(da, a);
         return res.json({ success: true, da, a, form });
       } catch (e) { console.log('[newsletter-form]', e.message); return res.json({ success: false, error: e.message }); }
+    }
+    if (req.method === 'GET' && path === '/api/ads-spesa') {
+      try {
+        const rg = getDateRange(query.get('periodo') || 'today', query.get('from'), query.get('to'));
+        return res.json({ success: true, ...(await adsPeriodo(getRomeDateString(new Date(rg.dateFrom)), getRomeDateString(new Date(rg.dateTo)))) });
+      } catch (e) { return res.json({ success: false, error: e.message }); }
     }
     if (req.method === 'GET' && path === '/api/newsletter-iscritti') {
       try {
