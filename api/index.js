@@ -5667,6 +5667,7 @@ export default async function handler(req, res) {
     // v5.79.1: diagnosi ATELIER READY senza scrivere (solo CRON_SECRET)
     if (req.method === 'GET' && path === '/api/atelier-diag') {
       if (!(CRON_SECRET && String(req.headers['authorization'] || '') === 'Bearer ' + CRON_SECRET)) return res.status(401).json({ ok: false });
+      if (query.get('q') != null) { const r = await shopifyGraphQL('query($q:String){ orders(first:8, query:$q, sortKey:CREATED_AT, reverse:true){ edges { node { id name createdAt tags lineItems(first:5){ edges { node { sku } } } } } } }', { q: query.get('q') || null }); return res.json(r); }
       try { return res.json(await atelierReady(String(query.get('name') || ''), query.get('oid') || '', query.get('scrivi') !== '1')); } catch (e) { return res.json({ success: false, error: e.message, stack: String(e.stack || '').slice(0, 500) }); }
     }
     // v5.74: elenco email utenti aggiuntivi (solo con CRON_SECRET, per assistenza)
