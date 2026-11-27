@@ -5604,7 +5604,7 @@ export default async function handler(req, res) {
     // v5.74: elenco email utenti aggiuntivi (solo con CRON_SECRET, per assistenza)
     if (req.method === 'GET' && path === '/api/utenti-elenco') {
       if (!(CRON_SECRET && String(req.headers['authorization'] || '') === 'Bearer ' + CRON_SECRET)) return res.status(401).json({ ok: false });
-      return res.json({ ok: true, utenti: Object.keys(await utentiExtra()), admin: ERP_USER, kv: KV_CREDENTIALS ? KV_CREDENTIALS.source : null, kv_ok: !!(await kvGet('passkeys_v1') !== undefined), prova: await kvSetEx('erp:ping', 60, '1'), chiavi: await (async () => { try { const r = await fetch(KV_REST_API_URL, { method: 'POST', headers: { 'Authorization': 'Bearer ' + KV_REST_API_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(['DBSIZE']) }); return (await r.json()).result; } catch (e) { return null; } })() });
+      return res.json({ ok: true, utenti: Object.keys(await utentiExtra()), admin: ERP_USER, admin_pw_nuova: !!(await kvGet('erp:admin_hash')), kv: KV_CREDENTIALS ? KV_CREDENTIALS.source : null, kv_ok: !!(await kvGet('passkeys_v1') !== undefined), prova: await kvSetEx('erp:ping', 60, '1'), chiavi: await (async () => { try { const r = await fetch(KV_REST_API_URL, { method: 'POST', headers: { 'Authorization': 'Bearer ' + KV_REST_API_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(['DBSIZE']) }); return (await r.json()).result; } catch (e) { return null; } })() });
     }
     // v5.72: carico spesa pubblicitaria di un giorno (Bearer CRON_SECRET o utente loggato)
     if (req.method === 'POST' && path === '/api/ads-spesa') {
