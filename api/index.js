@@ -361,9 +361,8 @@ document.getElementById('loginForm').addEventListener('submit', async e => {
 // Questo codice prova tutti e 3 i formati automaticamente.
 function detectKvCredentials() {
   // v5.76: nuovo database Upstash collegato con prefisso ERPDB (il vecchio KV è stato archiviato)
-  if (process.env.ERPDB_REST_API_URL && process.env.ERPDB_REST_API_TOKEN) {
-    return { url: process.env.ERPDB_REST_API_URL.trim(), token: process.env.ERPDB_REST_API_TOKEN.trim(), source: 'erpdb_rest' };
-  }
+  const eu = process.env.ERPDB_KV_REST_API_URL || process.env.ERPDB_REST_API_URL, et = process.env.ERPDB_KV_REST_API_TOKEN || process.env.ERPDB_REST_API_TOKEN;
+  if (eu && et) return { url: eu.trim(), token: et.trim(), source: 'erpdb_rest' };
   if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
     return { url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN, source: 'kv_rest' };
   }
