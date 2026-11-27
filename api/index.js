@@ -5571,7 +5571,7 @@ export default async function handler(req, res) {
       const bearer = String(req.headers['authorization'] || '');
       if (!((CRON_SECRET && bearer === 'Bearer ' + CRON_SECRET) || isAdmin(getAuthenticatedUser(req)))) return res.status(401).json({ ok: false });
       const b = await readJsonBody(req); const email = String(b.email || '').trim().toLowerCase();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email === ERP_USER) return res.json({ ok: false, error: 'Email non valida' });
+      if (email !== ERP_USER && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.json({ ok: false, error: 'Email non valida' });
       const t = crypto.randomBytes(24).toString('base64url');
       await kvSetEx('erp:invito:' + t, 48 * 3600, email);
       return res.json({ ok: true, link: DASHBOARD_URL.replace(/\/$/, '') + '/benvenuto?t=' + t, scade_ore: 48 });
@@ -5592,12 +5592,14 @@ export default async function handler(req, res) {
         if (pass.length < 10) errore = 'La password deve avere almeno 10 caratteri.';
         else if (pass !== pass2) errore = 'Le due password non coincidono.';
         else {
-          const ux = await utentiExtra(); ux[email] = hashPassword(pass);
-          if (await kvSetBody(UTENTI_KEY, JSON.stringify(ux))) { await kvDel('erp:invito:' + t); return res.status(200).send(pagina('<h1>Fatto!</h1><p>La tua password è impostata. Per entrare usa come utente <b>' + email + '</b> e la password che hai scelto.</p><a class="btn" href="/login">Vai al login</a>')); }
+          let salvato;
+          if (email === ERP_USER) salvato = await kvSetBody('erp:admin_hash', hashPassword(pass));
+          else { const ux = await utentiExtra(); ux[email] = hashPassword(pass); salvato = await kvSetBody(UTENTI_KEY, JSON.stringify(ux)); }
+          if (salvato) { await kvDel('erp:invito:' + t); return res.status(200).send(pagina('<h1>Fatto!</h1><p>La tua password è impostata. Per entrare usa come utente <b>' + email + '</b> e la password che hai scelto.</p><a class="btn" href="/login">Vai al login</a>')); }
           errore = 'Errore nel salvataggio, riprova.';
         }
       }
-      return res.status(200).send(pagina('<h1>Benvenuta nell’ERP TLuxy</h1><p>Scegli la tua password. Il tuo nome utente sarà <b>' + email + '</b>.</p>' + (errore ? '<div class="err">' + errore + '</div>' : '') + '<form method="post" action="/benvenuto"><input type="hidden" name="t" value="' + t + '"><label>Password (almeno 10 caratteri)</label><input type="password" name="password" required minlength="10" autocomplete="new-password"><label>Ripetila</label><input type="password" name="password2" required minlength="10" autocomplete="new-password"><button>Imposta password</button></form>'));
+      return res.status(200).send(pagina('<h1>Imposta la password dell’ERP TLuxy</h1><p>Scegli la tua password. Il tuo nome utente sarà <b>' + email + '</b>.</p>' + (errore ? '<div class="err">' + errore + '</div>' : '') + '<form method="post" action="/benvenuto"><input type="hidden" name="t" value="' + t + '"><label>Password (almeno 10 caratteri)</label><input type="password" name="password" required minlength="10" autocomplete="new-password"><label>Ripetila</label><input type="password" name="password2" required minlength="10" autocomplete="new-password"><button>Imposta password</button></form>'));
     }
     // v5.74: elenco email utenti aggiuntivi (solo con CRON_SECRET, per assistenza)
     if (req.method === 'GET' && path === '/api/utenti-elenco') {
@@ -5638,6 +5640,7 @@ export default async function handler(req, res) {
         if (t.n >= 8) return res.status(429).send(passwordLoginPage('Troppi tentativi, riprova tra 15 minuti'));
         await new Promise(r => setTimeout(r, 300));
         let chi = passwordOk(user, pass) ? ERP_USER : null;
+        if (!chi && String(user || '').trim().toLowerCase() === ERP_USER) { const ah = await kvGet('erp:admin_hash'); if (ah && hashOk(pass, ah)) chi = ERP_USER; }
         if (!chi) { const ux = await utentiExtra(); const u = String(user || '').trim().toLowerCase(); if (ux[u] && hashOk(pass, ux[u])) chi = u; }
         if (!chi) { t.n++; tentativiLogin.set(ip, t); return res.status(401).send(passwordLoginPage('Utente o password non corretti')); }
         tentativiLogin.delete(ip);
