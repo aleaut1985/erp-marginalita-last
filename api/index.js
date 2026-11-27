@@ -729,6 +729,7 @@ const MARKETPLACE_CONFIGS = {
   'JAMMY_DUDE': { nome: 'Jammy Dude', sconto_percentuale: 0, fee_principale: 19, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: '10gg data ordine', payment_policy: { type: 'fixed_days', days_offset: 10 } },
   'POIZON': { nome: 'Poizon', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Immediato', payment_policy: { type: 'immediate' } },
   'BRANDSGATEWAY': { nome: 'Brandsgateway', sconto_percentuale: 13, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 0, pagamento: '45gg data ordine', payment_policy: { type: 'fixed_days', days_offset: 45 } },
+  'LUOSOPHY': { nome: 'Luosophy', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 1, pagamento: 'Paga direttamente (immediato)', payment_policy: { type: 'fixed_days', days_offset: 2 }, iva_esente: true, prezzo_ordine_netto: true, nota_regole: 'Rivenditrice USA (Yinghan Wang): ordina sul sito con un suo codice sconto e paga direttamente; l\'importo dell\'ordine è già il netto incassato. Spedizione a suo carico.' },
   'TLUXY_SITE': { nome: 'T. Luxy (proprio)', sconto_percentuale: 10, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1, pagamento: 'Immediato (Shopify +2gg)', payment_policy: { type: 'fixed_days', days_offset: 2 } },
   'MARK_FOYS': { nome: 'Mark Foy', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Prepagato immediato', payment_policy: { type: 'immediate' } },
   'REFLAUNT': { nome: 'Reflaunt', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: '14gg reso + report + fattura (~30gg)', payment_policy: { type: 'fixed_days', days_offset: 30 },
@@ -891,6 +892,13 @@ function riconosciMarketplaceBase(ordine) {
     return { key: 'MARK_FOYS', config: MARKETPLACE_CONFIGS.MARK_FOYS };
   }
   
+  // PRIORITÀ 3b: Luosophy (rivenditrice USA, ordina sul sito con codice sconto dedicato)
+  const discLuo = (ordine.discount_codes || []).some(d => /luo/i.test(String(d.code || '')));
+  const nomiLuo = [ordine.customer?.first_name, ordine.customer?.last_name, ordine.shipping_address?.company, ordine.billing_address?.company, ordine.shipping_address?.name, ordine.billing_address?.name].join(' ').toLowerCase();
+  if (discLuo || tags.includes('luosophy') || /luosophy|luoluowyh/.test(email) || nomiLuo.includes('luosophy') || nomiLuo.includes('yinghan')) {
+    return { key: 'LUOSOPHY', config: MARKETPLACE_CONFIGS.LUOSOPHY };
+  }
+
   // PRIORITÀ 4: Giglio.com - detection via shipping/billing company name
   // Customer ha sempre ragione sociale "Giglio.com S.p.a." 
   const shipCompany = (ordine.shipping_address?.company || '').toLowerCase();
@@ -3420,7 +3428,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <script>
 const MARKETPLACES = ${JSON.stringify(Object.fromEntries(Object.entries(MARKETPLACE_CONFIGS).filter(([k]) => k !== 'REFLAUNT')))};
 function mpTextColor(hex){ var h=(hex||'#8E8E8E').replace('#',''); var c=[0,2,4].map(function(i){ var v=parseInt(h.substr(i,2),16)/255; return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4); }); var L=0.2126*c[0]+0.7152*c[1]+0.0722*c[2]; return (1.05/(L+0.05)) >= 4.5 ? '#FFFFFF' : '#1A1A1A'; }
-const MP_COLORS = { REFLAUNT:'#6E8B74', TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC', MARK_FOYS:'#2E5F8F', GIGLIO:'#7B4F8A', ABOUT_YOU:'#E4572E' };
+const MP_COLORS = { REFLAUNT:'#6E8B74', TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC', MARK_FOYS:'#2E5F8F', GIGLIO:'#7B4F8A', ABOUT_YOU:'#E4572E', LUOSOPHY:'#B5651D' };
 
 function setActiveButton(selector, btn) { document.querySelectorAll(selector).forEach(b => b.classList.remove('active')); if (btn) btn.classList.add('active'); }
 async function fetchNoCache(url) { const sep = url.includes('?') ? '&' : '?'; const res = await fetch(url + sep + '_=' + Date.now(), { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } }); return res.json(); }
@@ -6034,7 +6042,7 @@ export default async function handler(req, res) {
           // PREZZO LORDO IN EUR (al netto refund)
           const prezzo_lordo_originale = currencyInfo.eurTotal;
           const prezzo_lordo = Math.max(0, prezzo_lordo_originale - refundInfo.totalRefundedEur); // sottrae i refund
-          const spedizione = (ordine.shipping_lines || []).reduce((sum, line) => sum + toEurAmount(line.price_set, line.price, currencyInfo.originalCurrency), 0);
+          const spedizione = mp.key === 'LUOSOPHY' ? 0 : (ordine.shipping_lines || []).reduce((sum, line) => sum + toEurAmount(line.price_set, line.price, currencyInfo.originalCurrency), 0);
           const country = ordine.shipping_address?.country_code || ordine.billing_address?.country_code;
           const ivaPerc = mp.key === 'POIZON' ? 22 : (mp.key === 'REFLAUNT' ? 0 : getIvaPerPaese(country));
           const shopifyTaxEur = toEurAmount(ordine.total_tax_set, ordine.total_tax, currencyInfo.originalCurrency);
