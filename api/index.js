@@ -12,7 +12,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const MAIL_FROM = process.env.MAIL_FROM || 'T. Luxy ERP <onboarding@resend.dev>';
 const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
 const AUTH_SECRET = process.env.AUTH_SECRET || (RESEND_API_KEY + '_tluxy_erp_secret_salt_2026');
-const DASHBOARD_URL = process.env.DASHBOARD_URL || 'https://erp-marginalita-last.vercel.app';
+const DASHBOARD_URL = (process.env.DASHBOARD_URL || 'https://erp-marginalita-last.vercel.app').trim();
 const AUTH_COOKIE_NAME = 'tluxy_erp_session';
 // v5.21: accesso con passkey (Face ID / Touch ID). Attivo se PASSKEY_AUTH=1; PASSKEY_SETUP_CODE serve per registrare un dispositivo senza essere già dentro.
 // v5.22: accesso con utente e password (ERP_USER + ERP_PASS_HASH = 'salt:scrypt'); ha priorità sulla passkey.
