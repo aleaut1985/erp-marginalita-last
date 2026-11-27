@@ -3538,13 +3538,13 @@ function loAtelierBtn(o) {
   var pronto = String(o.tags || '').split(',').some(function (t) { return t.trim().toUpperCase() === 'ATELIER READY'; });
   var n = String(o.name || ('#' + o.order_number)).replace(/[&<>"']/g, '');
   return pronto ? '<div class="lo-atl lo-atl-ok">✓ Inviato ad Atelier</div>'
-    : '<div class="lo-atl"><button type="button" class="lo-atl-btn" data-name="' + n + '" onclick="loAtelierReady(this)">Invia ad Atelier (tag ATELIER READY)</button></div>';
+    : '<div class="lo-atl"><button type="button" class="lo-atl-btn" data-name="' + n + '" data-oid="' + String(o.oid || '').replace(/[^0-9]/g, '') + '" onclick="loAtelierReady(this)">Invia ad Atelier (tag ATELIER READY)</button></div>';
 }
 function loAtelierReady(btn) {
   var nome = btn.getAttribute('data-name');
   if (!confirm('Aggiungo il tag ATELIER READY all’ordine ' + nome + '? Atelier lo prenderà in carico.')) return;
   btn.disabled = true; btn.textContent = 'Invio…';
-  fetch('/api/ordine-atelier-ready', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nome }) })
+  fetch('/api/ordine-atelier-ready', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nome, oid: btn.getAttribute('data-oid') || '' }) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (d.success) { btn.parentNode.className = 'lo-atl lo-atl-ok'; btn.parentNode.textContent = d.gia ? '✓ Era già inviato ad Atelier' : '✓ Inviato ad Atelier'; }
@@ -5923,8 +5923,19 @@ export default async function handler(req, res) {
       const nome = String(b.name || '').trim().slice(0, 80);
       if (!nome) return res.json({ success: false, error: 'Ordine mancante' });
       try {
-        const q = await shopifyGraphQL('query($q:String!){ orders(first:1, query:$q){ edges { node { id name tags lineItems(first:50){ edges { node { sku } } } } } } }', { q: 'name:' + JSON.stringify(nome) });
-        const o = q?.data?.orders?.edges?.[0]?.node;
+        const oid = String(b.oid || '').replace(/[^0-9]/g, '');
+        const CAMPI = 'id name tags lineItems(first:50){ edges { node { sku } } }';
+        let o = null;
+        if (oid) { const q1 = await shopifyGraphQL('query($id:ID!){ order(id:$id){ ' + CAMPI + ' } }', { id: 'gid://shopify/Order/' + oid }); o = q1?.data?.order || null; }
+        if (!o) {
+          // fallback per nome: i nomi marketplace (#miinto-xxxx-…) non si trovano con name:"…", si cerca senza # e si confronta esatto
+          const pulito = nome.replace(/^#/, '');
+          for (const qq of ['name:' + JSON.stringify(nome), 'name:' + JSON.stringify(pulito), JSON.stringify(pulito)]) {
+            const q = await shopifyGraphQL('query($q:String!){ orders(first:10, query:$q, sortKey:CREATED_AT, reverse:true){ edges { node { ' + CAMPI + ' } } } }', { q: qq });
+            o = (q?.data?.orders?.edges || []).map(e => e.node).find(n => n.name === nome || n.name.replace(/^#/, '') === pulito) || null;
+            if (o) break;
+          }
+        }
         if (!o) return res.json({ success: false, error: 'Ordine ' + nome + ' non trovato' });
         const mm = (o.lineItems?.edges || []).some(e => isMMSku(e.node.sku));
         if (!mm) return res.json({ success: false, error: 'Nessun articolo Mantova Moda (AMM-) in questo ordine' });
@@ -6166,6 +6177,7 @@ export default async function handler(req, res) {
           breakdown_marketplace[mp.key].dettaglio_ordini.push({
             order_number: ordine.order_number,
             name: ordine.name,
+            oid: ordine.id,
             tags: ordine.tags || '',
             created_at: ordine.created_at,
             country,
