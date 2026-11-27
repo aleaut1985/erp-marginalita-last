@@ -729,6 +729,7 @@ const MARKETPLACE_CONFIGS = {
   'JAMMY_DUDE': { nome: 'Jammy Dude', sconto_percentuale: 0, fee_principale: 19, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: '10gg data ordine', payment_policy: { type: 'fixed_days', days_offset: 10 } },
   'POIZON': { nome: 'Poizon', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Immediato', payment_policy: { type: 'immediate' } },
   'BRANDSGATEWAY': { nome: 'Brandsgateway', sconto_percentuale: 13, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 0, pagamento: '45gg data ordine', payment_policy: { type: 'fixed_days', days_offset: 45 } },
+  'LOVE_THE_SALES': { nome: 'Love The Sales', sconto_percentuale: 0, fee_principale: 19, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1, pagamento: 'Da contratto (da verificare)', payment_policy: { type: 'fixed_days', days_offset: 30 }, nota_regole: 'Commissione a scaglioni sullo sconto del prodotto (prezzo vs prezzo pieno): 0–30% → 19%, 31–40% → 17%, 41–50% → 15%, 51–60% → 12%, 61–70% → 10%, 71–100% → 5%. Ordini resi: 7%. Spedizione a carico TLuxy (stima 12 €). Condizioni dalle email di negoziazione.' },
   'LUOSOPHY': { nome: 'Luosophy', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 1, pagamento: 'Paga direttamente (immediato)', payment_policy: { type: 'fixed_days', days_offset: 2 }, iva_esente: true, prezzo_ordine_netto: true, nota_regole: 'Rivenditrice USA (Yinghan Wang): ordina sul sito con un suo codice sconto e paga direttamente; l\'importo dell\'ordine è già il netto incassato. Spedizione a suo carico.' },
   'TLUXY_SITE': { nome: 'T. Luxy (proprio)', sconto_percentuale: 10, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 12, fee_fissa_packaging: 1, pagamento: 'Immediato (Shopify +2gg)', payment_policy: { type: 'fixed_days', days_offset: 2 } },
   'MARK_FOYS': { nome: 'Mark Foy', sconto_percentuale: 0, fee_principale: 0, fee_secondaria: 0, fee_fissa_trasporto: 0, fee_fissa_packaging: 0, pagamento: 'Prepagato immediato', payment_policy: { type: 'immediate' } },
@@ -848,10 +849,33 @@ function aboutYouFeePct(ordine) {
   return lordo > 0 ? Math.round(fee / lordo * 10000) / 100 : null;
 }
 
+// v5.78: Love The Sales — commissione a scaglioni in base allo sconto (prezzo venduto vs prezzo pieno compare-at della variante)
+const VARIANT_CMP = {};
+async function caricaCmpLoveTheSales(ordini) {
+  const ids = [...new Set((ordini || []).filter(o => riconosciMarketplaceBase(o).key === 'LOVE_THE_SALES').flatMap(o => (o.line_items || []).map(li => li.variant_id)).filter(v => v && !VARIANT_CMP[v]))];
+  for (let i = 0; i < ids.length; i += 100) {
+    try {
+      const d = await shopifyGraphQL('query($ids:[ID!]!){ nodes(ids:$ids){ ... on ProductVariant { id compareAtPrice } } }', { ids: ids.slice(i, i + 100).map(v => 'gid://shopify/ProductVariant/' + v) });
+      (d?.data?.nodes || []).forEach(n => { if (n && n.compareAtPrice) VARIANT_CMP[String(n.id).split('/').pop()] = parseFloat(n.compareAtPrice); });
+    } catch (e) { console.log('[lts cmp]', e.message); }
+  }
+}
+function loveTheSalesPct(sconto) { return sconto <= 30 ? 19 : sconto <= 40 ? 17 : sconto <= 50 ? 15 : sconto <= 60 ? 12 : sconto <= 70 ? 10 : 5; }
+function loveTheSalesFeePct(ordine) {
+  let lordo = 0, fee = 0, noti = 0;
+  for (const it of (ordine.line_items || [])) {
+    const q = parseInt(it.quantity) || 0, pu = parseFloat(it.price) || 0; if (!q || !pu) continue;
+    const cmp = VARIANT_CMP[it.variant_id] || 0;
+    const sconto = cmp > pu ? (1 - pu / cmp) * 100 : 0; if (cmp > pu) noti++;
+    lordo += pu * q; fee += pu * q * loveTheSalesPct(sconto) / 100;
+  }
+  return lordo > 0 && noti ? Math.round(fee / lordo * 10000) / 100 : null;
+}
 function riconosciMarketplace(ordine) {
   const r = riconosciMarketplaceBase(ordine);
   let config = getConfigPerData(r.key, ordine.created_at) || r.config;
   if (r.key === 'ABOUT_YOU') { const p = aboutYouFeePct(ordine); if (p !== null) config = { ...config, fee_principale: p }; }
+  if (r.key === 'LOVE_THE_SALES') { const p = loveTheSalesFeePct(ordine); if (p !== null) config = { ...config, fee_principale: p }; }
   return { key: r.key, config };
 }
 
@@ -892,6 +916,10 @@ function riconosciMarketplaceBase(ordine) {
     return { key: 'MARK_FOYS', config: MARKETPLACE_CONFIGS.MARK_FOYS };
   }
   
+  // PRIORITÀ 3a: Love The Sales (app "T.Luxy: LovetheSales", source "Love The Sales")
+  if (rawSource === '252655108097' || /love\s*the\s*sales/i.test(rawSource) || tags.includes('love the sales')) {
+    return { key: 'LOVE_THE_SALES', config: MARKETPLACE_CONFIGS.LOVE_THE_SALES };
+  }
   // PRIORITÀ 3b: Luosophy (rivenditrice USA, ordina sul sito con codice sconto dedicato)
   const discLuo = (ordine.discount_codes || []).some(d => /luo/i.test(String(d.code || '')));
   const nomiLuo = [ordine.customer?.first_name, ordine.customer?.last_name, ordine.shipping_address?.company, ordine.billing_address?.company, ordine.shipping_address?.name, ordine.billing_address?.name].join(' ').toLowerCase();
@@ -1757,6 +1785,7 @@ async function fetchVariantCosts(variantIds, orderProductIds = []) {
       const data = await response.json();
       stats.products_ok++;
       (data.product?.variants || []).forEach(v => {
+        if (v.id && parseFloat(v.compare_at_price) > 0) VARIANT_CMP[v.id] = parseFloat(v.compare_at_price);
         if (v.id && v.inventory_item_id) {
           variantToInventoryItem[v.id] = v.inventory_item_id;
           stats.variants_mappati++;
@@ -2270,7 +2299,7 @@ async function margineOrdineSingolo(ordineRaw) {
   const variantCosts = (await fetchVariantCosts(vids, pids)).costs;
   const duoUserCosts = {};
   if (KV_ENABLED) { try { const dv = (ordine.line_items || []).filter(li => li.variant_id && isDuoSku(li.sku)).map(li => li.variant_id); if (dv.length) { const r = await kvMGet(dv.map(v => 'duo_user_cost_' + v)); dv.forEach(v => { const x = parseFloat(r['duo_user_cost_' + v]); if (!isNaN(x)) duoUserCosts[v] = x; }); } } catch (e) {} }
-  await caricaPrezziMarkFoy([ordine]);
+  await caricaPrezziMarkFoy([ordine]); await caricaCmpLoveTheSales([ordine]);
   const mp = riconosciMarketplace(ordine);
   if (mp.key === 'MARK_FOYS') { const m = calcolaMarkFoyOrdine(ordine, variantCosts, duoUserCosts); return { mp: mp.config.nome, incasso: m.incasso, margine: m.margine, pct: m.incasso > 0 ? m.margine / m.incasso * 100 : 0, mancanti: m.mancanti.length }; }
   const { costo, errori } = calcolaCostoOrdine(ordine, variantCosts, duoUserCosts);
@@ -3428,7 +3457,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <script>
 const MARKETPLACES = ${JSON.stringify(Object.fromEntries(Object.entries(MARKETPLACE_CONFIGS).filter(([k]) => k !== 'REFLAUNT')))};
 function mpTextColor(hex){ var h=(hex||'#8E8E8E').replace('#',''); var c=[0,2,4].map(function(i){ var v=parseInt(h.substr(i,2),16)/255; return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4); }); var L=0.2126*c[0]+0.7152*c[1]+0.0722*c[2]; return (1.05/(L+0.05)) >= 4.5 ? '#FFFFFF' : '#1A1A1A'; }
-const MP_COLORS = { REFLAUNT:'#6E8B74', TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC', MARK_FOYS:'#2E5F8F', GIGLIO:'#7B4F8A', ABOUT_YOU:'#E4572E', LUOSOPHY:'#B5651D' };
+const MP_COLORS = { REFLAUNT:'#6E8B74', TLUXY_SITE:'#1A1A1A', THE_BRADERY:'#C9A961', MIINTO:'#008060', BALARDI:'#BF4747', ITALIST:'#2D2D2D', JAMMY_DUDE:'#8E4FBF', SECRET_SALES:'#6B5320', FASHION_TAMERS:'#5C5C5C', INTRA_MIRROR:'#B89550', ARCHIVIST:'#004C3F', BOUTIQUE_MALL:'#E8573A', WINKELSTRAAT:'#479CCF', POIZON:'#D4397A', BRANDSGATEWAY:'#4A7FBC', MARK_FOYS:'#2E5F8F', GIGLIO:'#7B4F8A', ABOUT_YOU:'#E4572E', LUOSOPHY:'#B5651D', LOVE_THE_SALES:'#E8467C' };
 
 function setActiveButton(selector, btn) { document.querySelectorAll(selector).forEach(b => b.classList.remove('active')); if (btn) btn.classList.add('active'); }
 async function fetchNoCache(url) { const sep = url.includes('?') ? '&' : '?'; const res = await fetch(url + sep + '_=' + Date.now(), { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } }); return res.json(); }
@@ -5996,7 +6025,7 @@ export default async function handler(req, res) {
         const fetchResult = await fetchVariantCosts([...variantIds], [...productIds]);
         const variantCosts = fetchResult.costs;
         const fetchStats = fetchResult.stats;
-        await caricaPrezziMarkFoy(ordini);
+        await caricaPrezziMarkFoy(ordini); await caricaCmpLoveTheSales(ordini);
         
         // Carica costi DUO salvati manualmente dall'utente (per gli ordini dove Shopify ha perso il cost)
         const duoUserCosts = {};
@@ -6286,7 +6315,7 @@ export default async function handler(req, res) {
           if (item.product_id) productIds.add(item.product_id);
         }));
         const variantCosts = (await fetchVariantCosts([...variantIds], [...productIds])).costs;
-        await caricaPrezziMarkFoy(ordini);
+        await caricaPrezziMarkFoy(ordini); await caricaCmpLoveTheSales(ordini);
         const bs = calcolaBestSellersModelli(ordini, variantCosts);
         const senzaImg = bs.modelli.filter(m => m.variant_id && !MEM_VARIANT_IMG.has(String(m.variant_id))).map(m => m.variant_id);
         if (senzaImg.length) await infoVariantiGraphQL(senzaImg);
@@ -6526,7 +6555,7 @@ export default async function handler(req, res) {
         const vids = new Set(), pids = new Set();
         ordini.forEach(o => (o.line_items || []).forEach(it => { if (isDuoSku(it.sku)) { if (it.variant_id) vids.add(it.variant_id); if (it.product_id) pids.add(it.product_id); } }));
         const variantCosts = vids.size ? (await fetchVariantCosts([...vids], [...pids])).costs : {};
-        await caricaPrezziMarkFoy(ordini);
+        await caricaPrezziMarkFoy(ordini); await caricaCmpLoveTheSales(ordini);
         CACHE_DUO_VENDITE = calcolaVenditeDuo(ordini, variantCosts);
         return res.json({ success: true, cached: false, ...CACHE_DUO_VENDITE });
       } catch (e) { return res.json({ success: false, error: e.message }); }
@@ -6650,7 +6679,7 @@ export default async function handler(req, res) {
           if (item.product_id) productIds.add(item.product_id);
         }));
         const { costs: variantCosts } = await fetchVariantCosts([...variantIds], [...productIds]);
-        await caricaPrezziMarkFoy(ordini);
+        await caricaPrezziMarkFoy(ordini); await caricaCmpLoveTheSales(ordini);
         
         // Carica costi DUO user
         const duoUserCosts = {};
