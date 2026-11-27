@@ -487,14 +487,14 @@ async function atelierReady(nome, oidIn, dry) {
   const oid = String(b.oid || '').replace(/[^0-9]/g, '');
   const CAMPI = 'id name tags lineItems(first:50){ edges { node { sku } } }';
   let o = null;
-  if (oid) { const q1 = await shopifyGraphQL('query($id:ID!){ order(id:$id){ ' + CAMPI + ' } }', { id: 'gid://shopify/Order/' + oid }); o = q1?.data?.order || null; if (q1?.errors) dbg.push(q1.errors[0]?.message); }
+  if (oid) { const q1 = await shopifyGraphQL('query($id:ID!){ order(id:$id){ ' + CAMPI + ' } }', { id: 'gid://shopify/Order/' + oid }); o = q1?.order || null; if (q1?.errors) dbg.push(q1.errors[0]?.message); }
   if (!o) {
     // fallback per nome: i nomi marketplace (#miinto-xxxx-…) non si trovano con name:"…", si cerca senza # e si confronta esatto
     const pulito = nome.replace(/^#/, '');
     for (const qq of ['name:' + JSON.stringify(nome), 'name:' + JSON.stringify(pulito), JSON.stringify(pulito)]) {
       const q = await shopifyGraphQL('query($q:String!){ orders(first:10, query:$q, sortKey:CREATED_AT, reverse:true){ edges { node { ' + CAMPI + ' } } } }', { q: qq });
-      if (q?.errors) dbg.push(q.errors[0]?.message); dbg.push(qq + ' → ' + (q?.data?.orders?.edges || []).map(e => e.node.name).join('|'));
-      o = (q?.data?.orders?.edges || []).map(e => e.node).find(n => n.name === nome || n.name.replace(/^#/, '') === pulito) || null;
+      if (q?.errors) dbg.push(q.errors[0]?.message); dbg.push(qq + ' → ' + (q?.orders?.edges || []).map(e => e.node.name).join('|'));
+      o = (q?.orders?.edges || []).map(e => e.node).find(n => n.name === nome || n.name.replace(/^#/, '') === pulito) || null;
       if (o) break;
     }
   }
@@ -504,7 +504,7 @@ async function atelierReady(nome, oidIn, dry) {
   if ((o.tags || []).some(t => String(t).toUpperCase() === 'ATELIER READY')) return ({ success: true, gia: true });
   if (dry) return ({ success: true, dry: true, ordine: o.name, tags: o.tags, skus: (o.lineItems?.edges || []).map(e => e.node.sku) });
   const r = await shopifyGraphQL('mutation($id:ID!,$t:[String!]!){ tagsAdd(id:$id, tags:$t){ userErrors { message } } }', { id: o.id, t: ['ATELIER READY'] });
-  const err = r?.errors?.[0]?.message || r?.data?.tagsAdd?.userErrors?.[0]?.message;
+  const err = r?.errors?.[0]?.message || r?.tagsAdd?.userErrors?.[0]?.message;
   if (err) return ({ success: false, error: /access|scope|denied/i.test(err) ? 'Manca il permesso write_orders sull\'app ERP' : err });
   return ({ success: true });
 }
