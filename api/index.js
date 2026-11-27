@@ -5563,6 +5563,39 @@ export default async function handler(req, res) {
       }
     }
 
+    // v5.75: invito — link personale (48h) con cui la persona sceglie da sola la propria password
+    if (req.method === 'POST' && path === '/api/utenti-invito') {
+      const bearer = String(req.headers['authorization'] || '');
+      if (!((CRON_SECRET && bearer === 'Bearer ' + CRON_SECRET) || isAdmin(getAuthenticatedUser(req)))) return res.status(401).json({ ok: false });
+      const b = await readJsonBody(req); const email = String(b.email || '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email === ERP_USER) return res.json({ ok: false, error: 'Email non valida' });
+      const t = crypto.randomBytes(24).toString('base64url');
+      await kvSetEx('erp:invito:' + t, 48 * 3600, email);
+      return res.json({ ok: true, link: DASHBOARD_URL.replace(/\/$/, '') + '/benvenuto?t=' + t, scade_ore: 48 });
+    }
+    if (path === '/benvenuto') {
+      res.setHeader('Cache-Control', 'no-store'); res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      let raw = '', t = query.get('t') || '', pass = '', pass2 = '';
+      if (req.method === 'POST') {
+        if (Buffer.isBuffer(req.body)) raw = req.body.toString('utf8'); else if (req.body && typeof req.body === 'object') raw = new URLSearchParams(req.body).toString(); else if (typeof req.body === 'string') raw = req.body; else await new Promise((ok, ko) => { req.on('data', c => raw += c); req.on('end', ok); req.on('error', ko); });
+        const f = new URLSearchParams(raw); t = f.get('t') || t; pass = f.get('password') || ''; pass2 = f.get('password2') || '';
+      }
+      t = String(t).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+      const email = t ? await kvGet('erp:invito:' + t) : null;
+      const pagina = (corpo) => `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Benvenuta · TLuxy Business Manager</title><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F6F4EF;color:#1b1b1b;margin:0;padding:24px 16px}main{max-width:420px;margin:0 auto;background:#fff;border-radius:14px;padding:24px}h1{font-size:1.2rem;margin:0 0 6px}p{color:#666;font-size:.9rem;line-height:1.5}label{display:block;font-size:.8rem;font-weight:600;margin:12px 0 4px}input{width:100%;box-sizing:border-box;padding:11px;border:1px solid #ddd;border-radius:8px;font-size:1rem}button,a.btn{display:block;text-align:center;margin-top:16px;width:100%;box-sizing:border-box;padding:12px;border:0;border-radius:8px;background:#111;color:#fff;font:inherit;font-weight:600;text-decoration:none}.err{background:#FBEAEA;color:#9B2C2C;padding:10px;border-radius:8px;font-size:.88rem}</style></head><body><main>${corpo}</main></body></html>`;
+      if (!email) return res.status(200).send(pagina('<h1>Link non valido</h1><p>Il link è scaduto o è già stato usato. Chiedi ad Alessio di mandartene uno nuovo.</p>'));
+      let errore = '';
+      if (req.method === 'POST') {
+        if (pass.length < 10) errore = 'La password deve avere almeno 10 caratteri.';
+        else if (pass !== pass2) errore = 'Le due password non coincidono.';
+        else {
+          const ux = await utentiExtra(); ux[email] = hashPassword(pass);
+          if (await kvSetBody(UTENTI_KEY, JSON.stringify(ux))) { await kvDel('erp:invito:' + t); return res.status(200).send(pagina('<h1>Fatto!</h1><p>La tua password è impostata. Per entrare usa come utente <b>' + email + '</b> e la password che hai scelto.</p><a class="btn" href="/login">Vai al login</a>')); }
+          errore = 'Errore nel salvataggio, riprova.';
+        }
+      }
+      return res.status(200).send(pagina('<h1>Benvenuta nell’ERP TLuxy</h1><p>Scegli la tua password. Il tuo nome utente sarà <b>' + email + '</b>.</p>' + (errore ? '<div class="err">' + errore + '</div>' : '') + '<form method="post" action="/benvenuto"><input type="hidden" name="t" value="' + t + '"><label>Password (almeno 10 caratteri)</label><input type="password" name="password" required minlength="10" autocomplete="new-password"><label>Ripetila</label><input type="password" name="password2" required minlength="10" autocomplete="new-password"><button>Imposta password</button></form>'));
+    }
     // v5.74: elenco email utenti aggiuntivi (solo con CRON_SECRET, per assistenza)
     if (req.method === 'GET' && path === '/api/utenti-elenco') {
       if (!(CRON_SECRET && String(req.headers['authorization'] || '') === 'Bearer ' + CRON_SECRET)) return res.status(401).json({ ok: false });
@@ -5819,13 +5852,13 @@ export default async function handler(req, res) {
       if (!isAdmin(authUser)) return res.status(403).send('Solo l’amministratore può gestire gli utenti.');
       let msg = '';
       if (req.method === 'POST') {
-        let raw = ''; if (req.body && typeof req.body === 'object') raw = new URLSearchParams(req.body).toString(); else if (typeof req.body === 'string') raw = req.body; else await new Promise((ok, ko) => { req.on('data', c => raw += c); req.on('end', ok); req.on('error', ko); });
+        let raw = ''; if (Buffer.isBuffer(req.body)) raw = req.body.toString('utf8'); else if (req.body && typeof req.body === 'object') raw = new URLSearchParams(req.body).toString(); else if (typeof req.body === 'string') raw = req.body; else await new Promise((ok, ko) => { req.on('data', c => raw += c); req.on('end', ok); req.on('error', ko); });
         const f = new URLSearchParams(raw); const email = String(f.get('email') || '').trim().toLowerCase();
         const ux = await utentiExtra();
-        if (f.get('azione') === 'rimuovi') { delete ux[email]; await kvSet(UTENTI_KEY, JSON.stringify(ux)); msg = 'Accesso tolto a ' + email; }
+        if (f.get('azione') === 'rimuovi') { delete ux[email]; await kvSetBody(UTENTI_KEY, JSON.stringify(ux)); msg = 'Accesso tolto a ' + email; }
         else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email === ERP_USER) msg = 'Email non valida';
         else if (String(f.get('password') || '').length < 10) msg = 'La password deve avere almeno 10 caratteri';
-        else { ux[email] = hashPassword(f.get('password')); await kvSet(UTENTI_KEY, JSON.stringify(ux)); msg = 'Utente ' + email + ' aggiunto: può entrare con questa email e la password scelta'; }
+        else { ux[email] = hashPassword(f.get('password')); const okSalva = await kvSetBody(UTENTI_KEY, JSON.stringify(ux)); msg = okSalva ? 'Utente ' + email + ' aggiunto: può entrare con questa email e la password scelta' : 'Errore nel salvataggio, riprova'; }
       }
       return res.status(200).send(utentiPage(Object.keys(await utentiExtra()).sort(), msg));
     }
