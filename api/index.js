@@ -5563,6 +5563,11 @@ export default async function handler(req, res) {
       }
     }
 
+    // v5.74: elenco email utenti aggiuntivi (solo con CRON_SECRET, per assistenza)
+    if (req.method === 'GET' && path === '/api/utenti-elenco') {
+      if (!(CRON_SECRET && String(req.headers['authorization'] || '') === 'Bearer ' + CRON_SECRET)) return res.status(401).json({ ok: false });
+      return res.json({ ok: true, utenti: Object.keys(await utentiExtra()), admin: ERP_USER });
+    }
     // v5.72: carico spesa pubblicitaria di un giorno (Bearer CRON_SECRET o utente loggato)
     if (req.method === 'POST' && path === '/api/ads-spesa') {
       const bearer = String(req.headers['authorization'] || '');
