@@ -2135,7 +2135,7 @@ function calcolaBestSellersModelli(ordini, variantCosts = {}) {
       const vendKey = vend.toUpperCase();
       const titolo = (item.title || '').trim();
       const key = vendKey + '|' + titolo.toUpperCase().replace(/\s+/g, ' ');
-      if (!modelli[key]) modelli[key] = { titolo, brand: vend, pezzi: 0, fatturato: 0, netto: 0, costo: 0, senza_costo: 0, ncc: 0, lcc: 0, varianti: {}, canali: {}, variant_id: item.variant_id, immagine: null };
+      if (!modelli[key]) modelli[key] = { titolo, brand: vend, pezzi: 0, fatturato: 0, netto: 0, costo: 0, senza_costo: 0, ncc: 0, lcc: 0, varianti: {}, canali: {}, variant_id: item.variant_id, immagine: null, sku: item.sku || '' };
       const m = modelli[key];
       m.pezzi += q; m.fatturato += lordo; m.netto += netto; m.ncc += ncc; m.lcc += lcc; m.costo += costo; if (cu === null) m.senza_costo += q;
       const vt = item.variant_title || '—'; m.varianti[vt] = (m.varianti[vt] || 0) + q;
@@ -2150,7 +2150,7 @@ function calcolaBestSellersModelli(ordini, variantCosts = {}) {
   });
   const r0 = n => Math.round(n);
   const marg = x => x.lcc > 0 ? Math.round((x.ncc - x.costo) / x.lcc * 1000) / 10 : 0; // % sul lordo, come in Analytics
-  const lista = Object.values(modelli).map(m => ({ titolo: m.titolo, brand: m.brand, pezzi: m.pezzi, fatturato: r0(m.fatturato), ricavo: r0(m.ncc - m.costo), margine_pct: marg(m), prezzo_medio: m.pezzi ? r0(m.fatturato / m.pezzi) : 0, senza_costo: m.senza_costo, variant_id: m.variant_id,
+  const lista = Object.values(modelli).map(m => ({ titolo: m.titolo, brand: m.brand, pezzi: m.pezzi, fatturato: r0(m.fatturato), ricavo: r0(m.ncc - m.costo), margine_pct: marg(m), prezzo_medio: m.pezzi ? r0(m.fatturato / m.pezzi) : 0, senza_costo: m.senza_costo, variant_id: m.variant_id, sku: m.sku,
     varianti: Object.entries(m.varianti).sort((a, b) => b[1] - a[1]).map(([nome, pezzi]) => ({ nome, pezzi })),
     canali: Object.entries(m.canali).map(([k, c]) => ({ key: k, nome: c.nome, pezzi: c.pezzi, fatturato: r0(c.fatturato) })).sort((a, b) => b.fatturato - a.fatturato) }))
     .sort((a, b) => b.fatturato - a.fatturato);
@@ -3482,6 +3482,8 @@ function renderRefunds(resi) {
   '</div>';
 }
 
+// v5.73: sigla fornitore (MM = Mantova Moda, DUO = Duomo) ovunque compaia un articolo
+function fornChipSku(sku) { sku = String(sku || ''); return /^AMM-/i.test(sku) ? '<span class="lo-forn lo-forn-mm" title="Fornitore Mantova Moda">MM</span>' : (/^DUO-/i.test(sku) ? '<span class="lo-forn" title="Fornitore Duomo">DUO</span>' : ''); }
 // v5.56.1: numero ordine corto (es. #miinto-b2ae…) per tenere le righe allineate
 function loShortNum(n) { n = String(n || ''); return n.length > 14 ? n.slice(0, 13) + '…' : n; }
 // v5.56: bandierina paese di spedizione nella lista ordini
@@ -3584,7 +3586,7 @@ function renderBreakdown(breakdown) {
             ? 'display:inline-block; background:var(--green-light); color:var(--green-dark); border:1px solid rgba(0,128,96,0.3); padding:2px 9px; border-radius:6px; font-weight:700; font-size:0.78rem;'
             : 'display:inline-block; background:var(--red-light); color:var(--red); border:1px solid rgba(191,71,71,0.3); padding:2px 9px; border-radius:6px; font-weight:700; font-size:0.78rem;';
           const segno = margineNettoUnit >= 0 ? '+' : '';
-          return '<div style="padding:4px 0; border-bottom:1px dotted var(--gray-200);"><strong style="font-size:0.82rem;">' + a.title + '</strong><br><span style="font-size:0.72rem; color:var(--gray-500);">SKU: ' + a.sku + ' · qty ' + a.quantity + '</span><br><span style="font-size:0.75rem;">Prezzo: <strong>€' + a.prezzo_unit.toFixed(2) + '</strong> · Costo: <strong>€' + a.cost_unit.toFixed(2) + '</strong> · <span style="' + badgeStyle + '" title="Margine netto per unità (dopo IVA, fees, spedizione)">Netto ' + segno + '€' + margineNettoUnit.toFixed(2) + '</span></span></div>';
+          return '<div style="padding:4px 0; border-bottom:1px dotted var(--gray-200);">' + fornChipSku(a.sku) + '<strong style="font-size:0.82rem;">' + a.title + '</strong><br><span style="font-size:0.72rem; color:var(--gray-500);">SKU: ' + a.sku + ' · qty ' + a.quantity + '</span><br><span style="font-size:0.75rem;">Prezzo: <strong>€' + a.prezzo_unit.toFixed(2) + '</strong> · Costo: <strong>€' + a.cost_unit.toFixed(2) + '</strong> · <span style="' + badgeStyle + '" title="Margine netto per unità (dopo IVA, fees, spedizione)">Netto ' + segno + '€' + margineNettoUnit.toFixed(2) + '</span></span></div>';
         }).join('');
         const marginCls2 = o.margine_netto >= 0 ? 'margin-pos' : 'margin-neg';
         const currencyBadge = o.is_foreign_currency ? '<span style="display:inline-block; background:#FFF4D6; color:#8B6914; padding:2px 7px; border-radius:10px; font-size:0.68rem; font-weight:700; margin-left:6px; border:1px solid #E8C77A;" title="Ordine in ' + o.currency + ' convertito in EUR al cambio del giorno (' + o.exchange_rate.toFixed(4) + ')">💱 ' + o.currency + ' ' + (o.total_original || 0).toFixed(0) + '</span>' : '';
@@ -3850,7 +3852,7 @@ function renderBestSellers2(d) {
     var img = m.immagine ? '<img src="' + bsEsc(m.immagine) + '&width=160" loading="lazy" alt="">' : '<span>◇</span>';
     var colori = m.varianti.slice(0, 4).map(function (v) { return bsEsc(v.nome.split(' / ')[0]) + (v.pezzi > 1 ? ' ×' + v.pezzi : ''); }).join(', ') + (m.varianti.length > 4 ? '…' : '');
     var canali = m.canali.map(function (c) { return '<span class="bs2-ch">' + bsEsc(c.nome) + ' ' + c.pezzi + ' · ' + bsEur(c.fatturato) + '</span>'; }).join('');
-    return '<details class="bs2-row"><summary><span class="bs2-rank' + (i < 3 ? ' top' : '') + '">' + (i + 1) + '</span><span class="bs2-img">' + img + '</span><span class="bs2-info"><span class="bs2-t">' + bsEsc(m.titolo) + '</span><span class="bs2-s">' + bsEsc(m.brand) + ' · ' + m.pezzi + ' pz · media ' + bsEur(m.prezzo_medio) + '</span></span><span class="bs2-num"><b>' + bsEur(m.fatturato) + '</b><span class="bs2-m ' + bsMargCls(m.margine_pct) + '">' + (m.senza_costo === m.pezzi ? 'costo ?' : m.margine_pct + '%') + '</span></span></summary>'
+    return '<details class="bs2-row"><summary><span class="bs2-rank' + (i < 3 ? ' top' : '') + '">' + (i + 1) + '</span><span class="bs2-img">' + img + '</span><span class="bs2-info"><span class="bs2-t">' + fornChipSku(m.sku) + bsEsc(m.titolo) + '</span><span class="bs2-s">' + bsEsc(m.brand) + ' · ' + m.pezzi + ' pz · media ' + bsEur(m.prezzo_medio) + '</span></span><span class="bs2-num"><b>' + bsEur(m.fatturato) + '</b><span class="bs2-m ' + bsMargCls(m.margine_pct) + '">' + (m.senza_costo === m.pezzi ? 'costo ?' : m.margine_pct + '%') + '</span></span></summary>'
       + '<div class="bs2-det"><div><span class="bs2-l">Colori</span> ' + colori + '</div><div><span class="bs2-l">Canali</span> ' + canali + '</div><div><span class="bs2-l">Margine netto</span> ' + bsEur(m.ricavo) + (m.senza_costo ? ' <small>(' + m.senza_costo + ' pz senza costo in Shopify)</small>' : '') + '</div></div></details>';
   }).join('') : '<div class="bs-empty">Nessun modello per questo filtro.</div>') + '</div>';
   html += '<div class="alerts-meta" style="margin-top:10px">Margine netto = incasso reale (sconti e rimborsi inclusi) meno IVA, commissioni marketplace/Shopify, spedizione e costo merce; % sul lordo, come in Analytics. Solo pezzi con costo in Shopify. ' + (t.pezzi_senza_costo ? t.pezzi_senza_costo + ' pezzi senza costo. ' : '') + t.ordini + ' ordini, ' + t.modelli + ' modelli venduti.</div>';
@@ -3862,7 +3864,7 @@ function renderBestSellers(prodotti) {
   cont.innerHTML = prodotti.map((p, i) => {
     const rank = p.rank || (i + 1); const rankClass = rank <= 3 ? 'top3' : '';
     const img = p.immagine ? '<img src="' + p.immagine + '" alt="' + p.titolo + '" loading="lazy">' : '<div class="bs-image-placeholder">◇</div>';
-    return '<div class="bs-card"><div class="bs-rank ' + rankClass + '">' + rank + '</div><div class="bs-image">' + img + '</div><div class="bs-body"><div class="bs-title">' + p.titolo + '</div><div class="bs-variant">' + (p.variante || '') + (p.sku ? ' · ' + p.sku : '') + '</div><div class="bs-stats"><div class="bs-stat"><div class="bs-stat-label">Prezzo</div><div class="bs-stat-value">€' + p.prezzo_unit_lordo.toFixed(2) + '</div></div><div class="bs-stat"><div class="bs-stat-label">Pezzi</div><div class="bs-stat-value">' + p.quantita_venduta + '</div></div><div class="bs-stat fatturato"><div class="bs-stat-label">Fatturato</div><div class="bs-stat-value">€' + Math.round(p.fatturato_lordo).toLocaleString('it-IT') + '</div></div><div class="bs-stat ricavo"><div class="bs-stat-label">Ricavo</div><div class="bs-stat-value">€' + Math.round(p.ricavo_stimato).toLocaleString('it-IT') + '</div></div></div></div></div>';
+    return '<div class="bs-card"><div class="bs-rank ' + rankClass + '">' + rank + '</div><div class="bs-image">' + img + '</div><div class="bs-body"><div class="bs-title">' + fornChipSku(p.sku) + p.titolo + '</div><div class="bs-variant">' + (p.variante || '') + (p.sku ? ' · ' + p.sku : '') + '</div><div class="bs-stats"><div class="bs-stat"><div class="bs-stat-label">Prezzo</div><div class="bs-stat-value">€' + p.prezzo_unit_lordo.toFixed(2) + '</div></div><div class="bs-stat"><div class="bs-stat-label">Pezzi</div><div class="bs-stat-value">' + p.quantita_venduta + '</div></div><div class="bs-stat fatturato"><div class="bs-stat-label">Fatturato</div><div class="bs-stat-value">€' + Math.round(p.fatturato_lordo).toLocaleString('it-IT') + '</div></div><div class="bs-stat ricavo"><div class="bs-stat-label">Ricavo</div><div class="bs-stat-value">€' + Math.round(p.ricavo_stimato).toLocaleString('it-IT') + '</div></div></div></div></div>';
   }).join('');
 }
 function confronta() {
