@@ -482,6 +482,32 @@ function isDuoSku(sku) {
 function isMMSku(sku) {
   return !!(sku && typeof sku === 'string' && /^AMM-/i.test(sku.trim()));
 }
+async function atelierReady(nome, oidIn, dry) {
+  const b = { oid: oidIn }; const dbg = [];
+  const oid = String(b.oid || '').replace(/[^0-9]/g, '');
+  const CAMPI = 'id name tags lineItems(first:50){ edges { node { sku } } }';
+  let o = null;
+  if (oid) { const q1 = await shopifyGraphQL('query($id:ID!){ order(id:$id){ ' + CAMPI + ' } }', { id: 'gid://shopify/Order/' + oid }); o = q1?.data?.order || null; if (q1?.errors) dbg.push(q1.errors[0]?.message); }
+  if (!o) {
+    // fallback per nome: i nomi marketplace (#miinto-xxxx-…) non si trovano con name:"…", si cerca senza # e si confronta esatto
+    const pulito = nome.replace(/^#/, '');
+    for (const qq of ['name:' + JSON.stringify(nome), 'name:' + JSON.stringify(pulito), JSON.stringify(pulito)]) {
+      const q = await shopifyGraphQL('query($q:String!){ orders(first:10, query:$q, sortKey:CREATED_AT, reverse:true){ edges { node { ' + CAMPI + ' } } } }', { q: qq });
+      if (q?.errors) dbg.push(q.errors[0]?.message); dbg.push(qq + ' → ' + (q?.data?.orders?.edges || []).map(e => e.node.name).join('|'));
+      o = (q?.data?.orders?.edges || []).map(e => e.node).find(n => n.name === nome || n.name.replace(/^#/, '') === pulito) || null;
+      if (o) break;
+    }
+  }
+  if (!o) return ({ success: false, error: 'Ordine ' + nome + ' non trovato', dbg });
+  const mm = (o.lineItems?.edges || []).some(e => isMMSku(e.node.sku));
+  if (!mm) return ({ success: false, error: 'Nessun articolo Mantova Moda (AMM-) in questo ordine' });
+  if ((o.tags || []).some(t => String(t).toUpperCase() === 'ATELIER READY')) return ({ success: true, gia: true });
+  if (dry) return ({ success: true, dry: true, ordine: o.name, tags: o.tags, skus: (o.lineItems?.edges || []).map(e => e.node.sku) });
+  const r = await shopifyGraphQL('mutation($id:ID!,$t:[String!]!){ tagsAdd(id:$id, tags:$t){ userErrors { message } } }', { id: o.id, t: ['ATELIER READY'] });
+  const err = r?.errors?.[0]?.message || r?.data?.tagsAdd?.userErrors?.[0]?.message;
+  if (err) return ({ success: false, error: /access|scope|denied/i.test(err) ? 'Manca il permesso write_orders sull\'app ERP' : err });
+  return ({ success: true });
+}
 function fornitoreSku(sku) { return isMMSku(sku) ? 'MANTOVA MODA' : (isDuoSku(sku) ? 'DUOMO' : ''); }
 
 // ============ CURRENCY HELPERS ============
@@ -5638,6 +5664,11 @@ export default async function handler(req, res) {
       }
       return res.status(200).send(pagina('<h1>Imposta la password dell’ERP TLuxy</h1><p>Scegli la tua password. Il tuo nome utente sarà <b>' + email + '</b>.</p>' + (errore ? '<div class="err">' + errore + '</div>' : '') + '<form method="post" action="/benvenuto"><input type="hidden" name="t" value="' + t + '"><label>Password (almeno 10 caratteri)</label><input type="password" name="password" required minlength="10" autocomplete="new-password"><label>Ripetila</label><input type="password" name="password2" required minlength="10" autocomplete="new-password"><button>Imposta password</button></form>'));
     }
+    // v5.79.1: diagnosi ATELIER READY senza scrivere (solo CRON_SECRET)
+    if (req.method === 'GET' && path === '/api/atelier-diag') {
+      if (!(CRON_SECRET && String(req.headers['authorization'] || '') === 'Bearer ' + CRON_SECRET)) return res.status(401).json({ ok: false });
+      try { return res.json(await atelierReady(String(query.get('name') || ''), query.get('oid') || '', query.get('scrivi') !== '1')); } catch (e) { return res.json({ success: false, error: e.message, stack: String(e.stack || '').slice(0, 500) }); }
+    }
     // v5.74: elenco email utenti aggiuntivi (solo con CRON_SECRET, per assistenza)
     if (req.method === 'GET' && path === '/api/utenti-elenco') {
       if (!(CRON_SECRET && String(req.headers['authorization'] || '') === 'Bearer ' + CRON_SECRET)) return res.status(401).json({ ok: false });
@@ -5922,29 +5953,10 @@ export default async function handler(req, res) {
       const b = await readJsonBody(req);
       const nome = String(b.name || '').trim().slice(0, 80);
       if (!nome) return res.json({ success: false, error: 'Ordine mancante' });
-      try {
-        const oid = String(b.oid || '').replace(/[^0-9]/g, '');
-        const CAMPI = 'id name tags lineItems(first:50){ edges { node { sku } } }';
-        let o = null;
-        if (oid) { const q1 = await shopifyGraphQL('query($id:ID!){ order(id:$id){ ' + CAMPI + ' } }', { id: 'gid://shopify/Order/' + oid }); o = q1?.data?.order || null; }
-        if (!o) {
-          // fallback per nome: i nomi marketplace (#miinto-xxxx-…) non si trovano con name:"…", si cerca senza # e si confronta esatto
-          const pulito = nome.replace(/^#/, '');
-          for (const qq of ['name:' + JSON.stringify(nome), 'name:' + JSON.stringify(pulito), JSON.stringify(pulito)]) {
-            const q = await shopifyGraphQL('query($q:String!){ orders(first:10, query:$q, sortKey:CREATED_AT, reverse:true){ edges { node { ' + CAMPI + ' } } } }', { q: qq });
-            o = (q?.data?.orders?.edges || []).map(e => e.node).find(n => n.name === nome || n.name.replace(/^#/, '') === pulito) || null;
-            if (o) break;
-          }
-        }
-        if (!o) return res.json({ success: false, error: 'Ordine ' + nome + ' non trovato' });
-        const mm = (o.lineItems?.edges || []).some(e => isMMSku(e.node.sku));
-        if (!mm) return res.json({ success: false, error: 'Nessun articolo Mantova Moda (AMM-) in questo ordine' });
-        if ((o.tags || []).some(t => String(t).toUpperCase() === 'ATELIER READY')) return res.json({ success: true, gia: true });
-        const r = await shopifyGraphQL('mutation($id:ID!,$t:[String!]!){ tagsAdd(id:$id, tags:$t){ userErrors { message } } }', { id: o.id, t: ['ATELIER READY'] });
-        const err = r?.errors?.[0]?.message || r?.data?.tagsAdd?.userErrors?.[0]?.message;
-        if (err) return res.json({ success: false, error: /access|scope|denied/i.test(err) ? 'Manca il permesso write_orders sull\'app ERP' : err });
-        return res.json({ success: true });
-      } catch (e) { return res.json({ success: false, error: e.message }); }
+      let out;
+      try { out = await atelierReady(nome, b.oid, false); } catch (e) { out = { success: false, error: e.message }; }
+      console.log('[atelier-ready]', nome, b.oid || '-', JSON.stringify(out).slice(0, 400));
+      return res.json(out);
     }
 
     if (req.method === 'GET' && (path === '/' || path === '/dashboard')) {
